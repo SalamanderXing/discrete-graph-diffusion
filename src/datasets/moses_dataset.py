@@ -14,7 +14,11 @@ import numpy as np
 from torch_geometric.data import Data, InMemoryDataset
 
 from src import utils
-from src.analysis.rdkit_functions import mol2smiles, build_molecule_with_partial_charges, compute_molecular_metrics
+from src.analysis.rdkit_functions import (
+    mol2smiles,
+    build_molecule_with_partial_charges,
+    compute_molecular_metrics,
+)
 from src.datasets.abstract_dataset import AbstractDatasetInfos, MolecularDataModule
 
 
@@ -25,16 +29,24 @@ def to_list(value: Any) -> Sequence:
         return [value]
 
 
-atom_decoder = ['C', 'N', 'S', 'O', 'F', 'Cl', 'Br', 'H']
+atom_decoder = ["C", "N", "S", "O", "F", "Cl", "Br", "H"]
 
 
 class MOSESDataset(InMemoryDataset):
-    def __init__(self, stage, root, transform=None, pre_transform=None, pre_filter=None, preprocess=False):
+    def __init__(
+        self,
+        stage,
+        root,
+        transform=None,
+        pre_transform=None,
+        pre_filter=None,
+        preprocess=False,
+    ):
         self.stage = stage
         self.atom_decoder = atom_decoder
-        if self.stage == 'train':
+        if self.stage == "train":
             self.file_idx = 0
-        elif self.stage == 'val':
+        elif self.stage == "val":
             self.file_idx = 1
         else:
             self.file_idx = 2
@@ -44,10 +56,11 @@ class MOSESDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ['moses_train.smiles', 'moses_val.smiles', 'moses_test.smiles']
+        return ["moses_train.smiles", "moses_val.smiles", "moses_test.smiles"]
+
     @property
     def split_file_name(self):
-        return ['moses_train.smiles', 'moses_val.smiles', 'moses_test.smiles']
+        return ["moses_train.smiles", "moses_val.smiles", "moses_test.smiles"]
 
     @property
     def split_paths(self):
@@ -58,7 +71,7 @@ class MOSESDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return ['moses_proc_tr.pt', 'moses_proc_val.pt', 'moses_proc_test.pt']
+        return ["moses_proc_tr.pt", "moses_proc_val.pt", "moses_proc_test.pt"]
 
     def download(self):
         """
@@ -68,18 +81,19 @@ class MOSESDataset(InMemoryDataset):
 
     def process(self):
         preprocess = self.preprocess
-        RDLogger.DisableLog('rdApp.*')
+        RDLogger.DisableLog("rdApp.*")
         types = {atom: i for i, atom in enumerate(self.atom_decoder)}
 
         bonds = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
 
-        if self.stage == 'train':
-            smile_list = moses.get_dataset('train')            # thank you moses authors for such an easy API
-        elif self.stage == 'val':
-            smile_list = moses.get_dataset('test')
+        if self.stage == "train":
+            smile_list = moses.get_dataset(
+                "train"
+            )  # thank you moses authors for such an easy API
+        elif self.stage == "val":
+            smile_list = moses.get_dataset("test")
         else:
-            smile_list = moses.get_dataset('test_scaffolds')
-
+            smile_list = moses.get_dataset("test_scaffolds")
 
         data_list = []
         smiles_kept = []
@@ -123,19 +137,27 @@ class MOSESDataset(InMemoryDataset):
                 continue
             else:
                 # Try to build the molecule again from the graph. If it fails, do not add it to the training set
-                dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
+                dense_data, node_mask = utils.to_dense(
+                    data.x, data.edge_index, data.edge_attr, data.batch
+                )
                 dense_data = dense_data.mask(node_mask, collapse=True)
                 X, E = dense_data.X, dense_data.E
 
                 assert X.size(0) == 1
                 atom_types = X[0]
                 edge_types = E[0]
-                mol = build_molecule_with_partial_charges(atom_types, edge_types, self.atom_decoder)
+                mol = build_molecule_with_partial_charges(
+                    atom_types, edge_types, self.atom_decoder
+                )
                 smiles = mol2smiles(mol)
                 if smiles is not None:
                     try:
-                        mol_frags = Chem.rdmolops.GetMolFrags(mol, asMols=True, sanitizeFrags=True)
-                        largest_mol = max(mol_frags, default=mol, key=lambda m: m.GetNumAtoms())
+                        mol_frags = Chem.rdmolops.GetMolFrags(
+                            mol, asMols=True, sanitizeFrags=True
+                        )
+                        largest_mol = max(
+                            mol_frags, default=mol, key=lambda m: m.GetNumAtoms()
+                        )
                         smiles = mol2smiles(largest_mol)
                         smiles_kept.append(smiles)
                     except Chem.rdchem.AtomValenceException:
@@ -144,10 +166,12 @@ class MOSESDataset(InMemoryDataset):
                         print("Can't kekulize molecule")
 
         if preprocess:
-            smiles_save_path = osp.join(pathlib.Path(self.raw_paths[0]).parent, 'new_test.smiles')
+            smiles_save_path = osp.join(
+                pathlib.Path(self.raw_paths[0]).parent, "new_test.smiles"
+            )
             print(smiles_save_path)
-            with open(smiles_save_path, 'w') as f:
-                f.writelines('%s\n' % s for s in smiles_kept)
+            with open(smiles_save_path, "w") as f:
+                f.writelines("%s\n" % s for s in smiles_kept)
             print(f"Number of molecules kept: {len(smiles_kept)} / {len(smile_list)}")
             assert False, "This assert avoids overwriting train smiles with val or test"
         else:
@@ -168,15 +192,23 @@ class MOSESDataModule(MolecularDataModule):
         base_path = pathlib.Path(os.path.realpath(__file__)).parents[2]
         root_path = os.path.join(base_path, self.datadir)
 
-        datasets = {'train': MOSESDataset(stage='train', root=root_path, preprocess=self.preprocess),
-                    'val': MOSESDataset(stage='val', root=root_path, preprocess=self.preprocess),
-                    'test': MOSESDataset(stage='test', root=root_path, preprocess=self.preprocess)}
+        datasets = {
+            "train": MOSESDataset(
+                stage="train", root=root_path, preprocess=self.preprocess
+            ),
+            "val": MOSESDataset(
+                stage="val", root=root_path, preprocess=self.preprocess
+            ),
+            "test": MOSESDataset(
+                stage="test", root=root_path, preprocess=self.preprocess
+            ),
+        }
         super().prepare_data(datasets)
 
 
 class MOSESinfos(AbstractDatasetInfos):
     def __init__(self, datamodule, cfg, recompute_statistics=False, meta=None):
-        self.name = 'MOSES'
+        self.name = "MOSES"
         self.input_dims = None
         self.output_dims = None
         self.remove_h = False
@@ -188,27 +220,64 @@ class MOSESinfos(AbstractDatasetInfos):
         self.num_atom_types = len(self.atom_decoder)
         self.max_weight = 350
 
-        meta_files = dict(n_nodes=f'{self.name}_n_counts.txt',
-                          node_types=f'{self.name}_atom_types.txt',
-                          edge_types=f'{self.name}_edge_types.txt',
-                          valency_distribution=f'{self.name}_valencies.txt')
+        meta_files = dict(
+            n_nodes=f"{self.name}_n_counts.txt",
+            node_types=f"{self.name}_atom_types.txt",
+            edge_types=f"{self.name}_edge_types.txt",
+            valency_distribution=f"{self.name}_valencies.txt",
+        )
 
-        self.n_nodes = torch.tensor([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.097634362347889692e-06,
-                                     1.858580617408733815e-05, 5.007842264603823423e-05, 5.678996240021660924e-05,
-                                     1.244216400664299726e-04, 4.486406978685408831e-04, 2.253012731671333313e-03,
-                                     3.231865121051669121e-03, 6.709992419928312302e-03, 2.289564721286296844e-02,
-                                     5.411050841212272644e-02, 1.099515631794929504e-01, 1.223291903734207153e-01,
-                                     1.280680745840072632e-01, 1.445975750684738159e-01, 1.505961418151855469e-01,
-                                     1.436946094036102295e-01, 9.265746921300888062e-02, 1.820066757500171661e-02,
-                                     2.065089574898593128e-06])
+        self.n_nodes = torch.tensor(
+            [
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                3.097634362347889692e-06,
+                1.858580617408733815e-05,
+                5.007842264603823423e-05,
+                5.678996240021660924e-05,
+                1.244216400664299726e-04,
+                4.486406978685408831e-04,
+                2.253012731671333313e-03,
+                3.231865121051669121e-03,
+                6.709992419928312302e-03,
+                2.289564721286296844e-02,
+                5.411050841212272644e-02,
+                1.099515631794929504e-01,
+                1.223291903734207153e-01,
+                1.280680745840072632e-01,
+                1.445975750684738159e-01,
+                1.505961418151855469e-01,
+                1.436946094036102295e-01,
+                9.265746921300888062e-02,
+                1.820066757500171661e-02,
+                2.065089574898593128e-06,
+            ]
+        )
         self.max_n_nodes = len(self.n_nodes) - 1 if self.n_nodes is not None else None
-        self.node_types = torch.tensor([0.722338, 0.13661, 0.163655, 0.103549, 0.1421803, 0.005411, 0.00150, 0.0])
-        self.edge_types = torch.tensor([0.89740, 0.0472947, 0.062670, 0.0003524, 0.0486])
+        self.node_types = torch.tensor(
+            [0.722338, 0.13661, 0.163655, 0.103549, 0.1421803, 0.005411, 0.00150, 0.0]
+        )
+        self.edge_types = torch.tensor(
+            [0.89740, 0.0472947, 0.062670, 0.0003524, 0.0486]
+        )
         self.valency_distribution = torch.zeros(3 * self.max_n_nodes - 2)
-        self.valency_distribution[:7] = torch.tensor([0.0, 0.1055, 0.2728, 0.3613, 0.2499, 0.00544, 0.00485])
+        self.valency_distribution[:7] = torch.tensor(
+            [0.0, 0.1055, 0.2728, 0.3613, 0.2499, 0.00544, 0.00485]
+        )
 
         if meta is None:
-            meta = dict(n_nodes=None, node_types=None, edge_types=None, valency_distribution=None)
+            meta = dict(
+                n_nodes=None,
+                node_types=None,
+                edge_types=None,
+                valency_distribution=None,
+            )
         assert set(meta.keys()) == set(meta_files.keys())
         for k, v in meta_files.items():
             if (k not in meta or meta[k] is None) and os.path.exists(v):
@@ -220,7 +289,7 @@ class MOSESinfos(AbstractDatasetInfos):
             np.savetxt(meta_files["n_nodes"], self.n_nodes.numpy())
             self.max_n_nodes = len(self.n_nodes) - 1
         if recompute_statistics or self.node_types is None:
-            self.node_types = datamodule.node_types()                                     # There are no node types
+            self.node_types = datamodule.node_types()  # There are no node types
             print("Distribution of node types", self.node_types)
             np.savetxt(meta_files["node_types"], self.node_types.numpy())
 
@@ -247,10 +316,12 @@ def get_train_smiles(cfg, datamodule, dataset_infos, evaluate_dataset=False):
         train_smiles = np.array(open(smiles_path).readlines())
 
     if evaluate_dataset:
-        train_dataloader = datamodule.dataloaders['train']
+        train_dataloader = datamodule.dataloaders["train"]
         all_molecules = []
         for i, data in enumerate(tqdm(train_dataloader)):
-            dense_data, node_mask = utils.to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
+            dense_data, node_mask = utils.to_dense(
+                data.x, data.edge_index, data.edge_attr, data.batch
+            )
             dense_data = dense_data.mask(node_mask, collapse=True)
             X, E = dense_data.X, dense_data.E
 
@@ -260,14 +331,26 @@ def get_train_smiles(cfg, datamodule, dataset_infos, evaluate_dataset=False):
                 edge_types = E[k, :n, :n].cpu()
                 all_molecules.append([atom_types, edge_types])
 
-        print("Evaluating the dataset -- number of molecules to evaluate", len(all_molecules))
-        metrics = compute_molecular_metrics(molecule_list=all_molecules, train_smiles=train_smiles,
-                                            dataset_info=dataset_infos)
+        print(
+            "Evaluating the dataset -- number of molecules to evaluate",
+            len(all_molecules),
+        )
+        metrics = compute_molecular_metrics(
+            molecule_list=all_molecules,
+            train_smiles=train_smiles,
+            dataset_info=dataset_infos,
+        )
         print(metrics[0])
 
     return train_smiles
 
 
 if __name__ == "__main__":
-    ds = [MOSESDataset(s, os.path.join(os.path.abspath(__file__), "../../../data/moses"),
-                       preprocess=True) for s in ["train", "val", "test"]]
+    ds = [
+        MOSESDataset(
+            s,
+            os.path.join(os.path.abspath(__file__), "../../../data/moses"),
+            preprocess=True,
+        )
+        for s in ["train", "val", "test"]
+    ]

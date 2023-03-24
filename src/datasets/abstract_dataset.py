@@ -16,9 +16,15 @@ class AbstractDataModule(pl.LightningDataModule):
     def prepare_data(self, datasets) -> None:
         batch_size = self.cfg.train.batch_size
         num_workers = self.cfg.train.num_workers
-        self.dataloaders = {split: DataLoader(dataset, batch_size=batch_size, num_workers=num_workers,
-                                              shuffle='debug' not in self.cfg.general.name)
-                            for split, dataset in datasets.items()}
+        self.dataloaders = {
+            split: DataLoader(
+                dataset,
+                batch_size=batch_size,
+                num_workers=num_workers,
+                shuffle="debug" not in self.cfg.general.name,
+            )
+            for split, dataset in datasets.items()
+        }
 
     def train_dataloader(self):
         return self.dataloaders["train"]
@@ -30,29 +36,29 @@ class AbstractDataModule(pl.LightningDataModule):
         return self.dataloaders["test"]
 
     def __getitem__(self, idx):
-        return self.dataloaders['train'][idx]
+        return self.dataloaders["train"][idx]
 
     def node_counts(self, max_nodes_possible=300):
         all_counts = torch.zeros(max_nodes_possible)
-        for split in ['train', 'val', 'test']:
+        for split in ["train", "val", "test"]:
             for i, data in enumerate(self.dataloaders[split]):
                 unique, counts = torch.unique(data.batch, return_counts=True)
                 for count in counts:
                     all_counts[count] += 1
         max_index = max(all_counts.nonzero())
-        all_counts = all_counts[:max_index + 1]
+        all_counts = all_counts[: max_index + 1]
         all_counts = all_counts / all_counts.sum()
         return all_counts
 
     def node_types(self):
         num_classes = None
-        for data in self.dataloaders['train']:
+        for data in self.dataloaders["train"]:
             num_classes = data.x.shape[1]
             break
 
         counts = torch.zeros(num_classes)
 
-        for i, data in enumerate(self.dataloaders['train']):
+        for i, data in enumerate(self.dataloaders["train"]):
             counts += data.x.sum(dim=0)
 
         counts = counts / counts.sum()
@@ -60,13 +66,13 @@ class AbstractDataModule(pl.LightningDataModule):
 
     def edge_counts(self):
         num_classes = None
-        for data in self.dataloaders['train']:
+        for data in self.dataloaders["train"]:
             num_classes = data.edge_attr.shape[1]
             break
 
         d = torch.zeros(num_classes, dtype=torch.float)
 
-        for i, data in enumerate(self.dataloaders['train']):
+        for i, data in enumerate(self.dataloaders["train"]):
             unique, counts = torch.unique(data.batch, return_counts=True)
 
             all_pairs = 0
@@ -87,12 +93,14 @@ class AbstractDataModule(pl.LightningDataModule):
 
 class MolecularDataModule(AbstractDataModule):
     def valency_count(self, max_n_nodes):
-        valencies = torch.zeros(3 * max_n_nodes - 2)   # Max valency possible if everything is connected
+        valencies = torch.zeros(
+            3 * max_n_nodes - 2
+        )  # Max valency possible if everything is connected
 
         # No bond, single bond, double bond, triple bond, aromatic bond
         multiplier = torch.tensor([0, 1, 2, 3, 1.5])
 
-        for split in ['train', 'val', 'test']:
+        for split in ["train", "val", "test"]:
             for i, data in enumerate(self.dataloaders[split]):
                 n = data.x.shape[0]
 
@@ -115,23 +123,36 @@ class AbstractDatasetInfos:
 
     def compute_input_output_dims(self, datamodule, extra_features, domain_features):
         example_batch = next(iter(datamodule.train_dataloader()))
-        ex_dense, node_mask = utils.to_dense(example_batch.x, example_batch.edge_index, example_batch.edge_attr,
-                                             example_batch.batch)
-        example_data = {'X_t': ex_dense.X, 'E_t': ex_dense.E, 'y_t': example_batch['y'], 'node_mask': node_mask}
+        ex_dense, node_mask = utils.to_dense(
+            example_batch.x,
+            example_batch.edge_index,
+            example_batch.edge_attr,
+            example_batch.batch,
+        )
+        example_data = {
+            "X_t": ex_dense.X,
+            "E_t": ex_dense.E,
+            "y_t": example_batch["y"],
+            "node_mask": node_mask,
+        }
 
-        self.input_dims = {'X': example_batch['x'].size(1),
-                           'E': example_batch['edge_attr'].size(1),
-                           'y': example_batch['y'].size(1) + 1}      # + 1 due to time conditioning
+        self.input_dims = {
+            "X": example_batch["x"].size(1),
+            "E": example_batch["edge_attr"].size(1),
+            "y": example_batch["y"].size(1) + 1,
+        }  # + 1 due to time conditioning
         ex_extra_feat = extra_features(example_data)
-        self.input_dims['X'] += ex_extra_feat.X.size(-1)
-        self.input_dims['E'] += ex_extra_feat.E.size(-1)
-        self.input_dims['y'] += ex_extra_feat.y.size(-1)
+        self.input_dims["X"] += ex_extra_feat.X.size(-1)
+        self.input_dims["E"] += ex_extra_feat.E.size(-1)
+        self.input_dims["y"] += ex_extra_feat.y.size(-1)
 
         ex_extra_molecular_feat = domain_features(example_data)
-        self.input_dims['X'] += ex_extra_molecular_feat.X.size(-1)
-        self.input_dims['E'] += ex_extra_molecular_feat.E.size(-1)
-        self.input_dims['y'] += ex_extra_molecular_feat.y.size(-1)
+        self.input_dims["X"] += ex_extra_molecular_feat.X.size(-1)
+        self.input_dims["E"] += ex_extra_molecular_feat.E.size(-1)
+        self.input_dims["y"] += ex_extra_molecular_feat.y.size(-1)
 
-        self.output_dims = {'X': example_batch['x'].size(1),
-                            'E': example_batch['edge_attr'].size(1),
-                            'y': 0}
+        self.output_dims = {
+            "X": example_batch["x"].size(1),
+            "E": example_batch["edge_attr"].size(1),
+            "y": 0,
+        }

@@ -14,6 +14,7 @@ import numpy as np
 import networkx as nx
 import subprocess as sp
 import concurrent.futures
+
 try:
     import graph_tool.all as gt
 except:
@@ -24,12 +25,25 @@ from string import ascii_uppercase, digits
 from datetime import datetime
 from scipy.linalg import eigvalsh
 from scipy.stats import chi2
-from src.analysis.dist_helper import compute_mmd, gaussian_emd, gaussian, emd, gaussian_tv, disc
+from src.analysis.dist_helper import (
+    compute_mmd,
+    gaussian_emd,
+    gaussian,
+    emd,
+    gaussian_tv,
+    disc,
+)
 from torch_geometric.utils import to_networkx
 import wandb
 
 PRINT_TIME = False
-__all__ = ['degree_stats', 'clustering_stats', 'orbit_stats_all', 'spectral_stats', 'eval_acc_lobster_graph']
+__all__ = [
+    "degree_stats",
+    "clustering_stats",
+    "orbit_stats_all",
+    "spectral_stats",
+    "eval_acc_lobster_graph",
+]
 
 
 def degree_worker(G):
@@ -37,10 +51,10 @@ def degree_worker(G):
 
 
 def degree_stats(graph_ref_list, graph_pred_list, is_parallel=True, compute_emd=False):
-    ''' Compute the distance between the degree distributions of two unordered sets of graphs.
-        Args:
-            graph_ref_list, graph_target_list: two lists of networkx graphs to be evaluated
-        '''
+    """Compute the distance between the degree distributions of two unordered sets of graphs.
+    Args:
+        graph_ref_list, graph_target_list: two lists of networkx graphs to be evaluated
+    """
     sample_ref = []
     sample_pred = []
     # in case an empty graph is generated
@@ -61,8 +75,7 @@ def degree_stats(graph_ref_list, graph_pred_list, is_parallel=True, compute_emd=
             degree_temp = np.array(nx.degree_histogram(graph_ref_list[i]))
             sample_ref.append(degree_temp)
         for i in range(len(graph_pred_list_remove_empty)):
-            degree_temp = np.array(
-                nx.degree_histogram(graph_pred_list_remove_empty[i]))
+            degree_temp = np.array(nx.degree_histogram(graph_pred_list_remove_empty[i]))
             sample_pred.append(degree_temp)
 
     # mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=gaussian_emd)
@@ -77,11 +90,12 @@ def degree_stats(graph_ref_list, graph_pred_list, is_parallel=True, compute_emd=
 
     elapsed = datetime.now() - prev
     if PRINT_TIME:
-        print('Time computing degree mmd: ', elapsed)
+        print("Time computing degree mmd: ", elapsed)
     return mmd_dist
 
 
 ###############################################################################
+
 
 def spectral_worker(G, n_eigvals=-1):
     # eigs = nx.laplacian_spectrum(G)
@@ -90,35 +104,45 @@ def spectral_worker(G, n_eigvals=-1):
     except:
         eigs = np.zeros(G.number_of_nodes())
     if n_eigvals > 0:
-        eigs = eigs[1:n_eigvals + 1]
+        eigs = eigs[1 : n_eigvals + 1]
     spectral_pmf, _ = np.histogram(eigs, bins=200, range=(-1e-5, 2), density=False)
     spectral_pmf = spectral_pmf / spectral_pmf.sum()
     return spectral_pmf
 
 
 def get_spectral_pmf(eigs, max_eig):
-    spectral_pmf, _ = np.histogram(np.clip(eigs, 0, max_eig), bins=200, range=(-1e-5, max_eig), density=False)
+    spectral_pmf, _ = np.histogram(
+        np.clip(eigs, 0, max_eig), bins=200, range=(-1e-5, max_eig), density=False
+    )
     spectral_pmf = spectral_pmf / spectral_pmf.sum()
     return spectral_pmf
 
 
-def eigval_stats(eig_ref_list, eig_pred_list, max_eig=20, is_parallel=True, compute_emd=False):
-    ''' Compute the distance between the degree distributions of two unordered sets of graphs.
-        Args:
-            graph_ref_list, graph_target_list: two lists of networkx graphs to be evaluated
-        '''
+def eigval_stats(
+    eig_ref_list, eig_pred_list, max_eig=20, is_parallel=True, compute_emd=False
+):
+    """Compute the distance between the degree distributions of two unordered sets of graphs.
+    Args:
+        graph_ref_list, graph_target_list: two lists of networkx graphs to be evaluated
+    """
     sample_ref = []
     sample_pred = []
 
     prev = datetime.now()
     if is_parallel:
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for spectral_density in executor.map(get_spectral_pmf, eig_ref_list,
-                                                 [max_eig for i in range(len(eig_ref_list))]):
+            for spectral_density in executor.map(
+                get_spectral_pmf,
+                eig_ref_list,
+                [max_eig for i in range(len(eig_ref_list))],
+            ):
                 sample_ref.append(spectral_density)
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for spectral_density in executor.map(get_spectral_pmf, eig_pred_list,
-                                                 [max_eig for i in range(len(eig_ref_list))]):
+            for spectral_density in executor.map(
+                get_spectral_pmf,
+                eig_pred_list,
+                [max_eig for i in range(len(eig_ref_list))],
+            ):
                 sample_pred.append(spectral_density)
     else:
         for i in range(len(eig_ref_list)):
@@ -137,7 +161,7 @@ def eigval_stats(eig_ref_list, eig_pred_list, max_eig=20, is_parallel=True, comp
 
     elapsed = datetime.now() - prev
     if PRINT_TIME:
-        print('Time computing eig mmd: ', elapsed)
+        print("Time computing eig mmd: ", elapsed)
     return mmd_dist
 
 
@@ -173,22 +197,31 @@ def get_spectral_filter_worker(eigvec, eigval, filters, bound=1.4):
     for ge in ges:
         linop.append(eigvec @ np.diag(ge) @ eigvec.T)
     linop = np.array(linop)
-    norm_filt = np.sum(linop ** 2, axis=2)
+    norm_filt = np.sum(linop**2, axis=2)
     hist_range = [0, bound]
-    hist = np.array([np.histogram(x, range=hist_range, bins=100)[0] for x in norm_filt])  # NOTE: change number of bins
+    hist = np.array(
+        [np.histogram(x, range=hist_range, bins=100)[0] for x in norm_filt]
+    )  # NOTE: change number of bins
     return hist.flatten()
 
 
-def spectral_filter_stats(eigvec_ref_list, eigval_ref_list, eigvec_pred_list, eigval_pred_list, is_parallel=False,
-                          compute_emd=False):
-    ''' Compute the distance between the eigvector sets.
-        Args:
-            graph_ref_list, graph_target_list: two lists of networkx graphs to be evaluated
-        '''
+def spectral_filter_stats(
+    eigvec_ref_list,
+    eigval_ref_list,
+    eigvec_pred_list,
+    eigval_pred_list,
+    is_parallel=False,
+    compute_emd=False,
+):
+    """Compute the distance between the eigvector sets.
+    Args:
+        graph_ref_list, graph_target_list: two lists of networkx graphs to be evaluated
+    """
     prev = datetime.now()
 
     class DMG(object):
         """Dummy Normalized Graph"""
+
         lmax = 2
 
     n_filters = 12
@@ -198,25 +231,37 @@ def spectral_filter_stats(eigvec_ref_list, eigval_ref_list, eigvec_pred_list, ei
     sample_pred = []
     if is_parallel:
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for spectral_density in executor.map(get_spectral_filter_worker, eigvec_ref_list, eigval_ref_list,
-                                                 [filters for i in range(len(eigval_ref_list))],
-                                                 [bound for i in range(len(eigval_ref_list))]):
+            for spectral_density in executor.map(
+                get_spectral_filter_worker,
+                eigvec_ref_list,
+                eigval_ref_list,
+                [filters for i in range(len(eigval_ref_list))],
+                [bound for i in range(len(eigval_ref_list))],
+            ):
                 sample_ref.append(spectral_density)
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for spectral_density in executor.map(get_spectral_filter_worker, eigvec_pred_list, eigval_pred_list,
-                                                 [filters for i in range(len(eigval_ref_list))],
-                                                 [bound for i in range(len(eigval_ref_list))]):
+            for spectral_density in executor.map(
+                get_spectral_filter_worker,
+                eigvec_pred_list,
+                eigval_pred_list,
+                [filters for i in range(len(eigval_ref_list))],
+                [bound for i in range(len(eigval_ref_list))],
+            ):
                 sample_pred.append(spectral_density)
     else:
         for i in range(len(eigval_ref_list)):
             try:
-                spectral_temp = get_spectral_filter_worker(eigvec_ref_list[i], eigval_ref_list[i], filters, bound)
+                spectral_temp = get_spectral_filter_worker(
+                    eigvec_ref_list[i], eigval_ref_list[i], filters, bound
+                )
                 sample_ref.append(spectral_temp)
             except:
                 pass
         for i in range(len(eigval_pred_list)):
             try:
-                spectral_temp = get_spectral_filter_worker(eigvec_pred_list[i], eigval_pred_list[i], filters, bound)
+                spectral_temp = get_spectral_filter_worker(
+                    eigvec_pred_list[i], eigval_pred_list[i], filters, bound
+                )
                 sample_pred.append(spectral_temp)
             except:
                 pass
@@ -230,15 +275,17 @@ def spectral_filter_stats(eigvec_ref_list, eigval_ref_list, eigvec_pred_list, ei
 
     elapsed = datetime.now() - prev
     if PRINT_TIME:
-        print('Time computing spectral filter stats: ', elapsed)
+        print("Time computing spectral filter stats: ", elapsed)
     return mmd_dist
 
 
-def spectral_stats(graph_ref_list, graph_pred_list, is_parallel=True, n_eigvals=-1, compute_emd=False):
-    ''' Compute the distance between the degree distributions of two unordered sets of graphs.
-        Args:
-            graph_ref_list, graph_target_list: two lists of networkx graphs to be evaluated
-        '''
+def spectral_stats(
+    graph_ref_list, graph_pred_list, is_parallel=True, n_eigvals=-1, compute_emd=False
+):
+    """Compute the distance between the degree distributions of two unordered sets of graphs.
+    Args:
+        graph_ref_list, graph_target_list: two lists of networkx graphs to be evaluated
+    """
     sample_ref = []
     sample_pred = []
     # in case an empty graph is generated
@@ -249,11 +296,16 @@ def spectral_stats(graph_ref_list, graph_pred_list, is_parallel=True, n_eigvals=
     prev = datetime.now()
     if is_parallel:
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for spectral_density in executor.map(spectral_worker, graph_ref_list, [n_eigvals for i in graph_ref_list]):
+            for spectral_density in executor.map(
+                spectral_worker, graph_ref_list, [n_eigvals for i in graph_ref_list]
+            ):
                 sample_ref.append(spectral_density)
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for spectral_density in executor.map(spectral_worker, graph_pred_list_remove_empty,
-                                                 [n_eigvals for i in graph_ref_list]):
+            for spectral_density in executor.map(
+                spectral_worker,
+                graph_pred_list_remove_empty,
+                [n_eigvals for i in graph_ref_list],
+            ):
                 sample_pred.append(spectral_density)
     else:
         for i in range(len(graph_ref_list)):
@@ -275,24 +327,25 @@ def spectral_stats(graph_ref_list, graph_pred_list, is_parallel=True, n_eigvals=
 
     elapsed = datetime.now() - prev
     if PRINT_TIME:
-        print('Time computing degree mmd: ', elapsed)
+        print("Time computing degree mmd: ", elapsed)
     return mmd_dist
 
 
 ###############################################################################
 
+
 def clustering_worker(param):
     G, bins = param
     clustering_coeffs_list = list(nx.clustering(G).values())
     hist, _ = np.histogram(
-        clustering_coeffs_list, bins=bins, range=(0.0, 1.0), density=False)
+        clustering_coeffs_list, bins=bins, range=(0.0, 1.0), density=False
+    )
     return hist
 
 
-def clustering_stats(graph_ref_list,
-                     graph_pred_list,
-                     bins=100,
-                     is_parallel=True, compute_emd=False):
+def clustering_stats(
+    graph_ref_list, graph_pred_list, bins=100, is_parallel=True, compute_emd=False
+):
     sample_ref = []
     sample_pred = []
     graph_pred_list_remove_empty = [
@@ -302,12 +355,14 @@ def clustering_stats(graph_ref_list,
     prev = datetime.now()
     if is_parallel:
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for clustering_hist in executor.map(clustering_worker,
-                                                [(G, bins) for G in graph_ref_list]):
+            for clustering_hist in executor.map(
+                clustering_worker, [(G, bins) for G in graph_ref_list]
+            ):
                 sample_ref.append(clustering_hist)
         with concurrent.futures.ThreadPoolExecutor() as executor:
             for clustering_hist in executor.map(
-                    clustering_worker, [(G, bins) for G in graph_pred_list_remove_empty]):
+                clustering_worker, [(G, bins) for G in graph_pred_list_remove_empty]
+            ):
                 sample_pred.append(clustering_hist)
 
         # check non-zero elements in hist
@@ -320,35 +375,46 @@ def clustering_stats(graph_ref_list,
         for i in range(len(graph_ref_list)):
             clustering_coeffs_list = list(nx.clustering(graph_ref_list[i]).values())
             hist, _ = np.histogram(
-                clustering_coeffs_list, bins=bins, range=(0.0, 1.0), density=False)
+                clustering_coeffs_list, bins=bins, range=(0.0, 1.0), density=False
+            )
             sample_ref.append(hist)
 
         for i in range(len(graph_pred_list_remove_empty)):
             clustering_coeffs_list = list(
-                nx.clustering(graph_pred_list_remove_empty[i]).values())
+                nx.clustering(graph_pred_list_remove_empty[i]).values()
+            )
             hist, _ = np.histogram(
-                clustering_coeffs_list, bins=bins, range=(0.0, 1.0), density=False)
+                clustering_coeffs_list, bins=bins, range=(0.0, 1.0), density=False
+            )
             sample_pred.append(hist)
 
     if compute_emd:
         # EMD option uses the same computation as GraphRNN, the alternative is MMD as computed by GRAN
         # mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=emd, sigma=1.0 / 10)
-        mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=gaussian_emd, sigma=1.0 / 10, distance_scaling=bins)
+        mmd_dist = compute_mmd(
+            sample_ref,
+            sample_pred,
+            kernel=gaussian_emd,
+            sigma=1.0 / 10,
+            distance_scaling=bins,
+        )
     else:
-        mmd_dist = compute_mmd(sample_ref, sample_pred, kernel=gaussian_tv, sigma=1.0 / 10)
+        mmd_dist = compute_mmd(
+            sample_ref, sample_pred, kernel=gaussian_tv, sigma=1.0 / 10
+        )
 
     elapsed = datetime.now() - prev
     if PRINT_TIME:
-        print('Time computing clustering mmd: ', elapsed)
+        print("Time computing clustering mmd: ", elapsed)
     return mmd_dist
 
 
 # maps motif/orbit name string to its corresponding list of indices from orca output
 motif_to_indices = {
-    '3path': [1, 2],
-    '4cycle': [8],
+    "3path": [1, 2],
+    "4cycle": [8],
 }
-COUNT_START_STR = 'orbit counts:'
+COUNT_START_STR = "orbit counts:"
 
 
 def edge_list_reindexed(G):
@@ -359,7 +425,7 @@ def edge_list_reindexed(G):
         idx += 1
 
     edges = []
-    for (u, v) in G.edges():
+    for u, v in G.edges():
         edges.append((id2idx[str(u)], id2idx[str(v)]))
     return edges
 
@@ -369,22 +435,29 @@ def orca(graph):
     tmp_fname = f'orca/tmp_{"".join(secrets.choice(ascii_uppercase + digits) for i in range(8))}.txt'
     tmp_fname = os.path.join(os.path.dirname(os.path.realpath(__file__)), tmp_fname)
     # print(tmp_fname, flush=True)
-    f = open(tmp_fname, 'w')
-    f.write(
-        str(graph.number_of_nodes()) + ' ' + str(graph.number_of_edges()) + '\n')
-    for (u, v) in edge_list_reindexed(graph):
-        f.write(str(u) + ' ' + str(v) + '\n')
+    f = open(tmp_fname, "w")
+    f.write(str(graph.number_of_nodes()) + " " + str(graph.number_of_edges()) + "\n")
+    for u, v in edge_list_reindexed(graph):
+        f.write(str(u) + " " + str(v) + "\n")
     f.close()
     output = sp.check_output(
-        [str(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'orca/orca')), 'node', '4', tmp_fname, 'std'])
-    output = output.decode('utf8').strip()
+        [
+            str(os.path.join(os.path.dirname(os.path.realpath(__file__)), "orca/orca")),
+            "node",
+            "4",
+            tmp_fname,
+            "std",
+        ]
+    )
+    output = output.decode("utf8").strip()
     idx = output.find(COUNT_START_STR) + len(COUNT_START_STR) + 2
     output = output[idx:]
-    node_orbit_counts = np.array([
-        list(map(int,
-                 node_cnts.strip().split(' ')))
-        for node_cnts in output.strip('\n').split('\n')
-    ])
+    node_orbit_counts = np.array(
+        [
+            list(map(int, node_cnts.strip().split(" ")))
+            for node_cnts in output.strip("\n").split("\n")
+        ]
+    )
 
     try:
         os.remove(tmp_fname)
@@ -394,8 +467,14 @@ def orca(graph):
     return node_orbit_counts
 
 
-def motif_stats(graph_ref_list, graph_pred_list, motif_type='4cycle', ground_truth_match=None,
-                bins=100, compute_emd=False):
+def motif_stats(
+    graph_ref_list,
+    graph_pred_list,
+    motif_type="4cycle",
+    ground_truth_match=None,
+    bins=100,
+    compute_emd=False,
+):
     # graph motif counts (int for each graph)
     # normalized by graph size
     total_counts_ref = []
@@ -404,7 +483,9 @@ def motif_stats(graph_ref_list, graph_pred_list, motif_type='4cycle', ground_tru
     num_matches_ref = []
     num_matches_pred = []
 
-    graph_pred_list_remove_empty = [G for G in graph_pred_list if not G.number_of_nodes() == 0]
+    graph_pred_list_remove_empty = [
+        G for G in graph_pred_list if not G.number_of_nodes() == 0
+    ]
     indices = motif_to_indices[motif_type]
 
     for G in graph_ref_list:
@@ -440,13 +521,16 @@ def motif_stats(graph_ref_list, graph_pred_list, motif_type='4cycle', ground_tru
     total_counts_ref = np.array(total_counts_ref)[:, None]
     total_counts_pred = np.array(total_counts_pred)[:, None]
 
-
     if compute_emd:
         # EMD option uses the same computation as GraphRNN, the alternative is MMD as computed by GRAN
         # mmd_dist = compute_mmd(total_counts_ref, total_counts_pred, kernel=emd, is_hist=False)
-        mmd_dist = compute_mmd(total_counts_ref, total_counts_pred, kernel=gaussian, is_hist=False)
+        mmd_dist = compute_mmd(
+            total_counts_ref, total_counts_pred, kernel=gaussian, is_hist=False
+        )
     else:
-        mmd_dist = compute_mmd(total_counts_ref, total_counts_pred, kernel=gaussian, is_hist=False)
+        mmd_dist = compute_mmd(
+            total_counts_ref, total_counts_pred, kernel=gaussian, is_hist=False
+        )
     return mmd_dist
 
 
@@ -483,14 +567,26 @@ def orbit_stats_all(graph_ref_list, graph_pred_list, compute_emd=False):
     #         total_counts_pred,
     #         kernel=gaussian_tv,
     #         is_hist=False,
-    #         sigma=30.0)  
+    #         sigma=30.0)
 
     if compute_emd:
         # mmd_dist = compute_mmd(total_counts_ref, total_counts_pred, kernel=emd, sigma=30.0)
         # EMD option uses the same computation as GraphRNN, the alternative is MMD as computed by GRAN
-        mmd_dist = compute_mmd(total_counts_ref, total_counts_pred, kernel=gaussian, is_hist=False, sigma=30.0)
+        mmd_dist = compute_mmd(
+            total_counts_ref,
+            total_counts_pred,
+            kernel=gaussian,
+            is_hist=False,
+            sigma=30.0,
+        )
     else:
-        mmd_dist = compute_mmd(total_counts_ref, total_counts_pred, kernel=gaussian_tv, is_hist=False, sigma=30.0)
+        mmd_dist = compute_mmd(
+            total_counts_ref,
+            total_counts_pred,
+            kernel=gaussian_tv,
+            is_hist=False,
+            sigma=30.0,
+        )
     return mmd_dist
 
 
@@ -519,20 +615,35 @@ def eval_acc_grid_graph(G_list, grid_start=10, grid_end=20):
     return count / float(len(G_list))
 
 
-def eval_acc_sbm_graph(G_list, p_intra=0.3, p_inter=0.005, strict=True, refinement_steps=1000, is_parallel=True):
+def eval_acc_sbm_graph(
+    G_list,
+    p_intra=0.3,
+    p_inter=0.005,
+    strict=True,
+    refinement_steps=1000,
+    is_parallel=True,
+):
     count = 0.0
     if is_parallel:
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for prob in executor.map(is_sbm_graph,
-                                     [gg for gg in G_list], [p_intra for i in range(len(G_list))],
-                                     [p_inter for i in range(len(G_list))],
-                                     [strict for i in range(len(G_list))],
-                                     [refinement_steps for i in range(len(G_list))]):
+            for prob in executor.map(
+                is_sbm_graph,
+                [gg for gg in G_list],
+                [p_intra for i in range(len(G_list))],
+                [p_inter for i in range(len(G_list))],
+                [strict for i in range(len(G_list))],
+                [refinement_steps for i in range(len(G_list))],
+            ):
                 count += prob
     else:
         for gg in G_list:
-            count += is_sbm_graph(gg, p_intra=p_intra, p_inter=p_inter, strict=strict,
-                                  refinement_steps=refinement_steps)
+            count += is_sbm_graph(
+                gg,
+                p_intra=p_intra,
+                p_inter=p_inter,
+                strict=strict,
+                refinement_steps=refinement_steps,
+            )
     return count / float(len(G_list))
 
 
@@ -550,11 +661,11 @@ def is_planar_graph(G):
 
 def is_lobster_graph(G):
     """
-        Check a given graph is a lobster graph or not
+    Check a given graph is a lobster graph or not
 
-        Removing leaf nodes twice:
+    Removing leaf nodes twice:
 
-        lobster -> caterpillar -> path
+    lobster -> caterpillar -> path
 
     """
     ### Check if G is a tree
@@ -637,7 +748,12 @@ def is_sbm_graph(G, p_intra=0.3, p_inter=0.005, strict=True, refinement_steps=10
     node_counts = state.get_nr().get_array()[:n_blocks]
     edge_counts = e.todense()[:n_blocks, :n_blocks]
     if strict:
-        if (node_counts > 40).sum() > 0 or (node_counts < 20).sum() > 0 or n_blocks > 5 or n_blocks < 2:
+        if (
+            (node_counts > 40).sum() > 0
+            or (node_counts < 20).sum() > 0
+            or n_blocks > 5
+            or n_blocks < 2
+        ):
             return False
 
     max_intra_edges = node_counts * (node_counts - 1)
@@ -694,12 +810,15 @@ def eval_fraction_unique(fake_graphs, precise=False):
                 fake_evaluated.append(fake_g)
 
     frac_unique = (float(len(fake_graphs)) - count_non_unique) / float(
-        len(fake_graphs))  # Fraction of distinct isomorphism classes in the fake graphs
+        len(fake_graphs)
+    )  # Fraction of distinct isomorphism classes in the fake graphs
 
     return frac_unique
 
 
-def eval_fraction_unique_non_isomorphic_valid(fake_graphs, train_graphs, validity_func=(lambda x: True)):
+def eval_fraction_unique_non_isomorphic_valid(
+    fake_graphs, train_graphs, validity_func=(lambda x: True)
+):
     count_valid = 0
     count_isomorphic = 0
     count_non_unique = 0
@@ -727,11 +846,16 @@ def eval_fraction_unique_non_isomorphic_valid(fake_graphs, train_graphs, validit
                     count_valid += 1
 
     frac_unique = (float(len(fake_graphs)) - count_non_unique) / float(
-        len(fake_graphs))  # Fraction of distinct isomorphism classes in the fake graphs
-    frac_unique_non_isomorphic = (float(len(fake_graphs)) - count_non_unique - count_isomorphic) / float(
-        len(fake_graphs))  # Fraction of distinct isomorphism classes in the fake graphs that are not in the training set
+        len(fake_graphs)
+    )  # Fraction of distinct isomorphism classes in the fake graphs
+    frac_unique_non_isomorphic = (
+        float(len(fake_graphs)) - count_non_unique - count_isomorphic
+    ) / float(
+        len(fake_graphs)
+    )  # Fraction of distinct isomorphism classes in the fake graphs that are not in the training set
     frac_unique_non_isomorphic_valid = count_valid / float(
-        len(fake_graphs))  # Fraction of distinct isomorphism classes in the fake graphs that are not in the training set and are valid
+        len(fake_graphs)
+    )  # Fraction of distinct isomorphism classes in the fake graphs that are not in the training set and are valid
     return frac_unique, frac_unique_non_isomorphic, frac_unique_non_isomorphic_valid
 
 
@@ -739,9 +863,9 @@ class SamplingSpectreMetrics(nn.Module):
     def __init__(self, dataloaders, compute_emd):
         super().__init__()
 
-        self.train_graphs = self.loader_to_nx(dataloaders['train'])
-        self.val_graphs = self.loader_to_nx(dataloaders['val'])
-        self.test_graphs = self.loader_to_nx(dataloaders['test'])
+        self.train_graphs = self.loader_to_nx(dataloaders["train"])
+        self.val_graphs = self.loader_to_nx(dataloaders["val"])
+        self.test_graphs = self.loader_to_nx(dataloaders["test"])
         self.num_graphs_test = len(self.test_graphs)
         self.num_graphs_val = len(self.val_graphs)
         self.compute_emd = compute_emd
@@ -751,13 +875,24 @@ class SamplingSpectreMetrics(nn.Module):
         for i, batch in enumerate(loader):
             data_list = batch.to_data_list()
             for j, data in enumerate(data_list):
-                networkx_graphs.append(to_networkx(data, node_attrs=None, edge_attrs=None, to_undirected=True,
-                                                   remove_self_loops=True))
+                networkx_graphs.append(
+                    to_networkx(
+                        data,
+                        node_attrs=None,
+                        edge_attrs=None,
+                        to_undirected=True,
+                        remove_self_loops=True,
+                    )
+                )
         return networkx_graphs
 
-    def forward(self, generated_graphs: list, name, current_epoch, val_counter, save_graphs = True):
-        print(f"Computing sampling metrics between {len(generated_graphs)} generated graphs and {len(self.test_graphs)}"
-              f" test graphs -- emd computation: {self.compute_emd}")
+    def forward(
+        self, generated_graphs: list, name, current_epoch, val_counter, save_graphs=True
+    ):
+        print(
+            f"Computing sampling metrics between {len(generated_graphs)} generated graphs and {len(self.test_graphs)}"
+            f" test graphs -- emd computation: {self.compute_emd}"
+        )
         networkx_graphs = []
         adjacency_matrices = []
         print("Building networkx graphs...")
@@ -770,12 +905,16 @@ class SamplingSpectreMetrics(nn.Module):
             networkx_graphs.append(nx_graph)
 
         print("Saving all adjacency matrices")
-        np.savez('generated_adjs.npz', *adjacency_matrices)
+        np.savez("generated_adjs.npz", *adjacency_matrices)
 
         print("Computing degree stats..")
-        degree = degree_stats(self.test_graphs, networkx_graphs, is_parallel=True,
-                              compute_emd=self.compute_emd)
-        wandb.run.summary['degree'] = degree
+        degree = degree_stats(
+            self.test_graphs,
+            networkx_graphs,
+            is_parallel=True,
+            compute_emd=self.compute_emd,
+        )
+        wandb.run.summary["degree"] = degree
         print("Computing spectre stats...")
         # val_eigvals = [graph["eigval"][1:self.k + 1].cpu().detach().numpy() for graph in self.val]
         # train_eigvals = [graph["eigval"][1:self.k + 1].cpu().detach().numpy() for graph in self.train]
@@ -783,37 +922,64 @@ class SamplingSpectreMetrics(nn.Module):
         # eigval_stats(eig_ref_list, eig_pred_list, max_eig=20, is_parallel=True, compute_emd=False)
         # spectral_filter_stats(eigvec_ref_list, eigval_ref_list, eigvec_pred_list, eigval_pred_list, is_parallel=False,
         #                       compute_emd=False)          # This is the one called wavelet
-        spectre = spectral_stats(self.test_graphs, networkx_graphs, is_parallel=True, n_eigvals=-1,
-                                 compute_emd=self.compute_emd)
-        wandb.run.summary['spectre'] = spectre
+        spectre = spectral_stats(
+            self.test_graphs,
+            networkx_graphs,
+            is_parallel=True,
+            n_eigvals=-1,
+            compute_emd=self.compute_emd,
+        )
+        wandb.run.summary["spectre"] = spectre
         print("Computing clustering stats...")
-        clustering = clustering_stats(self.test_graphs, networkx_graphs, bins=100, is_parallel=True,
-                                      compute_emd=self.compute_emd)
-        wandb.run.summary['clustering'] = clustering
-        motif = motif_stats(self.test_graphs, networkx_graphs, motif_type='4cycle', ground_truth_match=None, bins=100,
-                            compute_emd=self.compute_emd)
-        wandb.run.summary['motif'] = motif
+        clustering = clustering_stats(
+            self.test_graphs,
+            networkx_graphs,
+            bins=100,
+            is_parallel=True,
+            compute_emd=self.compute_emd,
+        )
+        wandb.run.summary["clustering"] = clustering
+        motif = motif_stats(
+            self.test_graphs,
+            networkx_graphs,
+            motif_type="4cycle",
+            ground_truth_match=None,
+            bins=100,
+            compute_emd=self.compute_emd,
+        )
+        wandb.run.summary["motif"] = motif
         print("Computing orbit stats...")
-        orbit = orbit_stats_all(self.test_graphs, networkx_graphs, compute_emd=self.compute_emd)
-        wandb.run.summary['orbit'] = orbit
+        orbit = orbit_stats_all(
+            self.test_graphs, networkx_graphs, compute_emd=self.compute_emd
+        )
+        wandb.run.summary["orbit"] = orbit
         print("Computing accuracy...")
         acc = eval_acc_sbm_graph(networkx_graphs, refinement_steps=100, strict=True)
-        wandb.run.summary['acc'] = acc
+        wandb.run.summary["acc"] = acc
         print("Computing all fractions...")
-        frac_unique, frac_unique_non_isomorphic, fraction_unique_non_isomorphic_valid = eval_fraction_unique_non_isomorphic_valid(
-            networkx_graphs, self.train_graphs, is_sbm_graph)
-        frac_non_isomorphic = 1.0 - eval_fraction_isomorphic(networkx_graphs, self.train_graphs)
+        (
+            frac_unique,
+            frac_unique_non_isomorphic,
+            fraction_unique_non_isomorphic_valid,
+        ) = eval_fraction_unique_non_isomorphic_valid(
+            networkx_graphs, self.train_graphs, is_sbm_graph
+        )
+        frac_non_isomorphic = 1.0 - eval_fraction_isomorphic(
+            networkx_graphs, self.train_graphs
+        )
 
-        to_log = {'sampling/degree_dist': degree,
-                  'sampling/spectre': spectre,
-                  'sampling/clustering': clustering,
-                  'sampling/motif': motif,
-                  'sampling/orbit': orbit,
-                  'sampling/acc': acc,
-                  'sampling/frac_unique': frac_unique,
-                  'sampling/frac_unique_non_iso': frac_unique_non_isomorphic,
-                  'sampling/frac_unic_non_iso_valid': fraction_unique_non_isomorphic_valid,
-                  'sampling/frac_non_iso': frac_non_isomorphic}
+        to_log = {
+            "sampling/degree_dist": degree,
+            "sampling/spectre": spectre,
+            "sampling/clustering": clustering,
+            "sampling/motif": motif,
+            "sampling/orbit": orbit,
+            "sampling/acc": acc,
+            "sampling/frac_unique": frac_unique,
+            "sampling/frac_unique_non_iso": frac_unique_non_isomorphic,
+            "sampling/frac_unic_non_iso_valid": fraction_unique_non_isomorphic_valid,
+            "sampling/frac_non_iso": frac_non_isomorphic,
+        }
         print("Sampling statistics", to_log)
         wandb.log(to_log, commit=False)
 
@@ -825,9 +991,9 @@ class SpectreSamplingMetrics(nn.Module):
     def __init__(self, dataloaders, compute_emd, metrics_list):
         super().__init__()
 
-        self.train_graphs = self.loader_to_nx(dataloaders['train'])
-        self.val_graphs = self.loader_to_nx(dataloaders['val'])
-        self.test_graphs = self.loader_to_nx(dataloaders['test'])
+        self.train_graphs = self.loader_to_nx(dataloaders["train"])
+        self.val_graphs = self.loader_to_nx(dataloaders["val"])
+        self.test_graphs = self.loader_to_nx(dataloaders["test"])
         self.num_graphs_test = len(self.test_graphs)
         self.num_graphs_val = len(self.val_graphs)
         self.compute_emd = compute_emd
@@ -839,13 +1005,30 @@ class SpectreSamplingMetrics(nn.Module):
             # TODO: this does not run with current loader
             data_list = batch.to_data_list()
             for j, data in enumerate(data_list):
-                networkx_graphs.append(to_networkx(data, node_attrs=None, edge_attrs=None, to_undirected=True,
-                                                   remove_self_loops=True))
+                networkx_graphs.append(
+                    to_networkx(
+                        data,
+                        node_attrs=None,
+                        edge_attrs=None,
+                        to_undirected=True,
+                        remove_self_loops=True,
+                    )
+                )
         return networkx_graphs
 
-    def forward(self, generated_graphs: list, name, current_epoch, val_counter, save_graphs=True, test=False):
-        print(f"Computing sampling metrics between {len(generated_graphs)} generated graphs and {len(self.test_graphs)}"
-              f" test graphs -- emd computation: {self.compute_emd}")
+    def forward(
+        self,
+        generated_graphs: list,
+        name,
+        current_epoch,
+        val_counter,
+        save_graphs=True,
+        test=False,
+    ):
+        print(
+            f"Computing sampling metrics between {len(generated_graphs)} generated graphs and {len(self.test_graphs)}"
+            f" test graphs -- emd computation: {self.compute_emd}"
+        )
         networkx_graphs = []
         adjacency_matrices = []
         print("Building networkx graphs...")
@@ -857,15 +1040,18 @@ class SpectreSamplingMetrics(nn.Module):
             nx_graph = nx.from_numpy_array(A)
             networkx_graphs.append(nx_graph)
 
-
         print("Saving all adjacency matrices")
-        np.savez('generated_adjs.npz', *adjacency_matrices)
+        np.savez("generated_adjs.npz", *adjacency_matrices)
 
-        if 'degree' in self.metrics_list:
+        if "degree" in self.metrics_list:
             print("Computing degree stats..")
-            degree = degree_stats(self.test_graphs, networkx_graphs, is_parallel=True,
-                                  compute_emd=self.compute_emd)
-            wandb.run.summary['degree'] = degree
+            degree = degree_stats(
+                self.test_graphs,
+                networkx_graphs,
+                is_parallel=True,
+                compute_emd=self.compute_emd,
+            )
+            wandb.run.summary["degree"] = degree
 
         # val_eigvals = [graph["eigval"][1:self.k + 1].cpu().detach().numpy() for graph in self.val]
         # train_eigvals = [graph["eigval"][1:self.k + 1].cpu().detach().numpy() for graph in self.train]
@@ -875,54 +1061,85 @@ class SpectreSamplingMetrics(nn.Module):
         #                       compute_emd=False)          # This is the one called wavelet
         to_log = {}
 
-        if 'spectre' in self.metrics_list:
+        if "spectre" in self.metrics_list:
             print("Computing spectre stats...")
-            spectre = spectral_stats(self.test_graphs, networkx_graphs, is_parallel=True, n_eigvals=-1,
-                                     compute_emd=self.compute_emd)
-            to_log['spectre'] = spectre
-            wandb.run.summary['spectre'] = spectre
+            spectre = spectral_stats(
+                self.test_graphs,
+                networkx_graphs,
+                is_parallel=True,
+                n_eigvals=-1,
+                compute_emd=self.compute_emd,
+            )
+            to_log["spectre"] = spectre
+            wandb.run.summary["spectre"] = spectre
 
-        if 'clustering' in self.metrics_list:
+        if "clustering" in self.metrics_list:
             print("Computing clustering stats...")
-            clustering = clustering_stats(self.test_graphs, networkx_graphs, bins=100, is_parallel=True,
-                                          compute_emd=self.compute_emd)
-            to_log['clustering'] = clustering
-            wandb.run.summary['clustering'] = clustering
+            clustering = clustering_stats(
+                self.test_graphs,
+                networkx_graphs,
+                bins=100,
+                is_parallel=True,
+                compute_emd=self.compute_emd,
+            )
+            to_log["clustering"] = clustering
+            wandb.run.summary["clustering"] = clustering
 
-        if 'motif' in self.metrics_list:
+        if "motif" in self.metrics_list:
             print("Computing motif stats")
-            motif = motif_stats(self.test_graphs, networkx_graphs, motif_type='4cycle', ground_truth_match=None, bins=100,
-                                compute_emd=self.compute_emd)
-            to_log['motif'] = motif
-            wandb.run.summary['motif'] = motif
+            motif = motif_stats(
+                self.test_graphs,
+                networkx_graphs,
+                motif_type="4cycle",
+                ground_truth_match=None,
+                bins=100,
+                compute_emd=self.compute_emd,
+            )
+            to_log["motif"] = motif
+            wandb.run.summary["motif"] = motif
 
-        if 'orbit' in self.metrics_list:
+        if "orbit" in self.metrics_list:
             print("Computing orbit stats...")
-            orbit = orbit_stats_all(self.test_graphs, networkx_graphs, compute_emd=self.compute_emd)
-            to_log['orbit'] = orbit
-            wandb.run.summary['orbit'] = orbit
+            orbit = orbit_stats_all(
+                self.test_graphs, networkx_graphs, compute_emd=self.compute_emd
+            )
+            to_log["orbit"] = orbit
+            wandb.run.summary["orbit"] = orbit
 
-        if 'sbm' in self.metrics_list:
+        if "sbm" in self.metrics_list:
             print("Computing accuracy...")
             acc = eval_acc_sbm_graph(networkx_graphs, refinement_steps=100, strict=True)
-            to_log['sbm_acc'] = acc
-            wandb.run.summary['sbmacc'] = acc
+            to_log["sbm_acc"] = acc
+            wandb.run.summary["sbmacc"] = acc
 
-        if 'planar' in self.metrics_list:
-            print('Computing planar accuracy...')
+        if "planar" in self.metrics_list:
+            print("Computing planar accuracy...")
             planar_acc = eval_acc_planar_graph(networkx_graphs)
-            to_log['planar_acc'] = planar_acc
-            wandb.run.summary['planar_acc'] = planar_acc
+            to_log["planar_acc"] = planar_acc
+            wandb.run.summary["planar_acc"] = planar_acc
 
-        if 'sbm' or 'planar' in self.metrics_list:
+        if "sbm" or "planar" in self.metrics_list:
             print("Computing all fractions...")
-            frac_unique, frac_unique_non_isomorphic, fraction_unique_non_isomorphic_valid = eval_fraction_unique_non_isomorphic_valid(
-                networkx_graphs, self.train_graphs, is_sbm_graph if 'sbm' in self.metrics_list else is_planar_graph)
-            frac_non_isomorphic = 1.0 - eval_fraction_isomorphic(networkx_graphs, self.train_graphs)
-            to_log.update({'sampling/frac_unique': frac_unique,
-                           'sampling/frac_unique_non_iso': frac_unique_non_isomorphic,
-                           'sampling/frac_unic_non_iso_valid': fraction_unique_non_isomorphic_valid,
-                           'sampling/frac_non_iso': frac_non_isomorphic})
+            (
+                frac_unique,
+                frac_unique_non_isomorphic,
+                fraction_unique_non_isomorphic_valid,
+            ) = eval_fraction_unique_non_isomorphic_valid(
+                networkx_graphs,
+                self.train_graphs,
+                is_sbm_graph if "sbm" in self.metrics_list else is_planar_graph,
+            )
+            frac_non_isomorphic = 1.0 - eval_fraction_isomorphic(
+                networkx_graphs, self.train_graphs
+            )
+            to_log.update(
+                {
+                    "sampling/frac_unique": frac_unique,
+                    "sampling/frac_unique_non_iso": frac_unique_non_isomorphic,
+                    "sampling/frac_unic_non_iso_valid": fraction_unique_non_isomorphic_valid,
+                    "sampling/frac_non_iso": frac_non_isomorphic,
+                }
+            )
 
         print("Sampling statistics", to_log)
         wandb.log(to_log, commit=False)
@@ -933,20 +1150,26 @@ class SpectreSamplingMetrics(nn.Module):
 
 class Comm20SamplingMetrics(SpectreSamplingMetrics):
     def __init__(self, dataloaders):
-        super().__init__(dataloaders=dataloaders,
-                         compute_emd=True,
-                         metrics_list=['degree', 'clustering', 'orbit'])
+        super().__init__(
+            dataloaders=dataloaders,
+            compute_emd=True,
+            metrics_list=["degree", "clustering", "orbit"],
+        )
 
 
 class PlanarSamplingMetrics(SpectreSamplingMetrics):
     def __init__(self, dataloaders):
-        super().__init__(dataloaders=dataloaders,
-                         compute_emd=False,
-                         metrics_list=['degree', 'clustering', 'orbit', 'spectre', 'planar'])
+        super().__init__(
+            dataloaders=dataloaders,
+            compute_emd=False,
+            metrics_list=["degree", "clustering", "orbit", "spectre", "planar"],
+        )
 
 
 class SBMSamplingMetrics(SpectreSamplingMetrics):
     def __init__(self, dataloaders):
-        super().__init__(dataloaders=dataloaders,
-                         compute_emd=False,
-                         metrics_list=['degree', 'clustering', 'orbit', 'spectre', 'sbm'])
+        super().__init__(
+            dataloaders=dataloaders,
+            compute_emd=False,
+            metrics_list=["degree", "clustering", "orbit", "spectre", "sbm"],
+        )
