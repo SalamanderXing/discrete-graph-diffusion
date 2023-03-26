@@ -1,0 +1,7 @@
+#!/home/bluesk/Documents/discrete-graph-diffusion/.mate/discrete-graph-diffusion/venv/bin/python
+# EASY-INSTALL-DEV-SCRIPT: 'mate==0.0.1','mateboard'
+__requires__ = 'mate==0.0.1'
+__import__('pkg_resources').require('mate==0.0.1')
+__file__ = '/home/bluesk/Documents/mate/src/mateboard'
+with open(__file__) as f:
+    exec(compile(f.read(), __file__, 'exec'))

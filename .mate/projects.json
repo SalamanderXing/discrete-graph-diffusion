@@ -1,0 +1,45 @@
+{
+    "discrete_graph_diffusion": {
+        "name": "discrete_graph_diffusion",
+        "project": {
+            "models": {
+                "graph_transformer": {
+                    "name": "graph_transformer",
+                    "exports": [],
+                    "errors": [
+                        "No exports found in models.graph_transformer. Consider exporting with 'mate export <module>'"
+                    ],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.2"
+                        ],
+                        [
+                            "jax",
+                            "0.4.1"
+                        ]
+                    ]
+                }
+            },
+            "data_loaders": {},
+            "trainers": {
+                "discrete_diffusion": {
+                    "name": "discrete_diffusion",
+                    "exports": [],
+                    "errors": [
+                        "No exports found in trainers.discrete_diffusion. Consider exporting with 'mate export <module>'"
+                    ],
+                    "dependencies": []
+                }
+            },
+            "experiments": {
+                "main": {
+                    "name": "main",
+                    "errors": [],
+                    "imports": []
+                }
+            }
+        },
+        "root": "/jax/discrete_graph_diffusion"
+    }
+}

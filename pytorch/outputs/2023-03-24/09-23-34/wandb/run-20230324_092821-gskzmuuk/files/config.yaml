@@ -1,0 +1,103 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.14.0
+    framework: huggingface
+    huggingface_version: 4.25.1
+    is_jupyter_run: false
+    is_kaggle_kernel: true
+    python_version: 3.10.10
+    start_time: 1679650101.158542
+    t:
+      1:
+      - 1
+      - 2
+      - 3
+      - 9
+      - 11
+      - 12
+      - 41
+      - 49
+      - 50
+      - 55
+      - 71
+      - 77
+      3:
+      - 13
+      - 16
+      - 23
+      4: 3.10.10
+      5: 0.14.0
+      6: 4.25.1
+      8:
+      - 2
+      - 5
+dataset:
+  desc: null
+  value:
+    datadir: data/qm9/qm9_pyg/
+    name: qm9
+    pin_memory: false
+    random_subset: null
+    remove_h: true
+general:
+  desc: null
+  value:
+    chains_to_save: 1
+    check_val_every_n_epochs: 5
+    evaluate_all_checkpoints: false
+    final_model_chains_to_save: 20
+    final_model_samples_to_generate: 10000
+    final_model_samples_to_save: 30
+    gpus: 1
+    log_every_steps: 50
+    name: graph-tf-model
+    number_chain_steps: 50
+    resume: null
+    sample_every_val: 4
+    samples_to_generate: 512
+    samples_to_save: 20
+    test_only: null
+    val_check_interval: null
+    wandb: online
+model:
+  desc: null
+  value:
+    diffusion_noise_schedule: cosine
+    diffusion_steps: 500
+    extra_features: all
+    hidden_dims:
+      de: 64
+      dim_ffE: 128
+      dim_ffX: 256
+      dim_ffy: 128
+      dx: 256
+      dy: 64
+      n_head: 8
+    hidden_mlp_dims:
+      E: 128
+      X: 256
+      y: 128
+    lambda_train:
+    - 5
+    - 0
+    model: graph_tf
+    n_layers: 5
+    transition: marginal
+    type: discrete
+train:
+  desc: null
+  value:
+    batch_size: 512
+    clip_grad: null
+    ema_decay: 0
+    lr: 0.0002
+    n_epochs: 1000
+    num_workers: 0
+    optimizer: adamw
+    progress_bar: false
+    save_model: true
+    seed: 0
+    weight_decay: 1.0e-12

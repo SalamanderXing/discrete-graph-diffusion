@@ -1,0 +1,3 @@
+[console_scripts]
+dirhash = dirhash.cli:main
+
