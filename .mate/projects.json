@@ -5,10 +5,10 @@
             "models": {
                 "graph_transformer": {
                     "name": "graph_transformer",
-                    "exports": [],
-                    "errors": [
-                        "No exports found in models.graph_transformer. Consider exporting with 'mate export <module>'"
+                    "exports": [
+                        "GraphTransformer"
                     ],
+                    "errors": [],
                     "dependencies": [
                         [
                             "flax",
@@ -36,7 +36,9 @@
                 "main": {
                     "name": "main",
                     "errors": [],
-                    "imports": []
+                    "imports": [
+                        "models"
+                    ]
                 }
             }
         },

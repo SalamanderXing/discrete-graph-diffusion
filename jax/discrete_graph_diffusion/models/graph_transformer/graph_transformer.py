@@ -3,6 +3,7 @@ from jax import Array
 from flax import linen as nn
 
 from .xey_transformer_layer import XEYTransformerLayer
+from .utils import PlaceHolder, assert_correctly_masked
 
 
 class GraphTransformer(nn.Module):
@@ -124,5 +125,21 @@ class GraphTransformer(nn.Module):
 
         new_e = self.mlp_in_e(e)
         new_e = (new_e + new_e.transpose((0, 2, 1))) / 2
-        #after_in = 
 
+        after_in = PlaceHolder(x=x, e=new_e, y=self.mlp_in_y(y)).mask(node_mask)
+        x, e, y = after_in.x, after_in.e, after_in.y
+
+        for layer in self.tf_layers:
+            x, e, y = layer(x, e, y, node_mask)
+
+        x = self.mlp_out_x(x)
+        e = self.mlp_out_e(e)
+        y = self.mlp_out_y(y)
+
+        x = x + x_to_out
+        e = (e + e_to_out) * diag_mask
+        y = y + y_to_out
+
+        e = 1 / 2 * (e + e.transpose((0, 2, 1)))
+
+        return PlaceHolder(x=x, e=e, y=y).mask(node_mask)

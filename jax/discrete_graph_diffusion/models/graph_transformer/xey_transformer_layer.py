@@ -1,7 +1,7 @@
 from flax import linen as nn
 import jax.numpy as jnp
 
-class XEyTransformerLayer(nn.Module):
+class XEYTransformerLayer(nn.Module):
     """
     Transformer that updates node, edge and global features
     d_x: node features
