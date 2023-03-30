@@ -1,6 +1,6 @@
 # Discrete Graph Diffusion
 
-Structure
+## Structure
 
 - `pytorch` $\rightarrow$ [original code](https://github.com/cvignac/DiGress)
 - `jax` $\rightarrow$ new code
@@ -22,5 +22,7 @@ pip install -e .
 Navigate into the `jax` directory and run `mate summary`. If everything worked well you should see a nice representation of the project. 
 
 Then you can run `mate run transformer_test` to run a simple test that checks the graph transformer model is working.
+
+---
 
 <small>builtwithmate</small>
