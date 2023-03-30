@@ -1,1 +1,4 @@
 pytorch/data/*
+
+.mate/*/venv
+.mate/tmp
