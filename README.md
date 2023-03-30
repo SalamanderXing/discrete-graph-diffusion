@@ -2,8 +2,8 @@
 
 Structure
 
-- `pytorch` --> [original code](https://github.com/cvignac/DiGress)
-- `jax` --> new code
+- `pytorch` $\rightarrow$ [original code](https://github.com/cvignac/DiGress)
+- `jax` $\rightarrow$ new code
 
 ## Running the code
 
