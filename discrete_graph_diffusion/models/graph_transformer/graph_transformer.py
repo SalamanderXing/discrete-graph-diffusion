@@ -1,41 +1,80 @@
 from jax import numpy as np
 from jax import Array
 from flax import linen as nn
+import ipdb
 
 from .xey_transformer_layer import XEYTransformerLayer
 from .utils import PlaceHolder, assert_correctly_masked
+from dataclasses import dataclass
+from dacite import from_dict
 
+@dataclass(frozen=True)
+class InputDims:
+    X: int
+    E: int
+    y: int
+
+@dataclass(frozen=True)
+class OutputDims:
+    X: int
+    E: int
+    y: int
+
+@dataclass(frozen=True)
+class HiddenMLPDims:
+    X: int
+    E: int
+    y: int
+
+@dataclass(frozen=True)
+class HiddenDims:
+    dx: int
+    de: int
+    dy: int
+    n_head: int
+    dim_ffX: int
+    dim_ffE: int
+    dim_ffy: int
+
+
+@dataclass(frozen=True)
+class GraphTransformerConfig:
+    n_layers: int
+    input_dims: InputDims
+    hidden_mlp_dims: HiddenMLPDims
+    hidden_dims: HiddenDims
+    output_dims: OutputDims
+
+    # has a custom init method that creates a config object from a dictionary
+    @classmethod
+    def from_dict(cls, config_dict):
+        return from_dict(cls, config_dict)
 
 class GraphTransformer(nn.Module):
     """
     n_layers: int -- number of layers
     dims: dict -- dimensions for each feature type
     """
+    config: GraphTransformerConfig
 
     def setup(
         self,
-        n_layers: int,
-        input_dims: dict,
-        hidden_mlp_dims: dict,
-        hidden_dims: dict,
-        output_dims: dict,
         act_fn_in=nn.relu,
         act_fn_out=nn.relu,
     ):
-        self.n_layers = n_layers
-        self.out_dim_x = output_dims["X"]
-        self.out_dim_e = output_dims["E"]
-        self.out_dim_y = output_dims["y"]
+        dx = self.config.hidden_dims.dx
+        de = self.config.hidden_dims.de
+        dy = self.config.hidden_dims.dy
 
         self.mlp_in_x = nn.Sequential(
             [
                 nn.Dense(
-                    hidden_mlp_dims["X"],
+                    self.config.hidden_mlp_dims.X,
                     use_bias=False,
                 ),
                 act_fn_in,
                 nn.Dense(
-                    hidden_mlp_dims["dx"],
+                    dx,
                     use_bias=False,
                 ),
             ]
@@ -43,12 +82,12 @@ class GraphTransformer(nn.Module):
         self.mlp_in_e = nn.Sequential(
             [
                 nn.Dense(
-                    hidden_mlp_dims["E"],
+                    self.config.hidden_mlp_dims.E,
                     use_bias=False,
                 ),
                 act_fn_in,
                 nn.Dense(
-                    hidden_mlp_dims["de"],
+                    self.config.hidden_dims.de,
                     use_bias=False,
                 ),
             ]
@@ -56,28 +95,33 @@ class GraphTransformer(nn.Module):
         self.mlp_in_y = nn.Sequential(
             [
                 nn.Dense(
-                    hidden_mlp_dims["y"],
+                    self.config.hidden_mlp_dims.y,
                     use_bias=False,
                 ),
                 act_fn_in,
                 nn.Dense(
-                    hidden_mlp_dims["dy"],
+                    dy,
                     use_bias=False,
                 ),
             ]
         )
 
-        self.layers = [XEYTransformerLayer(**hidden_dims) for _ in range(n_layers)]
+        self.layers = [
+            XEYTransformerLayer(
+                dx=dx, dy=dy, de=de, n_head=self.config.hidden_dims.n_head
+            )
+            for _ in range(self.config.n_layers)
+        ]
 
         self.mlp_out_x = nn.Sequential(
             [
                 nn.Dense(
-                    hidden_mlp_dims["dx"],
+                    dx,
                     use_bias=False,
                 ),
                 act_fn_out,
                 nn.Dense(
-                    self.out_dim_x,
+                    self.config.output_dims.X,
                     use_bias=False,
                 ),
             ]
@@ -86,12 +130,12 @@ class GraphTransformer(nn.Module):
         self.mlp_out_e = nn.Sequential(
             [
                 nn.Dense(
-                    hidden_mlp_dims["de"],
+                    de,
                     use_bias=False,
                 ),
                 act_fn_out,
                 nn.Dense(
-                    self.out_dim_e,
+                    self.config.output_dims.E,
                     use_bias=False,
                 ),
             ]
@@ -100,12 +144,12 @@ class GraphTransformer(nn.Module):
         self.mlp_out_y = nn.Sequential(
             [
                 nn.Dense(
-                    hidden_mlp_dims["dy"],
+                    dy,
                     use_bias=False,
                 ),
                 act_fn_out,
                 nn.Dense(
-                    self.out_dim_y,
+                    self.config.output_dims.y,
                     use_bias=False,
                 ),
             ]
@@ -119,17 +163,17 @@ class GraphTransformer(nn.Module):
             (bs, n, n, 1),
         )
 
-        x_to_out = x[..., : self.out_dim_x]
-        e_to_out = e[..., : self.out_dim_e]
-        y_to_out = y[..., : self.out_dim_y]
+        x_to_out = x[..., : self.config.output_dims.X]
+        e_to_out = e[..., : self.config.output_dims.E]
+        y_to_out = y[..., : self.config.output_dims.y]
 
         new_e = self.mlp_in_e(e)
-        new_e = (new_e + new_e.transpose((0, 2, 1))) / 2
+        new_e = (new_e + new_e.transpose((0, 2, 1, 3))) / 2
 
-        after_in = PlaceHolder(x=x, e=new_e, y=self.mlp_in_y(y)).mask(node_mask)
+        after_in = PlaceHolder(x=self.mlp_in_x(x), e=new_e, y=self.mlp_in_y(y)).mask(node_mask)
         x, e, y = after_in.x, after_in.e, after_in.y
 
-        for layer in self.tf_layers:
+        for layer in self.layers: # TODO: replace with a nn.Sequential
             x, e, y = layer(x, e, y, node_mask)
 
         x = self.mlp_out_x(x)

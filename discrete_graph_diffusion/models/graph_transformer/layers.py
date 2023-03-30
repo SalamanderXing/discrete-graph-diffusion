@@ -6,7 +6,7 @@ class XToY(nn.Module):
     """Maps X to Y."""
 
     @nn.compact
-    def apply(self, x):
+    def __call__(self, x):
         m = x.mean(axis=1)
         m1 = x.min(axis=1)[0]
         ma = x.max(axis=1)[0]
@@ -16,11 +16,11 @@ class XToY(nn.Module):
         return out
 
 
-class YToX(nn.Module):
+class EToY(nn.Module):
     """Maps Y to X."""
 
     @nn.compact
-    def apply(self, e):
+    def __call__(self, e):
         m = e.mean(axis=(1, 2))
         m1 = e.min(axis=2)[0].min(axis=1)[0]
         ma = e.max(axis=2)[0].max(axis=1)[0]

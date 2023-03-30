@@ -2,23 +2,17 @@ from flax import linen as nn
 from jax import numpy as np
 from jax import Array
 
-from utils import assert_correctly_masked
-from .layers import XToY, EToY, masked_softmax
 from .utils import assert_correctly_masked
+from .layers import XToY, EToY, masked_softmax
 
 
 class NodeEdgeBlock(nn.Module):
     """Self attention layer that also updates the representations of the edges."""
-
-    def __init__(self, dx, de, dy, n_head, **kwargs):
-        super().__init__()
-        assert dx % n_head == 0, f"dx ({dx}) must be divisible by n_head ({n_head})"
-        self.dx = dx
-        self.de = de
-        self.dy = dy
-        self.df = dx // n_head
-        self.n_head = n_head
-
+    dx : int
+    de : int
+    dy : int
+    n_head : int
+    
     def setup(self):
         # Attention
         self.q = nn.Dense(
@@ -66,6 +60,7 @@ class NodeEdgeBlock(nn.Module):
         :param node_mask: (bs, n)
         :return: (bs, n, dx), (bs, n, n, de), (bs, dz)
         """
+        df = self.dx // self.n_head
         bs, n, _ = x.shape
         x_mask = node_mask[..., None]
         e_mask1 = np.expand_dims(x_mask, axis=2)
@@ -78,11 +73,11 @@ class NodeEdgeBlock(nn.Module):
 
         # Compute unnormalized attention scores. Y is (bs, n, n, n_heads, df)
         y = q * k
-        y /= np.sqrt(self.df)
+        y /= np.sqrt(df)
         assert_correctly_masked(y, (e_mask1 * e_mask2))
 
-        e1 = (self.e_mul(e) * e_mask1 * e_mask2).reshape(bs, n, n, self.n_head, self.df)
-        e2 = (self.e_add(e) * e_mask1 * e_mask2).reshape(bs, n, n, self.n_head, self.df)
+        e1 = (self.e_mul(e) * e_mask1 * e_mask2).reshape(bs, n, n, self.n_head, df)
+        e2 = (self.e_add(e) * e_mask1 * e_mask2).reshape(bs, n, n, self.n_head, df)
 
         # Incorporate edge features into attention scores
         y = y * (e1 + 1) + e2  # (bs, n, n, n_heads, df)
@@ -102,7 +97,7 @@ class NodeEdgeBlock(nn.Module):
         attn = masked_softmax(y, softmax_mask, axis=2)
 
         v = self.v(x) * x_mask
-        v = v.reshape(bs, n, 1, self.n_head, self.df)[:, None]
+        v = v.reshape(bs, n, 1, self.n_head, df)[:, None]
 
         # Compute weighted values
         weighted_values = (attn * v).sum(axis=2)

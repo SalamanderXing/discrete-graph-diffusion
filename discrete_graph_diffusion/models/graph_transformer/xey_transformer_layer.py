@@ -1,11 +1,13 @@
 from flax import linen as nn
-import jax.numpy as jnp
+import jax.numpy as np
+from jax import Array
+from .node_edge_block import NodeEdgeBlock
 
 class XEYTransformerLayer(nn.Module):
     """
     Transformer that updates node, edge and global features
-    d_x: node features
-    d_y: edge features
+    dx: node features
+    dy: edge features
     dz: global features
     n_heads: number of attention heads
     dim_feedforward: dimension of feedforward layer after self-attention
@@ -14,59 +16,31 @@ class XEYTransformerLayer(nn.Module):
     """
 
 
-    d_x: int
-    d_y: int
-    dz: int
-    n_heads: int
-    dim_feedforward: int
-    dropout: float
+    dx: int
+    dy: int
+    de: int
+    n_head: int
+    dim_ffx: int = 2048
+    dim_ffe: int = 128 
+    dim_ffy: int = 2048
+    dropout: float = 0.1
     layer_norm_eps: float = 1e-6
 
     @nn.compact
-    def __call__(self, x, y, z, mask_x, mask_y, mask_z):
+    def __call__(self, x:Array, e:Array, y:Array, node_mask:Array):
+        """Pass the input through the encoder layer.
+        X: (bs, n, d)
+        E: (bs, n, n, d)
+        y: (bs, dy)
+        node_mask: (bs, n) Mask for the src keys per batch (optional)
+        Output: newX, newE, new_y with the same shape.
         """
-        x: node features
-        y: edge features
-        z: global features
-        mask_x: mask for node features
-        mask_y: mask for edge features
-        mask_z: mask for global features
-        """
+        new_x, new_e, new_y = NodeEdgeBlock(
+            dx=self.dx,
+            dy=self.dy,
+            de=self.de,
+            n_head=self.n_head,
+        )(x, e, y, node_mask)
 
-        # self-attention
-        x = nn.LayerNorm(epsilon=self.layer_norm_eps)(x)
-        x = nn.SelfAttention(
-            num_heads=self.n_heads,
-            qkv_features=self.d_x,
-            out_features=self.d_x,
-            dropout_rate=self.dropout,
-            deterministic=False,
-        )(x, mask=mask_x)
-        x = nn.Dropout(rate=self.dropout)(x, deterministic=False)
-        x = nn.LayerNorm(epsilon=self.layer_norm_eps)(x)
-        x = nn.Dense(features=self.d_x)(x)
-        x = nn.Dropout(rate=self.dropout)(x, deterministic=False)
-
-        # cross-attention
-        y = nn.LayerNorm(epsilon=self.layer_norm_eps)(y)
-        y = nn.SelfAttention(
-            num_heads=self.n_heads,
-            qkv_features=self.d_y,
-            out_features=self.d_y,
-            dropout_rate=self.dropout,
-            deterministic=False,
-        )(y, mask=mask_y)
-        y = nn.Dropout(rate=self.dropout)(y, deterministic=False)
-        y = nn.LayerNorm(epsilon=self.layer_norm_eps)(y)
-        y = nn.Dense(features=self.d_y)(y)
-        y = nn.Dropout(rate=self.dropout)(y, deterministic=False)
-
-        # feedforward
-        z = nn.LayerNorm(epsilon=self.layer_norm_eps)(z)
-        z = nn.Dense(features=self.dim_feedforward)(z)
-        z = nn.gelu(z)
-        z = nn.Dropout(rate=self.dropout)(z, deterministic=False)
-        z = nn.Dense(features=self.dz)(z)
-        z = nn.Dropout(rate=self.dropout)(z, deterministic=False)
 
         return x, y, z 

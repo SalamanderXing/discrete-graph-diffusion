@@ -1,10 +1,10 @@
 from jax import numpy as np
 from jax import Array
-
+import ipdb
 
 def assert_correctly_masked(variable, node_mask):
     assert (
-        variable * (1 - node_mask.long())
+        variable * (1 - node_mask.astype(variable.dtype))
     ).abs().max().item() < 1e-4, "Variables not masked properly."
 
 
@@ -28,14 +28,17 @@ class PlaceHolder:
         e_mask2 = np.expand_dims(x_mask, 1)             # bs, 1, n, 1
 
         if collapse:
-            self.X = np.argmax(self.X, axis=-1)
-            self.E = np.argmax(self.E, axis=-1)
+            self.x = np.argmax(self.x, axis=-1)
+            self.e = np.argmax(self.e, axis=-1)
 
-            self.X[node_mask == 0] = - 1
-            self.E[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1
+            self.x[node_mask == 0] = - 1
+            self.e[(e_mask1 * e_mask2).squeeze(-1) == 0] = - 1
         else:
-            self.X = self.X * x_mask
-            self.E = self.E * e_mask1 * e_mask2
-            assert np.allclose(self.E, np.transpose(self.E, (1, 2)))
+            try:
+                self.x = self.x * x_mask
+            except:
+                ipdb.set_trace()
+            self.e = self.e * e_mask1 * e_mask2
+            assert np.allclose(self.e, np.transpose(self.e, (0, 2, 1, 3)))
         return self
 
