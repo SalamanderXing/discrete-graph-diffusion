@@ -29,7 +29,16 @@
                     "errors": [
                         "No exports found in trainers.discrete_diffusion. Consider exporting with 'mate export <module>'"
                     ],
-                    "dependencies": []
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.2"
+                        ],
+                        [
+                            "jax",
+                            "0.4.1"
+                        ]
+                    ]
                 }
             },
             "experiments": {
@@ -42,6 +51,6 @@
                 }
             }
         },
-        "root": "/jax/discrete_graph_diffusion"
+        "root": "/discrete_graph_diffusion"
     }
 }
