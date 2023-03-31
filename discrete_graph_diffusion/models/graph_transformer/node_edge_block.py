@@ -1,18 +1,19 @@
 from flax import linen as nn
 from jax import numpy as np
 from jax import Array
-
+import ipdb
 from .utils import assert_correctly_masked
 from .layers import XToY, EToY, masked_softmax
 
 
 class NodeEdgeBlock(nn.Module):
     """Self attention layer that also updates the representations of the edges."""
-    dx : int
-    de : int
-    dy : int
-    n_head : int
-    
+
+    dx: int
+    de: int
+    dy: int
+    n_head: int
+
     def setup(self):
         # Attention
         self.q = nn.Dense(
@@ -49,8 +50,17 @@ class NodeEdgeBlock(nn.Module):
         self.y_x_add = nn.Dense(self.dx, use_bias=False)
         # Process y
         self.y_y = nn.Dense(self.dy, use_bias=False)
-        self.x_y = XToY()
-        self.e_y = EToY()
+        self.x_y = XToY(dy=self.dy)
+        self.e_y = EToY(dy=self.dy)
+        self.x_out = nn.Dense(self.dx, use_bias=False)
+        self.e_out = nn.Dense(self.de, use_bias=False)
+        self.y_out = nn.Sequential(
+            [
+                nn.Dense(self.dy, use_bias=False),
+                nn.relu,
+                nn.Dense(self.dy, use_bias=False),
+            ]
+        )
 
     def __call__(self, x: Array, e: Array, y: Array, node_mask: Array):
         """
@@ -69,23 +79,27 @@ class NodeEdgeBlock(nn.Module):
         # 1. Map X to keys and queries
         q = self.q(x) * x_mask
         k = self.k(x) * x_mask
-        assert_correctly_masked(q, node_mask)
+        assert_correctly_masked(q, x_mask)
+
+        q = q.reshape(bs, n, 1, self.n_head, df)
+        k = k.reshape(bs, 1, n, self.n_head, df)
 
         # Compute unnormalized attention scores. Y is (bs, n, n, n_heads, df)
-        y = q * k
-        y /= np.sqrt(df)
-        assert_correctly_masked(y, (e_mask1 * e_mask2))
+        attn = q * k
+        attn /= np.sqrt(attn.shape[-1])
+        assert_correctly_masked(attn, (e_mask1 * e_mask2)[..., None])
 
         e1 = (self.e_mul(e) * e_mask1 * e_mask2).reshape(bs, n, n, self.n_head, df)
         e2 = (self.e_add(e) * e_mask1 * e_mask2).reshape(bs, n, n, self.n_head, df)
 
         # Incorporate edge features into attention scores
-        y = y * (e1 + 1) + e2  # (bs, n, n, n_heads, df)
+        attn = attn * (e1 + 1) + e2  # (bs, n, n, n_heads, df)
 
         # Incorporate y to E
-        new_e = y.reshape(bs, n, n, -1)
+        new_e = attn.reshape(bs, n, n, -1)
         ye1 = self.y_e_add(y)[:, None, None, :]
         ye2 = self.y_e_mul(y)[:, None, None, :]
+        # prints all the shapes again
         new_e = ye1 + (ye2 + 1) * new_e
 
         # Output E
@@ -94,10 +108,10 @@ class NodeEdgeBlock(nn.Module):
 
         # Compute attentios attn is still (bs, n, n, n_heads, df)
         softmax_mask = np.broadcast_to(e_mask2, (bs, n, n, self.n_head))
-        attn = masked_softmax(y, softmax_mask, axis=2)
+        attn = masked_softmax(attn, softmax_mask, axis=2)
 
         v = self.v(x) * x_mask
-        v = v.reshape(bs, n, 1, self.n_head, df)[:, None]
+        v = v.reshape(bs, n, 1, self.n_head, df)
 
         # Compute weighted values
         weighted_values = (attn * v).sum(axis=2)
@@ -108,6 +122,8 @@ class NodeEdgeBlock(nn.Module):
         # Incorporate y to X
         yx1 = self.y_x_add(y)[:, None, :]
         yx2 = self.y_x_mul(y)[:, None, :]
+        # prints all the shapes again
+
         new_x = yx1 + (yx2 + 1) * weighted_values
 
         # Output X
@@ -118,6 +134,7 @@ class NodeEdgeBlock(nn.Module):
         y = self.y_y(y)
         e_y = self.e_y(e)
         x_y = self.x_y(x)
-        new_y = self.y_out(y + e_y + x_y)
+        # prints all the shapes again
+        new_y = self.y_out(y + x_y + e_y)
 
         return new_x, new_e, new_y

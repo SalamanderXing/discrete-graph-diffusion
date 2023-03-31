@@ -8,11 +8,13 @@ from .utils import PlaceHolder, assert_correctly_masked
 from dataclasses import dataclass
 from dacite import from_dict
 
+
 @dataclass(frozen=True)
 class InputDims:
     X: int
     E: int
     y: int
+
 
 @dataclass(frozen=True)
 class OutputDims:
@@ -20,11 +22,13 @@ class OutputDims:
     E: int
     y: int
 
+
 @dataclass(frozen=True)
 class HiddenMLPDims:
     X: int
     E: int
     y: int
+
 
 @dataclass(frozen=True)
 class HiddenDims:
@@ -50,11 +54,13 @@ class GraphTransformerConfig:
     def from_dict(cls, config_dict):
         return from_dict(cls, config_dict)
 
+
 class GraphTransformer(nn.Module):
     """
     n_layers: int -- number of layers
     dims: dict -- dimensions for each feature type
     """
+
     config: GraphTransformerConfig
 
     def setup(
@@ -140,7 +146,6 @@ class GraphTransformer(nn.Module):
                 ),
             ]
         )
-
         self.mlp_out_y = nn.Sequential(
             [
                 nn.Dense(
@@ -170,10 +175,12 @@ class GraphTransformer(nn.Module):
         new_e = self.mlp_in_e(e)
         new_e = (new_e + new_e.transpose((0, 2, 1, 3))) / 2
 
-        after_in = PlaceHolder(x=self.mlp_in_x(x), e=new_e, y=self.mlp_in_y(y)).mask(node_mask)
+        after_in = PlaceHolder(x=self.mlp_in_x(x), e=new_e, y=self.mlp_in_y(y)).mask(
+            node_mask
+        )
         x, e, y = after_in.x, after_in.e, after_in.y
 
-        for layer in self.layers: # TODO: replace with a nn.Sequential
+        for layer in self.layers:  # TODO: replace with a nn.Sequential
             x, e, y = layer(x, e, y, node_mask)
 
         x = self.mlp_out_x(x)
@@ -183,7 +190,6 @@ class GraphTransformer(nn.Module):
         x = x + x_to_out
         e = (e + e_to_out) * diag_mask
         y = y + y_to_out
-
-        e = 1 / 2 * (e + e.transpose((0, 2, 1)))
+        e = 1 / 2 * (e + e.transpose((0, 2, 1, 3)))
 
         return PlaceHolder(x=x, e=e, y=y).mask(node_mask)
