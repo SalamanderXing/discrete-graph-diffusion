@@ -2,8 +2,12 @@
 
 ## Project Structure
 
-- `pytorch` $\rightarrow$ [original code](https://github.com/cvignac/DiGress)
-- `discrete_graph_diffusion` $\rightarrow$ new code
+- `pytorch` $\rightarrow$ Almost identical to the [original code](https://github.com/cvignac/DiGress), adapted for debugging.
+- `discrete_graph_diffusion` $\rightarrow$ new code in JAX
+
+## Status
+
+Only the graph transformer works.
 
 ## Running the code
 
