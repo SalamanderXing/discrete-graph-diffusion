@@ -25,7 +25,7 @@ pip install -e .
 #### Running the code
 Navigate into the `discrete_graph_diffusion` directory and run `mate summary`. If everything worked well you should see a nice representation of the project. 
 
-Then you can run `mate run transformer_test` to run a simple test that checks the graph transformer model is working.
+Then you can run `mate run graph_transformer_test` to run a simple test that checks the graph transformer model is working.
 
 ---
 

@@ -11,12 +11,20 @@
                     "errors": [],
                     "dependencies": [
                         [
+                            "dacite",
+                            "1.8.0"
+                        ],
+                        [
                             "flax",
-                            "0.6.2"
+                            "0.6.8"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
                         ],
                         [
                             "jax",
-                            "0.4.1"
+                            "0.4.8"
                         ]
                     ]
                 }
@@ -42,8 +50,8 @@
                 }
             },
             "experiments": {
-                "main": {
-                    "name": "main",
+                "graph_transformer_test": {
+                    "name": "graph_transformer_test",
                     "errors": [],
                     "imports": [
                         "models"
