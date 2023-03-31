@@ -8,9 +8,9 @@ from jax import numpy as np
 from jax import random
 import jax
 
-jax.config.update("jax_platform_name", "cpu")
+jax.config.update("jax_platform_name", "cpu") # run on CPU for now.
 
-graph_transformer_config = GraphTransformerConfig.from_dict(
+config = GraphTransformerConfig.from_dict(
     dict(
         input_dims={
             "X": 9,
@@ -35,15 +35,16 @@ graph_transformer_config = GraphTransformerConfig.from_dict(
         n_layers=5,
     )
 )
+batch_size = 32
 # creates a test input, that is a random tensor of shape (32, 9, 12)
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
 key = random.PRNGKey(2)
-x = random.normal(key, (32, 9, graph_transformer_config.input_dims.X))
-e = random.normal(key, (32, 9, 9, graph_transformer_config.input_dims.E))
-y = random.normal(key, (32, graph_transformer_config.input_dims.y))
-node_mask = np.ones((32, 9))
+x = random.normal(key, (batch_size, 9, config.input_dims.X))
+e = random.normal(key, (batch_size, 9, 9, config.input_dims.E))
+y = random.normal(key, (batch_size, config.input_dims.y))
+node_mask = np.ones((batch_size, 9))
 
-graph_transformer = GraphTransformer(graph_transformer_config)
+graph_transformer = GraphTransformer(config)
 params = graph_transformer.init(rngs, x, e, y, node_mask)
 
 # this is the forward pass
@@ -51,4 +52,11 @@ params = graph_transformer.init(rngs, x, e, y, node_mask)
 out = graph_transformer.apply(
     params, x, e, y, node_mask, rngs={"dropout": rngs["dropout"]}
 )
-print(out)
+assert out.x.shape == (batch_size, config.input_dims.X, config.output_dims.X)
+assert out.e.shape == (
+    batch_size,
+    config.input_dims.X,
+    config.input_dims.X,
+    config.output_dims.E,
+)
+assert out.y.shape == (32, config.output_dims.y)
