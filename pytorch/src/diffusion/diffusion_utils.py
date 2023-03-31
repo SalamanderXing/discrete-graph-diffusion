@@ -4,6 +4,7 @@ import numpy as np
 import math
 
 from src.utils import PlaceHolder
+import ipdb
 
 
 def sum_except_batch(x):

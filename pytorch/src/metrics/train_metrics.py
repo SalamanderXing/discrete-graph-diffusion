@@ -13,11 +13,14 @@ from src.metrics.abstract_metrics import (
     NLL,
 )
 
+
 class WDB:
     def log(*args, **kwargs):
         pass
 
+
 wandb = WDB()
+
 
 class NodeMSE(MeanSquaredError):
     def __init__(self, *args):

@@ -78,7 +78,6 @@ class XEyTransformerLayer(nn.Module):
         node_mask: (bs, n) Mask for the src keys per batch (optional)
         Output: newX, newE, new_y with the same shape.
         """
-
         newX, newE, new_y = self.self_attn(X, E, y, node_mask=node_mask)
 
         newX_d = self.dropoutX1(newX)
@@ -172,6 +171,16 @@ class NodeEdgeBlock(nn.Module):
         # Compute unnormalized attentions. Y is (bs, n, n, n_head, df)
         Y = Q * K
         Y = Y / math.sqrt(Y.size(-1))
+        print(
+            f"""Y: {Y.shape} 
+        -- e_mask1: {e_mask1.shape} 
+        -- e_mask2: {e_mask2.shape}"""
+        )
+        # prints also the shape of Q, K
+        print(
+            f"""Q: {Q.shape} -- K: {K.shape} 
+        X: {X.shape}"""
+        )
         diffusion_utils.assert_correctly_masked(Y, (e_mask1 * e_mask2).unsqueeze(-1))
 
         E1 = self.e_mul(E) * e_mask1 * e_mask2  # bs, n, n, dx
@@ -187,6 +196,16 @@ class NodeEdgeBlock(nn.Module):
         newE = Y.flatten(start_dim=3)  # bs, n, n, dx
         ye1 = self.y_e_add(y).unsqueeze(1).unsqueeze(1)  # bs, 1, 1, de
         ye2 = self.y_e_mul(y).unsqueeze(1).unsqueeze(1)
+        # prints all the shapes again
+        print(
+            f"""newE: {newE.shape}
+        -- ye1: {ye1.shape}
+        -- ye2: {ye2.shape}
+        -- E1: {E1.shape}
+        -- E2: {E2.shape}
+        -- Y: {Y.shape}"""
+        )
+
         newE = ye1 + (ye2 + 1) * newE
 
         # Output E
@@ -211,6 +230,15 @@ class NodeEdgeBlock(nn.Module):
         # Incorporate y to X
         yx1 = self.y_x_add(y).unsqueeze(1)
         yx2 = self.y_x_mul(y).unsqueeze(1)
+        # prints all the shapes again
+        print(
+            f"""
+        V.shape: {V.shape}
+        yx1.shape: {yx1.shape}
+        yx2.shape: {yx2.shape}
+        weighted_V.shape: {weighted_V.shape}
+        """
+        )
         newX = yx1 + (yx2 + 1) * weighted_V
 
         # Output X
@@ -221,6 +249,16 @@ class NodeEdgeBlock(nn.Module):
         y = self.y_y(y)
         e_y = self.e_y(E)
         x_y = self.x_y(X)
+        # prints all the shapes again
+        print(
+            f"""
+        y.shape: {y.shape}
+        e.shape: {E.shape}
+        x.shape: {X.shape}
+        e_y.shape: {e_y.shape}
+        x_y.shape: {x_y.shape}
+        """
+        )
         new_y = y + x_y + e_y
         new_y = self.y_out(new_y)  # bs, dy
 
@@ -283,7 +321,6 @@ class GraphTransformer(nn.Module):
                 for i in range(n_layers)
             ]
         )
-
         self.mlp_out_X = nn.Sequential(
             nn.Linear(hidden_dims["dx"], hidden_mlp_dims["X"]),
             act_fn_out,
@@ -314,7 +351,7 @@ class GraphTransformer(nn.Module):
         y_to_out = y[..., : self.out_dim_y]
 
         new_E = self.mlp_in_E(E)
-        new_E = (new_E + new_E.transpose(1, 2)) / 2 # make sure E is symmetric
+        new_E = (new_E + new_E.transpose(1, 2)) / 2  # make sure E is symmetric
         after_in = utils.PlaceHolder(
             X=self.mlp_in_X(X), E=new_E, y=self.mlp_in_y(y)
         ).mask(node_mask)
@@ -330,7 +367,6 @@ class GraphTransformer(nn.Module):
         X = X + X_to_out
         E = (E + E_to_out) * diag_mask
         y = y + y_to_out
-
         E = 1 / 2 * (E + torch.transpose(E, 1, 2))
 
         return utils.PlaceHolder(X=X, E=E, y=y).mask(node_mask)

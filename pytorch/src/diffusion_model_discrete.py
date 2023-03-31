@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 import time
+
 # import wandb
 import os
 import ipdb
@@ -17,11 +18,14 @@ from metrics.train_metrics import TrainLossDiscrete
 from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
 from src import utils
 
+
 class WDB:
     def log(*args, **kwargs):
         pass
 
+
 wandb = WDB()
+
 
 class DiscreteDenoisingDiffusion(pl.LightningModule):
     def __init__(
@@ -130,11 +134,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.val_counter = 0
 
     def training_step(self, data, i):
-        
         if data.edge_index.numel() == 0:
             print("Found a batch with no edges. Skipping.")
             return
-        dense_data, node_mask = utils.to_dense( # TODO: check how this function works
+        dense_data, node_mask = utils.to_dense(  # TODO: check how this function works
             data.x, data.edge_index, data.edge_attr, data.batch
         )
         dense_data = dense_data.mask(node_mask)
@@ -642,6 +645,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         X = torch.cat((noisy_data["X_t"], extra_data.X), dim=2).float()
         E = torch.cat((noisy_data["E_t"], extra_data.E), dim=3).float()
         y = torch.hstack((noisy_data["y_t"], extra_data.y)).float()
+        # what is y? y is the target, which is the same as the input in this case
         return self.model(X, E, y, node_mask)
 
     @torch.no_grad()

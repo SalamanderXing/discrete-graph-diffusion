@@ -4,11 +4,14 @@ from torch import Tensor
 import wandb
 import torch.nn as nn
 
+
 class WDB:
     def log(*args, **kwargs):
         pass
 
+
 wandb = WDB()
+
 
 class CEPerClass(Metric):
     full_state_update = False

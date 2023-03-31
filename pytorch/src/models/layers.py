@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import ipdb
 
 
 class Xtoy(nn.Module):
@@ -34,7 +35,19 @@ class Etoy(nn.Module):
         ma = E.max(dim=2)[0].max(dim=1)[0]
         std = torch.std(E, dim=(1, 2))
         z = torch.hstack((m, mi, ma, std))
+        # prints all the shapes
+        print(
+            f"""
+        e: {E.shape}
+        m: {m.shape}
+        mi: {mi.shape}
+        ma: {ma.shape}
+        std: {std.shape}
+        z: {z.shape}
+        """
+        )
         out = self.lin(z)
+
         return out
 
 
