@@ -1,21 +1,25 @@
 from jax import numpy as np
-import jax
+from jax.random import PRNGKeyArray
 from jax import Array
+import jax
 
 
 class DistributionNodes:
-    def __init__(self, histogram):
+    def __init__(self, histogram: Array | dict, rng: PRNGKeyArray):
         """Compute the distribution of the number of nodes in the dataset, and sample from this distribution.
         historgram: dict. The keys are num_nodes, the values are counts
         """
-
+        self.rng = rng
+        prob = np.array([])
         if type(histogram) == dict:
             max_n_nodes = max(histogram.keys())
             prob = np.zeros(max_n_nodes + 1)
             for num_nodes, count in histogram.items():
                 prob = prob.at[num_nodes].set(count)
-        else:
+        elif isinstance(histogram, Array):
             prob = histogram
+        else:
+            raise TypeError("histogram must be a dict or a jax Array")
 
         self.prob = prob / prob.sum()
 

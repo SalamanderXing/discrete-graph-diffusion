@@ -171,6 +171,7 @@ class NodeEdgeBlock(nn.Module):
         # Compute unnormalized attentions. Y is (bs, n, n, n_head, df)
         Y = Q * K
         Y = Y / math.sqrt(Y.size(-1))
+        '''
         print(
             f"""Y: {Y.shape} 
         -- e_mask1: {e_mask1.shape} 
@@ -181,6 +182,7 @@ class NodeEdgeBlock(nn.Module):
             f"""Q: {Q.shape} -- K: {K.shape} 
         X: {X.shape}"""
         )
+        '''
         diffusion_utils.assert_correctly_masked(Y, (e_mask1 * e_mask2).unsqueeze(-1))
 
         E1 = self.e_mul(E) * e_mask1 * e_mask2  # bs, n, n, dx
@@ -197,6 +199,7 @@ class NodeEdgeBlock(nn.Module):
         ye1 = self.y_e_add(y).unsqueeze(1).unsqueeze(1)  # bs, 1, 1, de
         ye2 = self.y_e_mul(y).unsqueeze(1).unsqueeze(1)
         # prints all the shapes again
+        '''
         print(
             f"""newE: {newE.shape}
         -- ye1: {ye1.shape}
@@ -205,7 +208,7 @@ class NodeEdgeBlock(nn.Module):
         -- E2: {E2.shape}
         -- Y: {Y.shape}"""
         )
-
+        '''
         newE = ye1 + (ye2 + 1) * newE
 
         # Output E
@@ -231,6 +234,7 @@ class NodeEdgeBlock(nn.Module):
         yx1 = self.y_x_add(y).unsqueeze(1)
         yx2 = self.y_x_mul(y).unsqueeze(1)
         # prints all the shapes again
+        '''
         print(
             f"""
         V.shape: {V.shape}
@@ -239,6 +243,7 @@ class NodeEdgeBlock(nn.Module):
         weighted_V.shape: {weighted_V.shape}
         """
         )
+        '''
         newX = yx1 + (yx2 + 1) * weighted_V
 
         # Output X
@@ -250,6 +255,7 @@ class NodeEdgeBlock(nn.Module):
         e_y = self.e_y(E)
         x_y = self.x_y(X)
         # prints all the shapes again
+        '''
         print(
             f"""
         y.shape: {y.shape}
@@ -259,6 +265,7 @@ class NodeEdgeBlock(nn.Module):
         x_y.shape: {x_y.shape}
         """
         )
+        '''
         new_y = y + x_y + e_y
         new_y = self.y_out(new_y)  # bs, dy
 

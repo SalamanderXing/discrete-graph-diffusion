@@ -29,7 +29,53 @@
                     ]
                 }
             },
-            "data_loaders": {},
+            "data_loaders": {
+                "qm9": {
+                    "name": "qm9",
+                    "exports": [],
+                    "errors": [
+                        "No exports found in data_loaders.qm9. Consider exporting with 'mate export <module>'"
+                    ],
+                    "dependencies": [
+                        [
+                            "auto_mix_prep",
+                            "0.2.0"
+                        ],
+                        [
+                            "jax",
+                            "0.4.8"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.2"
+                        ],
+                        [
+                            "pandas",
+                            "1.5.2"
+                        ],
+                        [
+                            "pytorch_lightning",
+                            "1.9.0"
+                        ],
+                        [
+                            "rdkit",
+                            "2022.9.5"
+                        ],
+                        [
+                            "torch",
+                            "2.0.0.dev20230122+cu117"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.0"
+                        ],
+                        [
+                            "tqdm",
+                            "4.64.1"
+                        ]
+                    ]
+                }
+            },
             "trainers": {
                 "discrete_diffusion": {
                     "name": "discrete_diffusion",
@@ -40,11 +86,23 @@
                     "dependencies": [
                         [
                             "flax",
-                            "0.6.2"
+                            "0.6.8"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
                         ],
                         [
                             "jax",
-                            "0.4.1"
+                            "0.4.8"
+                        ],
+                        [
+                            "optax",
+                            "0.1.4"
+                        ],
+                        [
+                            "rich",
+                            "13.3.3"
                         ]
                     ]
                 }

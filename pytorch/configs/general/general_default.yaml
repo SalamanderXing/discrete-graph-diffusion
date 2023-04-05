@@ -1,7 +1,7 @@
 # General settings
 name: 'graph-tf-model'      # Warning: 'debug' and 'test' are reserved name that have a special behavior
 
-wandb: 'online'             # online | offline | disabled
+wandb: False             # online | offline | disabled
 gpus: 1                     # Multi-gpu is not implemented on this branch
 
 

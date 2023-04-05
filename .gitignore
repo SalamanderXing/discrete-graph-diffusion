@@ -1,4 +1,4 @@
 pytorch/data/*
-
+pytorch/outputs/*
 .mate/*/venv
 .mate/tmp

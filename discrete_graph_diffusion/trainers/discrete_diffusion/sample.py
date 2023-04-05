@@ -1,17 +1,21 @@
 from jax import numpy as np
 from flax import linen as nn
 from jax import Array
+from jax.random import PRNGKeyArray
 import jax
 from jax import random
+from jax._src.random import PRNGKey
 from jax.scipy.special import logit
 
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .utils import PlaceHolder
-from .distribution_nodes import DistributionNodes
-from .noise_transition import NoiseTransition
+from .distribution_nodes import NodesDistribution
+from .noise_transition import TransitionModel
 
 
-def sample_discrete_features(probX: Array, probE: Array, node_mask: Array, rng_key):
+def sample_discrete_features(
+    *, probX: Array, probE: Array, node_mask: Array, rng_key: PRNGKeyArray
+):
     """Sample features from multinomial distribution with given probabilities (probX, probE, proby)
     :param probX: bs, n, dx_out        node features
     :param probE: bs, n, n, de_out     edge features
@@ -126,10 +130,10 @@ def sample_batch(
     number_chain_steps: int,
     model: nn.Module,
     T: int,
-    node_dist: DistributionNodes,
+    node_dist: NodesDistribution,
     num_nodes=None,
     limit_dist: PlaceHolder | None = None,
-    noise_transition: NoiseTransition,
+    noise_transition: TransitionModel,
     noise_schedule: PredefinedNoiseScheduleDiscrete,
     extra_features: Array,
     domain_features: Array,
@@ -247,7 +251,7 @@ def sample_p_zs_given_zt(
     y_t: Array,
     node_mask: Array,
     noise_schedule: PredefinedNoiseScheduleDiscrete,
-    noise_transition: NoiseTransition,
+    noise_transition: TransitionModel,
     extra_features: Array,
     domain_features: Array,
     Xdim_output: int,

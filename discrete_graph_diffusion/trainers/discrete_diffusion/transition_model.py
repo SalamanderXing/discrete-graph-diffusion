@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from jax import Array
 
 
-class NoiseTransition(ABC):
+class TransitionModel(ABC):
     @abstractmethod
     def get_Qt(self, beta_t: Array) -> PlaceHolder:
         """Returns one-step transition matrices for X and E, from step t - 1 to step t.
@@ -30,7 +30,7 @@ class NoiseTransition(ABC):
     y_classes: int = 0
 
 
-class DiscreteUniformTransition(NoiseTransition):
+class DiscreteUniformTransition(TransitionModel):
     def __init__(self, x_classes: int, e_classes: int, y_classes: int):
         self.X_classes = x_classes
         self.E_classes = e_classes
@@ -49,7 +49,7 @@ class DiscreteUniformTransition(NoiseTransition):
 
     def get_Qt(self, beta_t: Array):
         """Returns one-step transition matrices for X and E, from step t - 1 to step t.
-        Qt = (1 - beta_t) * I + beta_t / K
+        $Q_t = (1 - \beta_t) * I + \beta_t / K$
 
         beta_t: (bs)                         noise level between 0 and 1
         returns: qx (bs, dx, dx), qe (bs, de, de), qy (bs, dy, dy).
@@ -78,7 +78,7 @@ class DiscreteUniformTransition(NoiseTransition):
         return PlaceHolder(x=q_x, e=q_e, y=q_y)
 
 
-class MarginalUniformTransition(NoiseTransition):
+class MarginalUniformTransition(TransitionModel):
     def __init__(self, x_marginals: Array, e_marginals: Array, y_classes: int):
         self.X_classes = len(x_marginals)
         self.E_classes = len(e_marginals)

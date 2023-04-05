@@ -8,14 +8,14 @@ import time
 import os
 import ipdb
 from models.transformer_model import GraphTransformer
+from metrics.train_metrics import TrainLossDiscrete
+from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
 from diffusion.noise_schedule import (
     DiscreteUniformTransition,
     PredefinedNoiseScheduleDiscrete,
     MarginalUniformTransition,
 )
 from src.diffusion import diffusion_utils
-from metrics.train_metrics import TrainLossDiscrete
-from metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
 from src import utils
 
 
@@ -43,7 +43,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         input_dims = dataset_infos.input_dims
         output_dims = dataset_infos.output_dims
         nodes_dist = dataset_infos.nodes_dist
-
         self.cfg = cfg
         self.name = cfg.general.name
         self.model_dtype = torch.float32
@@ -142,8 +141,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         dense_data = dense_data.mask(node_mask)
         X, E = dense_data.X, dense_data.E
-        if i == 0:
-            ipdb.set_trace()
+        # if i == 0:
+        #    ipdb.set_trace()
         noisy_data = self.apply_noise(X, E, data.y, node_mask)
         extra_data = self.compute_extra_data(noisy_data)
         pred = self.forward(noisy_data, extra_data, node_mask)
@@ -425,14 +424,18 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             pred_E=probE,
             node_mask=node_mask,
         )
-
         kl_distance_X = F.kl_div(
-            input=probX.log(), target=limit_dist_X, reduction="none"
+            input=probX,
+            target=limit_dist_X,
+            # log_target=True,
+            reduction="none",
         )
         kl_distance_E = F.kl_div(
-            input=probE.log(), target=limit_dist_E, reduction="none"
+            input=probE,
+            target=limit_dist_E,
+            # log_target=True,
+            reduction="none",
         )
-
         return diffusion_utils.sum_except_batch(
             kl_distance_X
         ) + diffusion_utils.sum_except_batch(kl_distance_E)
@@ -486,13 +489,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             pred_E=prob_pred.E,
             node_mask=node_mask,
         )
-        kl_x = (self.test_X_kl if test else self.val_X_kl)(
-            prob_true.X, torch.log(prob_pred.X)
-        )
-        kl_e = (self.test_E_kl if test else self.val_E_kl)(
-            prob_true.E, torch.log(prob_pred.E)
-        )
-        return self.T * (kl_x + kl_e)
+        to_call = self.test_X_kl if test else self.val_X_kl
+        kl_x = to_call(prob_true.X, prob_pred.X)
+        kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true.E, prob_pred.E)
+        res = self.T * (kl_x + kl_e)
+        return res
 
     def reconstruction_logp(self, t, X, E, node_mask):
         # Compute noise values for t = 0.
@@ -621,7 +622,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         loss_term_0 = self.val_X_logp(X * prob0.X.log()) + self.val_E_logp(
             E * prob0.E.log()
         )
-
         # Combine terms
         nlls = -log_pN + kl_prior + loss_all_t - loss_term_0
         assert len(nlls.shape) == 1, f"{nlls.shape} has more than only batch dim."
@@ -658,7 +658,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         save_final: int,
         num_nodes=None,
     ):
-        ipdb.set_trace()
         """
         :param batch_id: int
         :param batch_size: int

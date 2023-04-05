@@ -264,6 +264,11 @@ class PlaceHolder:
         self.E = E
         self.y = y
 
+    def __str__(self):
+        return f"X: {self.X.shape}, E: {self.E.shape}, y: {self.y.shape}"
+    def __repr__(self):
+        return self.__str__()
+
     def type_as(self, x: torch.Tensor):
         """Changes the device and dtype of X, E, y."""
         self.X = self.X.type_as(x)

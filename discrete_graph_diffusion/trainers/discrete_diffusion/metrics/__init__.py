@@ -1,1 +1,1 @@
-from .abstract import Metric
+from .average_metric import AverageMetric

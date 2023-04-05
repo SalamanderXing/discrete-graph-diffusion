@@ -36,6 +36,7 @@ class Etoy(nn.Module):
         std = torch.std(E, dim=(1, 2))
         z = torch.hstack((m, mi, ma, std))
         # prints all the shapes
+        '''
         print(
             f"""
         e: {E.shape}
@@ -46,6 +47,7 @@ class Etoy(nn.Module):
         z: {z.shape}
         """
         )
+        '''
         out = self.lin(z)
 
         return out

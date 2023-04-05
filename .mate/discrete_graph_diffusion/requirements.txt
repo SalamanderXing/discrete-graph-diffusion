@@ -10,7 +10,7 @@ anyio==3.6.2
 appdirs==1.4.4
 arandr==0.1.11
 archey4==4.14.1.0
-archinstall==2.5.3
+archinstall==2.5.4
 argon2-cffi==21.3.0
 argon2-cffi-bindings==21.2.0
 arrow==1.2.3
@@ -28,7 +28,7 @@ black==23.1.0
 bleach==5.0.1
 blis==0.7.9
 Brlapi==0.8.4
-btrfsutil==6.2.1
+btrfsutil==6.2.2
 build==0.10.0
 cached-property==1.5.2
 cachetools==5.2.0
@@ -124,7 +124,7 @@ installer==0.7.0
 iopath==0.1.8
 ipdb==0.13.9
 ipykernel==6.19.2
-ipython==8.11.0
+ipython==8.12.0
 ipython-genutils==0.2.0
 ipywidgets==7.7.2
 isoduration==20.11.0
@@ -168,7 +168,7 @@ Mako==1.2.4
 Markdown==3.4.1
 markdown-it-py==2.2.0
 MarkupSafe==2.1.2
--e git+https://github.com/SalamanderCrossing/mate@4e9b733376702826e2a9e06398e690502f9e7315#egg=mate
+-e git+https://github.com/SalamanderCrossing/mate@234557f7ac83a3ff3cabe1fe3c2195124674f1b4#egg=mate
 matplotlib==3.7.1
 matplotlib-inline==0.1.6
 mdurl==0.1.2
@@ -259,15 +259,15 @@ pyasn1-modules==0.2.8
 pycairo==1.23.0
 pycocotools==2.0.6
 pycparser==2.21
-pydantic==1.10.6
+pydantic==1.10.7
 pydot==1.4.2
 pyemd==1.0.0
 pyglet==2.0.2.1
 Pygments==2.14.0
-PyGObject==3.42.2
+PyGObject==3.44.1
 PyGSP==0.5.1
 pynauty==2.8.6
-pyOpenSSL==23.0.0
+pyOpenSSL==23.1.0
 pyparsing==3.0.9
 pyperclip==1.8.2
 pyproject_hooks==1.0.0
@@ -378,7 +378,7 @@ ujson==5.7.0
 uri-template==1.2.0
 urllib3==1.26.13
 validate==5.1.0.dev0
-validate-pyproject==0.12.1
+validate-pyproject==0.12.2.post1.dev0+g2940279.d20230328
 validators==0.20.0
 wandb==0.14.0
 wasabi==0.10.1
