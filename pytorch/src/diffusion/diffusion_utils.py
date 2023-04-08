@@ -370,6 +370,7 @@ def posterior_distributions(X, E, y, X_t, E_t, y_t, Qt, Qsb, Qtb):
 def sample_discrete_feature_noise(limit_dist, node_mask):
     """Sample from the limit distribution of the diffusion process"""
     bs, n_max = node_mask.shape
+
     x_limit = limit_dist.X[None, None, :].expand(bs, n_max, -1)
     e_limit = limit_dist.E[None, None, None, :].expand(bs, n_max, n_max, -1)
     y_limit = limit_dist.y[None, :].expand(bs, -1)

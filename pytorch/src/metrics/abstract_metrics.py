@@ -2,6 +2,8 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F
 from torchmetrics import Metric, MeanSquaredError
+import ipdb
+from src import utils
 
 
 class TrainAbstractMetricsDiscrete(torch.nn.Module):
@@ -88,9 +90,8 @@ class SumExceptBatchKL(Metric):
         self.add_state("total_samples", default=torch.tensor(0.0), dist_reduce_fx="sum")
 
     def update(self, p, q) -> None:
-        q = torch.softmax(q, dim=-1)
-        p = torch.softmax(p, dim=-1)
-        uba = F.kl_div(torch.log(q), torch.log(p), log_target=True, reduction="sum")
+        uba = utils.softmax_kl_div(p, q)
+        print("UBA", uba)
         self.total_value += uba
         self.total_samples += p.size(0)
 

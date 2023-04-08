@@ -1,4 +1,4 @@
-from jax.random import PRNGKeyArray
+from jax.random import PRNGKey, PRNGKeyArray
 import jax
 import optax
 import ipdb
@@ -6,94 +6,153 @@ from rich import print
 from jax import Array
 import jax
 from jax import numpy as np
+from flax import linen as nn
+from flax.training.train_state import TrainState
 from dataclasses import dataclass
 
-from .config import Dimensions
 from .transition_model import TransitionModel
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .sample import sample_discrete_features
-from .utils.placeholder import PlaceHolder
-from .metrics.sum_except_batch_kl import SumExceptBatchKL
+from .utils import Graph, NoisyData, softmax_kl_div
 
 
-@dataclass(frozen=True)
-class NoisyData:
-    t_int: Array
-    t: Array
-    beta_t: Array
-    alpha_s_bar: Array
-    alpha_t_bar: Array
-    X_t: Array
-    E_t: Array
-    y_t: Array
-    node_mask: Array
+def reconstruction_logp(
+    *,
+    rng_key: PRNGKeyArray,
+    model: nn.Module,
+    state: TrainState,
+    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    t: int,
+    X: Array,
+    E: Array,
+    node_mask: Array,
+    transition_model: TransitionModel,
+    get_extra_features: Callable[[NoisyData], Graph],
+    get_domain_features: Callable[[NoisyData], Graph],
+):
+    # Compute noise values for t = 0.
+    t_zeros = np.zeros_like(t)
+    beta_0 = noise_schedule(t_zeros)
+    Q0 = transition_model.get_Qt(beta_t=beta_0)
+
+    probX0 = X @ Q0.X  # (bs, n, dx_out)
+    probE0 = np.matmul(E, np.expand_dims(Q0.E, 1))  # (bs, n, n, de_out)
+
+    sampled0 = sample_discrete_features(
+        rng_key=rng_key, probX=probX0, probE=probE0, node_mask=node_mask
+    )
+
+    X0 = np.eye(X.shape[-1])[sampled0.X].astype(np.float32)
+    E0 = np.eye(E.shape[-1])[sampled0.E].astype(np.float32)
+    y0 = sampled0.y
+    assert (X.shape == X0.shape) and (E.shape == E0.shape)
+
+    sampled_0 = Graph(x=X0, e=E0, y=y0, mask=node_mask)
+
+    noisy_data = NoisyData(
+        graph=sampled_0,
+        t=np.zeros((X0.shape[0], 1), dtype=y0.dtype),
+    )
+    extra_data = compute_extra_data(noisy_data, get_extra_features, get_domain_features)
+    # pred0 = model.apply(noisy_data, extra_data, node_mask)
+    # passes the parameters to the model and calls the apply
+    x, e, y = model.apply(state.params, noisy_data, extra_data, node_mask)
+    pred0 = Graph(x=x, e=e, y=y, mask=node_mask)
+
+    # Normalize predictions
+    probX0 = jax.nn.softmax(pred0.X, axis=-1)
+    probE0 = jax.nn.softmax(pred0.E, axis=-1)
+    proby0 = jax.nn.softmax(pred0.y, axis=-1)
+
+    # Set masked rows to arbitrary values that don't contribute to loss
+    probX0 = probX0.at[np.logical_not(node_mask)].set(np.ones(X.shape[-1]))
+    probE0 = probE0.at[
+        np.logical_not(np.expand_dims(node_mask, 1) * np.expand_dims(node_mask, 2))
+    ].set(np.ones(E.shape[-1]))
+
+    diag_mask = np.eye(probE0.shape[1], dtype=bool)
+    diag_mask = np.expand_dims(diag_mask, 0).repeat(probE0.shape[0], axis=0)
+    probE0 = probE0.at[diag_mask].set(np.ones(E.shape[-1]))
+
+    return Graph(x=probX0, e=probE0, y=proby0)
+
+
+from typing import Callable
+
+
+def compute_extra_data(
+    noisy_data: NoisyData,
+    get_extra_features: Callable[[NoisyData], Graph],
+    get_domain_features: Callable[[NoisyData], Graph],
+):
+    """At every training step (after adding noise) and step in sampling, compute extra information and append to
+    the network input."""
+
+    extra_features = get_extra_features(noisy_data)
+    extra_molecular_features = get_domain_features(noisy_data)
+
+    extra_X = np.concatenate((extra_features.x, extra_molecular_features.x), axis=-1)
+    extra_E = np.concatenate((extra_features.e, extra_molecular_features.e), axis=-1)
+    extra_y = np.concatenate((extra_features.y, extra_molecular_features.y), axis=-1)
+
+    t = noisy_data.t
+    extra_y = np.concatenate((extra_y, t), axis=1)
+
+    return Graph(x=extra_X, e=extra_E, y=extra_y)
 
 
 def compute_Lt(
-    X: Array,
-    E: Array,
-    y: Array,
-    pred,
+    *,
+    target: Graph,
+    pred: Graph,
     noisy_data: NoisyData,
-    node_mask: Array,
-    test: bool,
     T: float,
     transition_model: TransitionModel,
-    test_X_kl: SumExceptBatchKL,
-    val_X_kl: SumExceptBatchKL,
-    test_E_kl: SumExceptBatchKL,
-    val_E_kl: SumExceptBatchKL,
-) -> float:
-    pred_probs_X = jax.nn.softmax(pred.X, axis=-1)
-    pred_probs_E = jax.nn.softmax(pred.E, axis=-1)
-    pred_probs_y = jax.nn.softmax(pred.y, axis=-1)
+) -> Array:
+    pred_probs = Graph(
+        x=jax.nn.softmax(pred.x, axis=-1),
+        e=jax.nn.softmax(pred.e, axis=-1),
+        y=jax.nn.softmax(pred.y, axis=-1),
+    )
 
-    Qtb = transition_model.get_Qt_bar(noisy_data.alpha_t_bar)
-    Qsb = transition_model.get_Qt_bar(noisy_data.alpha_s_bar)
+    Qt_bar = transition_model.get_Qt_bar(
+        noisy_data.alpha_t_bar
+    )  # this is the transitin matrix up to time t
+    Qs_bar = transition_model.get_Qt_bar(
+        noisy_data.alpha_s_bar
+    )  # this is the transitin matrix up to time t - 1
     Qt = transition_model.get_Qt(noisy_data.beta_t)
 
     # Compute distributions to compare with KL
-    bs, n, d = X.shape
     prob_true = posterior_distributions(
-        X=X,
-        E=E,
-        y=y,
-        X_t=noisy_data.X_t,
-        E_t=noisy_data.E_t,
-        y_t=noisy_data.y_t,
+        target,
+        noisy_data.graph,
         Qt=Qt,
-        Qsb=Qsb,
-        Qtb=Qtb,
+        Qsb=Qs_bar,
+        Qtb=Qt_bar,
     )
-    prob_true.e = prob_true.e.reshape((bs, n, n, -1))
-    prob_pred = posterior_distributions(
-        X=pred_probs_X,
-        E=pred_probs_E,
-        y=pred_probs_y,
-        X_t=noisy_data.X_t,
-        E_t=noisy_data.E_t,
-        y_t=noisy_data.y_t,
+    prob_pred_unmasked = posterior_distributions(
+        pred_probs,
+        noisy_data.graph,
         Qt=Qt,
-        Qsb=Qsb,
-        Qtb=Qtb,
+        Qsb=Qs_bar,
+        Qtb=Qt_bar,
     )
-    prob_pred.e = prob_pred.e.reshape((bs, n, n, -1))
-
     # Reshape and filter masked rows
     (
-        prob_true_X,
-        prob_true_E,
-        prob_pred.x,
-        prob_pred.e,
+        _,
+        _,
+        prob_pred_x,
+        prob_pred_e,
     ) = mask_distributions(
         true_X=prob_true.x,
         true_E=prob_true.e,
-        pred_X=prob_pred.x,
-        pred_E=prob_pred.e,
-        node_mask=node_mask,
+        pred_X=prob_pred_unmasked.x,
+        pred_E=prob_pred_unmasked.e,
+        node_mask=target.mask,
     )
-    kl_x = (test_X_kl if test else val_X_kl)(prob_true.x, np.log(prob_pred.x))
-    kl_e = (test_E_kl if test else val_E_kl)(prob_true.e, np.log(prob_pred.e))
+    kl_x = softmax_kl_div(prob_true.x, prob_pred_x)
+    kl_e = softmax_kl_div(prob_true.e, prob_pred_e)
     return T * (kl_x + kl_e)
 
 
@@ -123,19 +182,16 @@ def compute_posterior_distribution(
     return prob
 
 
-def posterior_distributions(X, E, y, X_t, E_t, y_t, Qt, Qsb, Qtb):
-    prob_X = compute_posterior_distribution(
-        M=X, M_t=X_t, Qt_M=Qt.X, Qsb_M=Qsb.X, Qtb_M=Qtb.X
-    )  # (bs, n, dx)
-    prob_E = compute_posterior_distribution(
-        M=E, M_t=E_t, Qt_M=Qt.E, Qsb_M=Qsb.E, Qtb_M=Qtb.E
-    )  # (bs, n * n, de)
-
-    return PlaceHolder(x=prob_X, e=prob_E, y=y_t)
-
-
-def sum_except_batch(x: Array):
-    return x.reshape(x.shape[0], -1).sum(axis=-1)
+def posterior_distributions(graph: Graph, graph_t: Graph, Qt, Qsb, Qtb) -> Graph:
+    return Graph(
+        x=compute_posterior_distribution(
+            M=graph.x, M_t=graph_t.x, Qt_M=Qt.X, Qsb_M=Qsb.X, Qtb_M=Qtb.X
+        ),  # (bs, n, dx),
+        e=compute_posterior_distribution(
+            M=graph.e, M_t=graph_t.e, Qt_M=Qt.E, Qsb_M=Qsb.E, Qtb_M=Qtb.E
+        ).reshape((graph.e.shape[0], graph.e.shape[1], graph.e.shape[1], -1)),
+        y=graph_t.y,
+    )
 
 
 def kl_div(p: Array, q: Array, eps: float = 2**-17) -> Array:
@@ -182,63 +238,59 @@ def apply_noise(
     noise_schedule: PredefinedNoiseScheduleDiscrete,
     transition_model: TransitionModel,
     training: bool,
-    output_dims: Dimensions,
 ) -> NoisyData:
     """Sample noise and apply it to the data."""
 
     # Sample a timestep t.
     # When evaluating, the loss for t=0 is computed separately
     lowest_t = 0 if training else 1
-    # the above in jax is:
-    t_int = jax.random.randint(
+    t_int = jax.random.randint(  # sample t_int from U[lowest_t, T]
         rng, (X.shape[0], 1), lowest_t, T + 1
     )  # why as type float?
     s_int = t_int - 1
 
-    t_float = t_int / T
-    s_float = s_int / T
+    t_float = t_int / T  # current normalized timestep
+    s_float = s_int / T  # previous normalized timestep
 
     # beta_t and alpha_s_bar are used for denoising/loss computation
-    beta_t = noise_schedule(t_normalized=t_float)  # (bs, 1)
+    beta_t = noise_schedule(
+        t_normalized=t_float
+    )  # (bs, 1) beta_t is the noise level at t
     alpha_s_bar = noise_schedule.get_alpha_bar(t_normalized=s_float)  # (bs, 1)
     alpha_t_bar = noise_schedule.get_alpha_bar(t_normalized=t_float)  # (bs, 1)
 
-    Qtb = transition_model.get_Qt_bar(
+    Qt_bar = transition_model.get_Qt_bar(
         alpha_t_bar
     )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
-    assert (abs(Qtb.X.sum(dim=2) - 1.0) < 1e-4).all(), Qtb.X.sum(dim=2) - 1
-    assert (abs(Qtb.E.sum(dim=2) - 1.0) < 1e-4).all()
+    assert (abs(Qt_bar.X.sum(dim=2) - 1.0) < 1e-4).all(), Qt_bar.X.sum(dim=2) - 1
+    assert (abs(Qt_bar.E.sum(dim=2) - 1.0) < 1e-4).all()
 
     # Compute transition probabilities
-    probX = X @ Qtb.X  # (bs, n, dx_out)
-    probE = E @ Qtb.E.unsqueeze(1)  # (bs, n, n, de_out)
+    probX = X @ Qt_bar.X  # (bs, n, dx_out)
+    probE = E @ Qt_bar.E.unsqueeze(1)  # (bs, n, n, de_out)
 
-    sampled_t = sample_discrete_features(
+    sampled_graph_t = sample_discrete_features(
         probX=probX, probE=probE, node_mask=node_mask, rng_key=rng
     )
 
-    X_t = jax.nn.one_hot(sampled_t.X, num_classes=output_dims.X)
-    E_t = jax.nn.one_hot(sampled_t.E, num_classes=output_dims.E)
+    X_t = jax.nn.one_hot(sampled_graph_t.X, num_classes=probX.shape[-1])
+    E_t = jax.nn.one_hot(sampled_graph_t.E, num_classes=probE.shape[-1])
     assert (X.shape == X_t.shape) and (E.shape == E_t.shape)
 
-    z_t = PlaceHolder(x=X_t, e=E_t, y=y).type_as(X_t).mask(node_mask)
+    z_t = Graph(x=X_t, e=E_t, y=y, mask=node_mask).type_as(X_t)
 
     return NoisyData(
-        **{
-            "t_int": t_int,
-            "t": t_float,
-            "beta_t": beta_t,
-            "alpha_s_bar": alpha_s_bar,
-            "alpha_t_bar": alpha_t_bar,
-            "X_t": z_t.x,
-            "E_t": z_t.e,
-            "y_t": z_t.y,
-            "node_mask": node_mask,
-        }
+        t_int=t_int,  # t_int is the timestep at the current timestep
+        t=t_float,
+        beta_t=beta_t,
+        alpha_s_bar=alpha_s_bar,  # alpha_s_bar is the alpha value at the previous timestep
+        alpha_t_bar=alpha_t_bar,  # alpha_t_bar is the alpha value at the current timestep
+        graph=z_t,
     )
 
 
 def kl_prior(
+    *,
     X: Array,
     E: Array,
     node_mask: Array,
@@ -246,7 +298,6 @@ def kl_prior(
     noise_schedule,
     transition_model,
     limit_dist,
-    device,
 ) -> Array:
     """Computes the KL between q(z1 | x) and the prior p(z1) = Normal(0, 1).
 
@@ -258,7 +309,7 @@ def kl_prior(
     Ts = T * ones
     alpha_t_bar = noise_schedule.get_alpha_bar(t_int=Ts)  # (bs, 1)
 
-    Qtb = transition_model.get_Qt_bar(alpha_t_bar, device)
+    Qtb = transition_model.get_Qt_bar(alpha_t_bar)
 
     # Compute transition probabilities
     probX = X @ Qtb.X  # (bs, n, dx_out)
@@ -279,7 +330,7 @@ def kl_prior(
         node_mask=node_mask,
     )
 
-    kl_distance_X = kl_div(np.log(probX), limit_dist_X)
-    kl_distance_E = kl_div(np.log(probE), limit_dist_E)
+    kl_distance_X = kl_div(np.log(probX), limit_dist_X).sum(1)
+    kl_distance_E = kl_div(np.log(probE), limit_dist_E).sum(1)
 
-    return sum_except_batch(kl_distance_X) + sum_except_batch(kl_distance_E)
+    return kl_distance_X + kl_distance_E

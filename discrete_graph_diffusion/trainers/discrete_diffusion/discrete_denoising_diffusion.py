@@ -12,13 +12,14 @@ from .metrics import AverageMetric
 from .metrics.sum_except_batch import SumExceptBatchMetric
 from .metrics.sum_except_batch_kl import SumExceptBatchKL
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
-from .noise_transition import (
+from .transition_model import (
     DiscreteUniformTransition,
     MarginalUniformTransition,
     TransitionModel,
 )
+from .diffusion import apply_noise, compute_Lt, kl_prior
 from .config import GeneralConfig, Dimensions
-from .utils.placeholder import PlaceHolder
+from .utils import Graph
 from .utils.geometric import to_dense
 from .sample import sample_discrete_features
 from .diffusion import kl_prior
@@ -26,11 +27,10 @@ from .nodes_distribution import NodesDistribution
 
 
 def compute_val_loss(
-    pred: Array,
+    *,
+    target: Graph,
+    pred: Graph,
     noisy_data: Array,
-    X: Array,
-    E: Array,
-    y: Array,
     node_mask: Array,
     node_dist: NodesDistribution,
     test=False,
@@ -79,8 +79,20 @@ def compute_val_loss(
     return nll
 
 
-def training_step(model: nn.Module, data: Array, i: int):
-    if data.edge_index.numel() == 0:
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class DataBatch:
+    edge_index: Array
+    edge_attr: Array
+    x: Array
+    y: Array
+    batch: Array
+
+
+def training_step(model: nn.Module, data: DataBatch, i: int):
+    if data.edge_index.size == 0:
         print("Found a batch with no edges. Skipping.")
         return
     dense_data, node_mask = to_dense(
@@ -180,7 +192,7 @@ class DiscreteDenoisingDiffusion:
             x_limit = np.ones(self.cfg.dataset.out_dims.X) / self.cfg.dataset.out_dims.X
             e_limit = np.ones(self.cfg.dataset.out_dims.E) / self.cfg.dataset.out_dims.E
             y_limit = np.ones(self.cfg.dataset.out_dims.y) / self.cfg.dataset.out_dims.y
-            self.limit_dist = PlaceHolder(x=x_limit, e=e_limit, y=y_limit)
+            self.limit_dist = Graph(x=x_limit, e=e_limit, y=y_limit)
 
         elif cfg.train.transition == "marginal":
             node_types = self.cfg.dataset.node_types.astype(float)
@@ -196,7 +208,7 @@ class DiscreteDenoisingDiffusion:
                 e_marginals=e_marginals,
                 y_classes=self.cfg.dataset.out_dims.y,
             )
-            self.limit_dist = PlaceHolder(
+            self.limit_dist = Graph(
                 x=x_marginals,
                 e=e_marginals,
                 y=np.ones(self.cfg.dataset.out_dims.y) / self.cfg.dataset.out_dims.y,

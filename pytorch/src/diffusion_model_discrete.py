@@ -424,16 +424,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             pred_E=probE,
             node_mask=node_mask,
         )
-        kl_distance_X = F.kl_div(
-            input=probX,
-            target=limit_dist_X,
-            # log_target=True,
+        kl_distance_X = utils.softmax_kl_div(
+            tensor1=probX,
+            tensor2=limit_dist_X,
             reduction="none",
         )
-        kl_distance_E = F.kl_div(
-            input=probE,
-            target=limit_dist_E,
-            # log_target=True,
+        kl_distance_E = utils.softmax_kl_div(
+            tensor1=probE,
+            tensor2=limit_dist_E,
             reduction="none",
         )
         return diffusion_utils.sum_except_batch(
@@ -507,7 +505,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         sampled0 = diffusion_utils.sample_discrete_features(
             probX=probX0, probE=probE0, node_mask=node_mask
         )
-
+        ipdb.set_trace()
         X0 = F.one_hot(sampled0.X, num_classes=self.Xdim_output).float()
         E0 = F.one_hot(sampled0.E, num_classes=self.Edim_output).float()
         y0 = sampled0.y
@@ -575,7 +573,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         sampled_t = diffusion_utils.sample_discrete_features(
             probX=probX, probE=probE, node_mask=node_mask
         )
-
+        ipdb.set_trace()
         X_t = F.one_hot(sampled_t.X, num_classes=self.Xdim_output)
         E_t = F.one_hot(sampled_t.E, num_classes=self.Edim_output)
         assert (X.shape == X_t.shape) and (E.shape == E_t.shape)
@@ -611,7 +609,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
         kl_prior = self.kl_prior(X, E, node_mask)
-
+        ipdb.set_trace()
         # 3. Diffusion loss
         loss_all_t = self.compute_Lt(X, E, y, pred, noisy_data, node_mask, test)
 

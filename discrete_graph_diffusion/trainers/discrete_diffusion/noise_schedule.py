@@ -37,7 +37,7 @@ def custom_beta_schedule_discrete(timesteps, average_num_nodes=50, s=0.008):
 
 
 class PredefinedNoiseScheduleDiscrete:
-    def __init__(self, noise_schedule, timesteps):
+    def __init__(self, noise_schedule: str, timesteps: int):
         self.timesteps = timesteps
 
         if noise_schedule == "cosine":
@@ -55,11 +55,15 @@ class PredefinedNoiseScheduleDiscrete:
         self.alphas_bar = np.exp(log_alpha_bar)
 
     def __call__(self, t_normalized=None, t_int=None):
-        assert int(t_normalized is None) + int(t_int is None) == 1
-        t_int = t_int if t_int is not None else np.round(t_normalized * self.timesteps)
+        """Get the beta value at timestep t."""
+        if t_int is None:
+            assert t_normalized is not None
+            t_int = np.round(t_normalized * self.timesteps)
         return self.betas[np.array(t_int, dtype=np.int32)]
 
     def get_alpha_bar(self, t_normalized=None, t_int=None):
-        assert int(t_normalized is None) + int(t_int is None) == 1
-        t_int = t_int if t_int is not None else np.round(t_normalized * self.timesteps)
-        return self.alphas_bar[np.array(t_int, dtype=np.int32)]
+        """Get the cumulative product of alphas up to timestep t."""
+        if t_int is None:
+            assert t_normalized is not None
+            t_int = np.round(t_normalized * self.timesteps)
+        return self.alphas_bar[t_int]

@@ -1,41 +1,57 @@
+from . import utils
 import torch
 import pytorch_lightning as pl
 from torch_geometric.loader import DataLoader
-from jax import Array
-from jax import numpy as np
-from typing import Iterable
-from . import utils
+from .distribution_nodes import DistributionNodes
 
 
-class AbstractDataModule:
-    def __init__(self, cfg):
+class AbstractDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        train_batch_size: int,
+        val_batch_size: int,
+        test_batch_size: int,
+        num_workers: int,
+    ):
         super().__init__()
-        self.cfg = cfg
-        self.dataloaders = dict()
+        self.train_batch_size = train_batch_size
+        self.val_batch_size = val_batch_size
+        self.test_batch_size = test_batch_size
+        self.num_workers = num_workers
+        self.dataloaders = {}
         self.input_dims = -1
         self.output_dims = -1
-        self.train: Iterable = []
-        self.val: Iterable = []
-        self.test: Iterable = []
 
     def prepare_data(self, datasets) -> None:
-        batch_size = self.cfg.train.batch_size
-        num_workers = self.cfg.train.num_workers
+        batch_size = self.train_batch_size
+        num_workers = self.num_workers
         self.dataloaders = {
             split: DataLoader(
                 dataset,
                 batch_size=batch_size,
                 num_workers=num_workers,
-                shuffle="debug" not in self.cfg.general.name,
+                shuffle=True,
             )
             for split, dataset in datasets.items()
         }
+
+    def train_dataloader(self):
+        return self.dataloaders["train"]
+
+    def val_dataloader(self):
+        return self.dataloaders["val"]
+
+    def test_dataloader(self):
+        return self.dataloaders["test"]
+
+    def __getitem__(self, idx):
+        return self.dataloaders["train"][idx]
 
     def node_counts(self, max_nodes_possible=300):
         all_counts = torch.zeros(max_nodes_possible)
         for split in ["train", "val", "test"]:
             for i, data in enumerate(self.dataloaders[split]):
-                unique, counts = torch.unique(data.batch, return_counts=True)
+                _, counts = torch.unique(data.batch, return_counts=True)
                 for count in counts:
                     all_counts[count] += 1
         max_index = max(all_counts.nonzero())
@@ -44,7 +60,7 @@ class AbstractDataModule:
         return all_counts
 
     def node_types(self):
-        num_classes = -1
+        num_classes = None
         for data in self.dataloaders["train"]:
             num_classes = data.x.shape[1]
             break
@@ -58,15 +74,15 @@ class AbstractDataModule:
         return counts
 
     def edge_counts(self):
-        num_classes = -1
+        num_classes = None
         for data in self.dataloaders["train"]:
             num_classes = data.edge_attr.shape[1]
             break
 
         d = torch.zeros(num_classes, dtype=torch.float)
 
-        for data in self.dataloaders["train"]:
-            _, counts = torch.unique(data.batch, return_counts=True)
+        for i, data in enumerate(self.dataloaders["train"]):
+            unique, counts = torch.unique(data.batch, return_counts=True)
 
             all_pairs = 0
             for count in counts:
@@ -106,58 +122,45 @@ class MolecularDataModule(AbstractDataModule):
         return valencies
 
 
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class Dim:
-    x: int
-    e: int
-    y: int
-
-
 class AbstractDatasetInfos:
     def complete_infos(self, n_nodes, node_types):
-        self.input_dims: Dim = Dim(0, 0, 0)
-        self.output_dims = Dim(0, 0, 0)
+        self.input_dims = None
+        self.output_dims = None
         self.num_classes = len(node_types)
         self.max_n_nodes = len(n_nodes) - 1
-        self.nodes_dist: dict | Array = np.zeros(n_nodes)
+        self.nodes_dist = DistributionNodes(n_nodes)
 
-    @classmethod
-    def compute_input_output_dims(
-        cls, datamodule: AbstractDataModule, extra_features, domain_features
-    ):
-        example_batch = next(iter(datamodule.train))
+    def compute_input_output_dims(self, datamodule, extra_features, domain_features):
+        example_batch = next(iter(datamodule.train_dataloader()))
         ex_dense, node_mask = utils.to_dense(
             example_batch.x,
             example_batch.edge_index,
             example_batch.edge_attr,
             example_batch.batch,
         )
-        example_data = utils.Graph(
-            x=ex_dense.x,
-            e=ex_dense.e,
-            y=example_batch.y,
-            mask=node_mask,
-        )
+        example_data = {
+            "X_t": ex_dense.X,
+            "E_t": ex_dense.E,
+            "y_t": example_batch["y"],
+            "node_mask": node_mask,
+        }
 
-        input_dims = utils.Graph(
-            x=example_batch["x"].size(1),
-            e=example_batch["edge_attr"].size(1),
-            y=example_batch["y"].size(1) + 1,
-        )  # + 1 due to time conditioning
+        self.input_dims = {
+            "X": example_batch["x"].size(1),
+            "E": example_batch["edge_attr"].size(1),
+            "y": example_batch["y"].size(1) + 1,
+        }  # + 1 due to time conditioning
         ex_extra_feat = extra_features(example_data)
-        input_dims["X"] += ex_extra_feat.X.size(-1)
-        input_dims["E"] += ex_extra_feat.E.size(-1)
-        input_dims["y"] += ex_extra_feat.y.size(-1)
+        self.input_dims["X"] += ex_extra_feat.X.size(-1)
+        self.input_dims["E"] += ex_extra_feat.E.size(-1)
+        self.input_dims["y"] += ex_extra_feat.y.size(-1)
 
         ex_extra_molecular_feat = domain_features(example_data)
-        input_dims["X"] += ex_extra_molecular_feat.X.size(-1)
-        input_dims["E"] += ex_extra_molecular_feat.E.size(-1)
-        input_dims["y"] += ex_extra_molecular_feat.y.size(-1)
+        self.input_dims["X"] += ex_extra_molecular_feat.X.size(-1)
+        self.input_dims["E"] += ex_extra_molecular_feat.E.size(-1)
+        self.input_dims["y"] += ex_extra_molecular_feat.y.size(-1)
 
-        output_dims = {
+        self.output_dims = {
             "X": example_batch["x"].size(1),
             "E": example_batch["edge_attr"].size(1),
             "y": 0,

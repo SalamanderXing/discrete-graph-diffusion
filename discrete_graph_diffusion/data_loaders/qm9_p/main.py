@@ -13,13 +13,13 @@ import pandas as pd
 from torch_geometric.data import Data, InMemoryDataset, download_url, extract_zip
 from torch_geometric.utils import subgraph
 
-import src.utils as utils
-from .abstract import MolecularDataModule, AbstractDatasetInfos
+from .abstract_dataset import MolecularDataModule, AbstractDatasetInfos
 from .analyses import (
     mol2smiles,
     build_molecule_with_partial_charges,
     compute_molecular_metrics,
 )
+from . import utils
 
 
 def files_exist(files) -> bool:
@@ -110,6 +110,8 @@ class QM9Dataset(InMemoryDataset):
         Download raw qm9 files. Taken from PyG QM9 class
         """
         try:
+            import rdkit  # noqa
+
             file_path = download_url(self.raw_url, self.raw_dir)
             extract_zip(file_path, self.raw_dir)
             os.unlink(file_path)
@@ -213,14 +215,27 @@ class QM9Dataset(InMemoryDataset):
 
 
 class QM9DataModule(MolecularDataModule):
-    def __init__(self, cfg):
-        self.datadir = cfg.dataset.datadir
-        super().__init__(cfg)
-        self.remove_h = cfg.dataset.remove_h
+    def __init__(
+        self,
+        datadir: str,
+        remove_h: bool,
+        # target_prop: str,
+        train_batch_size: int,
+        val_batch_size: int,
+        test_batch_size: int,
+        num_workers: int = 4,
+        guidance_target: str | None = None,
+        regressor: str | None = None,
+    ):
+        self.guidance_target = guidance_target
+        self.datadir = datadir
+        self.regressor = regressor
+        super().__init__(train_batch_size, val_batch_size, test_batch_size, num_workers)
+        self.remove_h = remove_h
 
     def prepare_data(self) -> None:
-        target = getattr(self.cfg.general, "guidance_target", None)
-        regressor = getattr(self, "regressor", None)
+        target = self.guidance_target
+        regressor = self.regressor
         if regressor and target == "mu":
             transform = SelectMuTransform()
         elif regressor and target == "homo":
@@ -236,21 +251,21 @@ class QM9DataModule(MolecularDataModule):
             "train": QM9Dataset(
                 stage="train",
                 root=root_path,
-                remove_h=self.cfg.dataset.remove_h,
+                remove_h=self.remove_h,
                 target_prop=target,
                 transform=RemoveYTransform(),
             ),
             "val": QM9Dataset(
                 stage="val",
                 root=root_path,
-                remove_h=self.cfg.dataset.remove_h,
+                remove_h=self.remove_h,
                 target_prop=target,
                 transform=RemoveYTransform(),
             ),
             "test": QM9Dataset(
                 stage="test",
                 root=root_path,
-                remove_h=self.cfg.dataset.remove_h,
+                remove_h=self.remove_h,
                 target_prop=target,
                 transform=transform,
             ),
@@ -258,9 +273,9 @@ class QM9DataModule(MolecularDataModule):
         super().prepare_data(datasets)
 
 
-class QM9infos(AbstractDatasetInfos):
-    def __init__(self, datamodule, cfg, recompute_statistics=False):
-        self.remove_h = cfg.dataset.remove_h
+class QM9Infos(AbstractDatasetInfos):
+    def __init__(self, datamodule, remove_h: bool, recompute_statistics: bool = False):
+        self.remove_h = remove_h
         self.need_to_strip = (
             False  # to indicate whether we need to ignore one output from the model
         )
@@ -370,13 +385,18 @@ class QM9infos(AbstractDatasetInfos):
             assert False
 
 
-def get_train_smiles(cfg, train_dataloader, dataset_infos, evaluate_dataset=False):
+def get_train_smiles(
+    data_dir: str,
+    remove_h: bool,
+    train_dataloader,
+    dataset_infos,
+    evaluate_dataset=False,
+):
     if evaluate_dataset:
         assert (
             dataset_infos is not None
         ), "If wanting to evaluate dataset, need to pass dataset_infos"
-    datadir = cfg.dataset.datadir
-    remove_h = cfg.dataset.remove_h
+    datadir = data_dir
     atom_decoder = dataset_infos.atom_decoder
     root_dir = pathlib.Path(os.path.realpath(__file__)).parents[2]
     smiles_file_name = "train_smiles_no_h.npy" if remove_h else "train_smiles_h.npy"
