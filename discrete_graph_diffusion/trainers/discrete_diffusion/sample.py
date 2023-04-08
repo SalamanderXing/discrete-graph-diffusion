@@ -8,9 +8,9 @@ from jax._src.random import PRNGKey
 from jax.scipy.special import logit
 
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
-from .utils import PlaceHolder
-from .distribution_nodes import NodesDistribution
-from .noise_transition import TransitionModel
+from .utils import Graph 
+from .nodes_distribution import NodesDistribution
+from .transition_model import TransitionModel
 
 
 def sample_discrete_features(
@@ -51,7 +51,7 @@ def sample_discrete_features(
     E_t = np.triu(E_t, k=1)
     E_t = E_t + np.transpose(E_t, (0, 2, 1))
 
-    return PlaceHolder(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
+    return Graph(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
 
 
 def compute_batched_over0_posterior_distribution(X_t, Qt, Qsb, Qtb):
@@ -120,7 +120,7 @@ def sample_discrete_feature_noise(*, limit_dist, node_mask):
 
     assert np.all(U_E == np.transpose(U_E, (0, 2, 1, 3)))
 
-    return PlaceHolder(x=U_X, e=U_E, y=U_y).mask(node_mask)
+    return Graph(x=U_X, e=U_E, y=U_y).mask(node_mask)
 
 
 def sample_batch(
@@ -132,7 +132,7 @@ def sample_batch(
     T: int,
     node_dist: NodesDistribution,
     num_nodes=None,
-    limit_dist: PlaceHolder | None = None,
+    limit_dist: Graph | None = None,
     noise_transition: TransitionModel,
     noise_schedule: PredefinedNoiseScheduleDiscrete,
     extra_features: Array,
@@ -325,8 +325,8 @@ def sample_p_zs_given_zt(
     assert (E_s == np.swapaxes(E_s, 1, 2)).all()
     assert (X_t.shape == X_s.shape) and (E_t.shape == E_s.shape)
 
-    out_one_hot = PlaceHolder(x=X_s, e=E_s, y=np.zeros(y_t.shape[0], 0))
-    out_discrete = PlaceHolder(x=X_s, e=E_s, y=np.zeros(y_t.shape[0], 0))
+    out_one_hot = Graph(x=X_s, e=E_s, y=np.zeros(y_t.shape[0], 0))
+    out_discrete = Graph(x=X_s, e=E_s, y=np.zeros(y_t.shape[0], 0))
 
     return out_one_hot.mask(node_mask).type_as(y_t), out_discrete.mask(
         node_mask, collapse=True
@@ -347,7 +347,7 @@ def compute_extra_data(*, noisy_data: dict, extra_features, domain_features):
     t = noisy_data["t"]
     extra_y = np.concatenate((extra_y, t), axis=1)
 
-    return PlaceHolder(x=extra_X, e=extra_E, y=extra_y)
+    return Graph(x=extra_X, e=extra_E, y=extra_y)
 
 
 '''

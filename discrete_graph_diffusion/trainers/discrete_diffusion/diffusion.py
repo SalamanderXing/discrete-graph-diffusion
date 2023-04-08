@@ -1,3 +1,4 @@
+from typing import Callable
 from jax.random import PRNGKey, PRNGKeyArray
 import jax
 import optax

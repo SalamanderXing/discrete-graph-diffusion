@@ -223,7 +223,7 @@ class QM9DataModule(MolecularDataModule):
         train_batch_size: int,
         val_batch_size: int,
         test_batch_size: int,
-        num_workers: int = 4,
+        num_workers: int = 0,
         guidance_target: str | None = None,
         regressor: str | None = None,
     ):

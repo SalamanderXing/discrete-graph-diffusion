@@ -6,11 +6,15 @@ import jax
 import optax
 import ipdb
 from rich import print
+from typing import Iterable
+from dataclasses import dataclass
+from typing import FrozenSet
+from flax.core.frozen_dict import FrozenDict
 
-from .train_loss import TrainLossDiscrete
-from .metrics import AverageMetric
-from .metrics.sum_except_batch import SumExceptBatchMetric
-from .metrics.sum_except_batch_kl import SumExceptBatchKL
+# from .train_loss import TrainLossDiscrete
+# from .metrics import AverageMetric
+# from .metrics.sum_except_batch import SumExceptBatchMetric
+# from .metrics.sum_except_batch_kl import SumExceptBatchKL
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .transition_model import (
     DiscreteUniformTransition,
@@ -26,6 +30,20 @@ from .diffusion import kl_prior
 from .nodes_distribution import NodesDistribution
 
 
+@dataclass(frozen=True)
+class DataBatch:
+    edge_index: Array
+    edge_attr: Array
+    x: Array
+    y: Array
+    batch: Array
+
+
+class Logger:
+    def add_scalar(self, name: str, val: float | int, epoch: int):
+        print(f"{name} {val} {epoch}")
+
+
 def compute_val_loss(
     *,
     target: Graph,
@@ -34,6 +52,7 @@ def compute_val_loss(
     node_mask: Array,
     node_dist: NodesDistribution,
     test=False,
+    state: FrozenDict,
 ):
     """Computes an estimator for the variational lower bound.
     pred: (batch_size, n, total_features)
@@ -79,19 +98,7 @@ def compute_val_loss(
     return nll
 
 
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class DataBatch:
-    edge_index: Array
-    edge_attr: Array
-    x: Array
-    y: Array
-    batch: Array
-
-
-def training_step(model: nn.Module, data: DataBatch, i: int):
+def training_step(*, model: nn.Module, data: DataBatch, i: int, state: FrozenDict):
     if data.edge_index.size == 0:
         print("Found a batch with no edges. Skipping.")
         return
@@ -125,21 +132,49 @@ def training_step(model: nn.Module, data: DataBatch, i: int):
     return {"loss": loss}
 
 
-def train_model(train_loader, val_loader, num_epochs=200):
+def init_optimizer():
+    return
+
+
+def train_model(
+    *,
+    model: nn.Module,
+    train_loader,
+    val_loader,
+    num_epochs=1,
+    rngs: dict[str, PRNGKeyArray],
+    lr: float,
+):
+    optimizer = optax.adam(lr)
+
     # Train model for defined number of epochs
     # We first need to create optimizer and the scheduler for the given number of epochs
+    logger = Logger()
     optimizer = init_optimizer(num_epochs, len(train_loader))
     # Track best eval accuracy
     best_eval = 0.0
     for epoch_idx in tqdm(range(1, num_epochs + 1)):
-        training_step(train_loader, epoch=epoch_idx)
+        train_loss, state = training_epoch(
+            model, train_loader, epoch=epoch_idx, state=state
+        )
         if epoch_idx % 2 == 0:
-            eval_acc = self.eval_model(val_loader)
-            self.logger.add_scalar("val/acc", eval_acc, global_step=epoch_idx)
+            eval_acc = eval_model(val_loader)
+            logger.add_scalar("val/acc", eval_acc, global_step=epoch_idx)
             if eval_acc >= best_eval:
                 best_eval = eval_acc
-                self.save_model(step=epoch_idx)
-            self.logger.flush()
+                # save_model(step=epoch_idx)
+            # self.logger.flush()
+
+
+def pytorch_geometric_databatch_to_jax(pytorch_geometric_databatch):
+    ipdb.set_trace()
+    return
+
+
+def training_epoch(model: nn.Module, train_loader, epoch: int, state: FrozenDict):
+    for batch in train_loader:
+        batch = pytorch_geometric_databatch_to_jax(pytorch_geometric_databatch_to_jax)
+        training_step()
 
 
 def validation_step(model: nn.Module, data: Array, i: int):
@@ -156,6 +191,7 @@ def validation_step(model: nn.Module, data: Array, i: int):
     return {"loss": nll}
 
 
+"""
 class DiscreteDenoisingDiffusion:
     def __init__(
         self,
@@ -223,9 +259,6 @@ class DiscreteDenoisingDiffusion:
         self.best_val_nll = 1e8
         self.val_counter = 0
 
-    def init_optimizer(self):
-        return optax.adam(self.cfg.train.learning_rate)
-
     def on_validation_epoch_start(self) -> None:
         self.val_nll.reset()
         self.val_X_kl.reset()
@@ -233,3 +266,4 @@ class DiscreteDenoisingDiffusion:
         self.val_X_logp.reset()
         self.val_E_logp.reset()
         self.sampling_metrics.reset()
+"""
