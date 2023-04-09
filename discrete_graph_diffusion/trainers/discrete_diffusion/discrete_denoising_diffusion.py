@@ -1,4 +1,6 @@
 from jax import numpy as np
+from flax.training.train_state import TrainState
+from jax import jit
 import flax.linen as nn
 from jax import Array
 from jax.random import PRNGKeyArray
@@ -22,7 +24,7 @@ from .transition_model import (
     TransitionModel,
 )
 from .diffusion import apply_noise, compute_Lt, kl_prior
-from .config import GeneralConfig, Dimensions
+from .config import TrainingConfig 
 from .utils import Graph
 from .utils.geometric import to_dense
 from .sample import sample_discrete_features
@@ -98,7 +100,7 @@ def compute_val_loss(
     return nll
 
 
-def training_step(*, model: nn.Module, data: DataBatch, i: int, state: FrozenDict):
+def training_step(*, model: nn.Module, data: DataBatch, i: int, state: TrainState):
     if data.edge_index.size == 0:
         print("Found a batch with no edges. Skipping.")
         return
@@ -132,38 +134,48 @@ def training_step(*, model: nn.Module, data: DataBatch, i: int, state: FrozenDic
     return {"loss": loss}
 
 
-def init_optimizer():
-    return
+@jit
+def apply_model(state: TrainState, images, labels):
+    """Computes gradients, loss and accuracy for a single batch."""
+
+    def loss_fn(params):
+        logits = state.apply_fn({"params": params}, images)
+        one_hot = jax.nn.one_hot(labels, 10)
+        loss = np.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
+        return loss, logits
+
+    grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
+    (loss, logits), grads = grad_fn(state.params)
+    accuracy = np.mean(np.argmax(logits, -1) == labels)
+    return grads, loss, accuracy
 
 
 def train_model(
     *,
     model: nn.Module,
     train_loader,
+    params: FrozenDict,
     val_loader,
     num_epochs=1,
     rngs: dict[str, PRNGKeyArray],
     lr: float,
+    config:TrainingConfig
 ):
     optimizer = optax.adam(lr)
-
-    # Train model for defined number of epochs
+    train_state = TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
+    # aaaaaaaaaa Train model for defined number of epochs
     # We first need to create optimizer and the scheduler for the given number of epochs
     logger = Logger()
-    optimizer = init_optimizer(num_epochs, len(train_loader))
     # Track best eval accuracy
-    best_eval = 0.0
     for epoch_idx in tqdm(range(1, num_epochs + 1)):
-        train_loss, state = training_epoch(
-            model, train_loader, epoch=epoch_idx, state=state
+        rng, input_rng = jax.random.split(rng)
+        state, train_loss = training_epoch(
+            state=state, train_dataloader=train_dataloader, batch_size=batch_size, input_rng=input_rng
         )
-        if epoch_idx % 2 == 0:
-            eval_acc = eval_model(val_loader)
-            logger.add_scalar("val/acc", eval_acc, global_step=epoch_idx)
-            if eval_acc >= best_eval:
-                best_eval = eval_acc
-                # save_model(step=epoch_idx)
-            # self.logger.flush()
+        _, test_loss = apply_model(
+            state, test_dataloader
+        )
+
 
 
 def pytorch_geometric_databatch_to_jax(pytorch_geometric_databatch):
@@ -171,10 +183,10 @@ def pytorch_geometric_databatch_to_jax(pytorch_geometric_databatch):
     return
 
 
-def training_epoch(model: nn.Module, train_loader, epoch: int, state: FrozenDict):
+def training_epoch(model: nn.Module, train_loader, epoch: int, state: TrainState):
     for batch in train_loader:
         batch = pytorch_geometric_databatch_to_jax(pytorch_geometric_databatch_to_jax)
-        training_step()
+        training_step(model=model, data=batch, i=epoch, state=state)
 
 
 def validation_step(model: nn.Module, data: Array, i: int):

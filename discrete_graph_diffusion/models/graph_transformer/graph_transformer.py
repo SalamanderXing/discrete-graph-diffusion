@@ -5,55 +5,7 @@ import ipdb
 
 from .xey_transformer_layer import XEYTransformerLayer
 from .utils import PlaceHolder, assert_correctly_masked
-from dataclasses import dataclass
-from dacite import from_dict
-
-
-@dataclass(frozen=True)
-class InputDims:
-    X: int
-    E: int
-    y: int
-
-
-@dataclass(frozen=True)
-class OutputDims:
-    X: int
-    E: int
-    y: int
-
-
-@dataclass(frozen=True)
-class HiddenMLPDims:
-    X: int
-    E: int
-    y: int
-
-
-@dataclass(frozen=True)
-class HiddenDims:
-    dx: int
-    de: int
-    dy: int
-    n_head: int
-    dim_ffX: int
-    dim_ffE: int
-    dim_ffy: int
-
-
-@dataclass(frozen=True)
-class GraphTransformerConfig:
-    n_layers: int
-    input_dims: InputDims
-    hidden_mlp_dims: HiddenMLPDims
-    hidden_dims: HiddenDims
-    output_dims: OutputDims
-
-    # has a custom init method that creates a config object from a dictionary
-    @classmethod
-    def from_dict(cls, config_dict):
-        return from_dict(cls, config_dict)
-
+from .config import GraphTransformerConfig
 
 class GraphTransformer(nn.Module):
     """
