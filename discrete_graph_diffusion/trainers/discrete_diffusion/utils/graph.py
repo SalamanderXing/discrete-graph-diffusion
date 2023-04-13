@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from jax import Array
 from jax import numpy as np
+import ipdb
 
 
 @dataclass(frozen=True)
@@ -12,12 +13,18 @@ class Graph:
     collapse: bool = False
 
     def __post_init__(self):
-        assert self.x.shape[0] == self.e.shape[0] == self.y.shape[0]
-        assert self.x.shape[1] == self.e.shape[1] == self.e.shape[2]
-        assert self.x.shape[2] == self.y.shape[1]
-        if self.mask is not None:
-            assert self.mask.shape[0] == self.x.shape[0]
-            assert self.mask.shape[1] == self.x.shape[1]
+        '''
+        assert (
+            self.x.shape[0] == self.e.shape[0] == self.y.shape[0]
+        ), f"{self.x.shape}, {self.e.shape}, {self.y.shape}"
+        assert (
+            self.x.shape[1] == self.e.shape[1] == self.e.shape[2]
+        ), (f"{self.x.shape}, {self.e.shape}, {self.y.shape}", ipdb.set_trace())
+        # assert self.x.shape[2] == self.y.shape[1], (f"{self.x.shape}, {self.y.shape}", ipdb.set_trace())
+        '''
+        if self.mask.shape != (1, 1):
+            assert self.mask.shape[0] == self.x.shape[0], ipdb.set_trace()
+            assert self.mask.shape[1] == self.x.shape[1], ipdb.set_trace()
             self.__mask(self.mask)
         else:
             object.__setattr__(self, "mask", np.ones(self.x.shape[:2], dtype=bool))

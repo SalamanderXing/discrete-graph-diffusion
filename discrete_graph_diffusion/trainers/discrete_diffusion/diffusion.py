@@ -230,9 +230,10 @@ def mask_distributions(
 
 
 def apply_noise(
+    *,
     rng: PRNGKeyArray,
-    X: Array,
-    E: Array,
+    x: Array,
+    e: Array,
     y: Array,
     node_mask: Array,
     T: int,
@@ -246,7 +247,7 @@ def apply_noise(
     # When evaluating, the loss for t=0 is computed separately
     lowest_t = 0 if training else 1
     t_int = jax.random.randint(  # sample t_int from U[lowest_t, T]
-        rng, (X.shape[0], 1), lowest_t, T + 1
+        rng, (x.shape[0], 1), lowest_t, T + 1
     )  # why as type float?
     s_int = t_int - 1
 
@@ -263,20 +264,19 @@ def apply_noise(
     Qt_bar = transition_model.get_Qt_bar(
         alpha_t_bar
     )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
-    assert (abs(Qt_bar.X.sum(dim=2) - 1.0) < 1e-4).all(), Qt_bar.X.sum(dim=2) - 1
-    assert (abs(Qt_bar.E.sum(dim=2) - 1.0) < 1e-4).all()
-
+    assert (abs(Qt_bar.x.sum(axis=2) - 1.0) < 1e-4).all(), Qt_bar.x.sum(axis=2) - 1
+    assert (abs(Qt_bar.e.sum(axis=2) - 1.0) < 1e-4).all()
     # Compute transition probabilities
-    probX = X @ Qt_bar.X  # (bs, n, dx_out)
-    probE = E @ Qt_bar.E.unsqueeze(1)  # (bs, n, n, de_out)
+    probX = x @ Qt_bar.x  # (bs, n, dx_out)
+    probE = e @ Qt_bar.e[:, None]  # (bs, n, n, de_out)
 
     sampled_graph_t = sample_discrete_features(
         probX=probX, probE=probE, node_mask=node_mask, rng_key=rng
     )
 
-    X_t = jax.nn.one_hot(sampled_graph_t.X, num_classes=probX.shape[-1])
-    E_t = jax.nn.one_hot(sampled_graph_t.E, num_classes=probE.shape[-1])
-    assert (X.shape == X_t.shape) and (E.shape == E_t.shape)
+    X_t = jax.nn.one_hot(sampled_graph_t.x, num_classes=probX.shape[-1])
+    E_t = jax.nn.one_hot(sampled_graph_t.e, num_classes=probE.shape[-1])
+    assert (x.shape == X_t.shape) and (e.shape == E_t.shape)
 
     z_t = Graph(x=X_t, e=E_t, y=y, mask=node_mask).type_as(X_t)
 

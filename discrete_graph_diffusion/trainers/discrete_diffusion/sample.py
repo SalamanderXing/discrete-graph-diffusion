@@ -6,9 +6,9 @@ import jax
 from jax import random
 from jax._src.random import PRNGKey
 from jax.scipy.special import logit
-
+import ipdb
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
-from .utils import Graph 
+from .utils import Graph
 from .nodes_distribution import NodesDistribution
 from .transition_model import TransitionModel
 
@@ -24,7 +24,7 @@ def sample_discrete_features(
     bs, n, _ = probX.shape
     # Noise X
     # The masked rows should define probability distributions as well
-    probX = np.where(~node_mask, 1 / probX.shape[-1], probX)
+    probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
 
     # Flatten the probability tensor to sample with categorical distribution
     probX = probX.reshape(bs * n, -1)  # (bs * n, dx_out)
@@ -36,11 +36,10 @@ def sample_discrete_features(
 
     # Noise E
     # The masked rows should define probability distributions as well
-    inverse_edge_mask = ~(node_mask[:, None] * node_mask[:, None, :])
-    diag_mask = np.eye(n)[None]
-
-    probE = np.where(inverse_edge_mask, 1 / probE.shape[-1], probE)
-    probE = np.where(diag_mask, 1 / probE.shape[-1], probE)
+    inverse_edge_mask = ~(node_mask[:, None] * node_mask[:, :, None])
+    diag_mask = np.eye(n)[None].astype(bool).repeat(bs, axis=0)
+    probE = probE.at[inverse_edge_mask].set(1 / probE.shape[-1])
+    probE = probE.at[diag_mask].set(1 / probE.shape[-1])
 
     probE = probE.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
 

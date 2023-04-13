@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from jax import Array
-
+from typing import Any
 from dacite import from_dict
+
 
 @dataclass(frozen=True)
 class Dimensions:
@@ -12,24 +13,20 @@ class Dimensions:
 
 @dataclass(frozen=True)
 class DatasetInfos:
-    in_dims: Dimensions
-    out_dims: Dimensions
+    remove_h: bool
+    need_to_strip: bool
+    atom_encoder: dict[str, int]
+    valencies: list[int]
+    atom_weights: dict[int, int]
+    max_n_nodes: int
+    max_weight: int
+    n_nodes: Array
     node_types: Array
     edge_types: Array
-class DatasetInfos:
-    remove_h: bool
-    need_to_strip:bool
-    atom_encoder:dict[str, int]
-    valencies:list[int]
-    atom_weights:dict[str, float]
-    max_n_nodes:int
-    max_weight:int
-    n_nodes:Array
-    node_types:Array
-    edge_types:Array
-    num_classes:int
-    nodes_dist', 
-    valency_distribution'
+    num_classes: int
+    nodes_dist: Any
+    valency_distribution: Array
+
 
 @dataclass(frozen=True)
 class TrainingConfig:

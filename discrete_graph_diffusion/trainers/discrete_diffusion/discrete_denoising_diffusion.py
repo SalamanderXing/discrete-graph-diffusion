@@ -1,6 +1,7 @@
 from jax import numpy as np
-from flax.training.train_state import TrainState
+from flax.training import train_state
 from jax import jit
+from jax import random
 import flax.linen as nn
 from jax import Array
 from jax.random import PRNGKeyArray
@@ -8,10 +9,14 @@ import jax
 import optax
 import ipdb
 from rich import print
+from torch import dropout_
+from tqdm import tqdm
 from typing import Iterable
 from dataclasses import dataclass
 from typing import FrozenSet
 from flax.core.frozen_dict import FrozenDict
+from .utils import NoisyData
+from .train_loss import train_loss
 
 # from .train_loss import TrainLossDiscrete
 # from .metrics import AverageMetric
@@ -23,13 +28,14 @@ from .transition_model import (
     MarginalUniformTransition,
     TransitionModel,
 )
-from .diffusion import apply_noise, compute_Lt, kl_prior
-from .config import TrainingConfig 
+from .diffusion import apply_noise, compute_Lt, kl_prior, compute_extra_data
+from .config import TrainingConfig
 from .utils import Graph
 from .utils.geometric import to_dense
 from .sample import sample_discrete_features
 from .diffusion import kl_prior
 from .nodes_distribution import NodesDistribution
+from .extra_features import extra_features
 
 
 @dataclass(frozen=True)
@@ -39,6 +45,20 @@ class DataBatch:
     x: Array
     y: Array
     batch: Array
+
+    @classmethod
+    def from_pytorch(cls, data):
+        return cls(
+            edge_index=np.array(data.edge_index),
+            edge_attr=np.array(data.edge_attr),
+            x=np.array(data.x),
+            y=np.array(data.y),
+            batch=np.array(data.batch),
+        )
+
+
+class TrainState(train_state.TrainState):
+    key: jax.random.KeyArray
 
 
 class Logger:
@@ -100,40 +120,106 @@ def compute_val_loss(
     return nll
 
 
-def training_step(*, model: nn.Module, data: DataBatch, i: int, state: TrainState):
+def forward(
+    params: FrozenDict,
+    nX: Array,
+    nE: Array,
+    y: Array,
+    node_mask: Array,
+    state: TrainState,
+    extra_data: Graph,
+    dropout_key: PRNGKeyArray,
+):
+    X = np.concatenate((nX, extra_data.x), axis=2).astype(float)
+    E = np.concatenate((nE, extra_data.e), axis=3).astype(float)
+    y = np.hstack((y, extra_data.y)).astype(float)
+    # print(f"{noisy_data.graph=}")
+    # print(f"{extra_data=}")
+    # print(
+    #    f"Forward shapes: {X.shape=}, {E.shape=}, {y.shape=} {noisy_data.graph.mask.shape=}"
+    # )
+    # __import__('sys').exit()
+    return state.apply_fn(
+        params,
+        X,
+        E,
+        y,
+        node_mask,
+        # training=True,
+        rngs={"dropout": dropout_key},
+    )
+
+
+def training_step(
+    *,
+    data: DataBatch,
+    i: int,
+    state: TrainState,
+    rng: PRNGKeyArray,
+    config: TrainingConfig,
+    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    transition_model: TransitionModel,
+) -> tuple[TrainState, float]:
+    dropout_train_key = jax.random.fold_in(key=rng, data=state.step)
     if data.edge_index.size == 0:
         print("Found a batch with no edges. Skipping.")
         return
-    dense_data, node_mask = to_dense(
-        data.x, data.edge_index, data.edge_attr, data.batch
-    )
-    dense_data = dense_data.mask(node_mask)
-    X, E = dense_data.X, dense_data.E
+    X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
+    dense_data = Graph(x=X, e=E, y=data.y, mask=node_mask)
+    X, E, y = dense_data.x, dense_data.e, dense_data.y
     if i == 0:
         ipdb.set_trace()
-    noisy_data = apply_noise(X, E, data.y, node_mask)
-    extra_data = compute_extra_data(noisy_data)
-    pred = model(noisy_data, extra_data, node_mask)
-    loss = train_loss(
-        masked_pred_X=pred.X,
-        masked_pred_E=pred.E,
-        pred_y=pred.y,
-        true_X=X,
-        true_E=E,
-        true_y=data.y,
+
+    noisy_data = apply_noise(
+        x=X,
+        e=E,
+        y=y,
+        training=True,
+        node_mask=node_mask,
+        rng=rng,
+        T=config.diffusion_steps,
+        noise_schedule=noise_schedule,
+        transition_model=transition_model,
     )
+    # prints the shapes of the noisy data's X, E, y
+    extra_data = extra_features(noisy_data)
 
-    train_metrics(
-        masked_pred_X=pred.X,
-        masked_pred_E=pred.E,
-        true_X=X,
-        true_E=E,
-        log=i % self.log_every_steps == 0,
+    # extra data shapes:  torch.Size([200, 9, 8]) torch.Size([200, 9, 9, 0]) torch.Size([200, 13])
+    # assert extra_data.x.shape[2] == 8, f"{extra_data.x.shape=}"
+    # assert extra_data.e.shape[3] == 0, f"{extra_data.e.shape=}"
+    # assert extra_data.y.shape[1] == 13, f"{extra_data.y.shape=}"
+    # extra_data = Graph(x=extra_data.x[:, :, :8], e=extra_data.e, y=extra_data.y[:, :13])
+    # print(f"{extra_data=}")
+    nX, nE, ny, n_mask = (
+        noisy_data.graph.x,
+        noisy_data.graph.e,
+        noisy_data.graph.y,
+        noisy_data.graph.mask,
     )
+    n_mask = n_mask.astype(float)
 
-    return {"loss": loss}
+    def loss_fn(params: FrozenDict):
+        pred = forward(
+            params, nX, nE, ny, n_mask, state, extra_data, dropout_key=dropout_train_key
+        )
+        loss = train_loss(
+            masked_pred_x=pred.x,
+            masked_pred_e=pred.e,
+            pred_y=pred.y,
+            true_x=X,
+            true_e=E,
+            true_y=data.y,
+        )
+        return loss, pred
+
+    # loss, pred = loss_fn(state)
+    gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
+    (loss, pred), grads = gradient_fn(state.params)
+    state = state.apply_gradients(grads=grads)
+    return state, loss
 
 
+'''
 @jit
 def apply_model(state: TrainState, images, labels):
     """Computes gradients, loss and accuracy for a single batch."""
@@ -148,6 +234,7 @@ def apply_model(state: TrainState, images, labels):
     (loss, logits), grads = grad_fn(state.params)
     accuracy = np.mean(np.argmax(logits, -1) == labels)
     return grads, loss, accuracy
+'''
 
 
 def train_model(
@@ -159,34 +246,67 @@ def train_model(
     num_epochs=1,
     rngs: dict[str, PRNGKeyArray],
     lr: float,
-    config:TrainingConfig
+    config: TrainingConfig,
+    output_dims: dict[str, int],
 ):
     optimizer = optax.adam(lr)
-    train_state = TrainState.create(apply_fn=model.apply, params=params, tx=optimizer)
-    # aaaaaaaaaa Train model for defined number of epochs
+    rng = rngs["params"]
+    state = TrainState.create(
+        apply_fn=model.apply,
+        params=params,
+        tx=optimizer,
+        key=rngs["dropout"],
+    )
+    noise_schedule = PredefinedNoiseScheduleDiscrete(
+        "cosine", diffusion_steps=config.diffusion_steps
+    )
+    transition_model = DiscreteUniformTransition(
+        x_classes=output_dims["X"],
+        e_classes=output_dims["E"],
+        y_classes=output_dims["y"],
+    )
     # We first need to create optimizer and the scheduler for the given number of epochs
     logger = Logger()
     # Track best eval accuracy
-    for epoch_idx in tqdm(range(1, num_epochs + 1)):
+    for epoch_idx in range(1, num_epochs + 1):
         rng, input_rng = jax.random.split(rng)
         state, train_loss = training_epoch(
-            state=state, train_dataloader=train_dataloader, batch_size=batch_size, input_rng=input_rng
+            rng=rng,
+            state=state,
+            train_loader=train_loader,
+            epoch=epoch_idx,
+            config=config,
+            transition_model=transition_model,
+            noise_schedule=noise_schedule,
         )
-        _, test_loss = apply_model(
-            state, test_dataloader
+        # _, test_loss = apply_model(state, val_loader)
+
+
+def training_epoch(
+    *,
+    train_loader,
+    epoch: int,
+    state: TrainState,
+    config: TrainingConfig,
+    rng: PRNGKeyArray,
+    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    transition_model: TransitionModel,
+):
+    run_loss = 0.0
+    for batch in tqdm(train_loader):
+        batch = DataBatch.from_pytorch(batch)
+        state, loss = training_step(
+            data=batch,
+            i=epoch,
+            state=state,
+            config=config,
+            rng=rng,
+            noise_schedule=noise_schedule,
+            transition_model=transition_model,
         )
-
-
-
-def pytorch_geometric_databatch_to_jax(pytorch_geometric_databatch):
-    ipdb.set_trace()
-    return
-
-
-def training_epoch(model: nn.Module, train_loader, epoch: int, state: TrainState):
-    for batch in train_loader:
-        batch = pytorch_geometric_databatch_to_jax(pytorch_geometric_databatch_to_jax)
-        training_step(model=model, data=batch, i=epoch, state=state)
+        run_loss += loss
+    # prints the average loss for the epoch
+    print(f"Epoch {epoch} loss: {run_loss / len(train_loader)}")
 
 
 def validation_step(model: nn.Module, data: Array, i: int):

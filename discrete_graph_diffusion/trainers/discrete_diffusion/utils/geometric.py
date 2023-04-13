@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 import jax
 from jax import Array
 import jax.numpy as np
+import ipdb
 
 from .graph import Graph
 
@@ -47,10 +48,8 @@ def to_dense_batch(
             raise NotImplementedError(
                 "Filtering nodes is not implemented in this JAX version."
             )
-
     tmp = np.arange(batch.size) - cum_nodes[batch]
-    idx = tmp + (batch * max_num_nodes)
-
+    idx = (tmp + (batch * max_num_nodes)).astype(np.int32)
     size = [batch_size * max_num_nodes] + list(x.shape)[1:]
     out = np.full(size, fill_value)
     out = out.at[idx].set(x)
@@ -87,12 +86,14 @@ def to_dense_adj(
 
     if max_num_nodes is None:
         max_num_nodes = int(num_nodes.max())
-    else:
+    elif (idx1.size > 0 and idx1.max() >= max_num_nodes) or (
+        idx2.size > 0 and idx2.max() >= max_num_nodes
+    ):
         mask = (idx1 < max_num_nodes) & (idx2 < max_num_nodes)
-        if mask.any():
-            raise NotImplementedError(
-                "Filtering nodes is not implemented in this JAX version."
-            )
+        idx0 = idx0[mask]
+        idx1 = idx1[mask]
+        idx2 = idx2[mask]
+        edge_attr = None if edge_attr is None else edge_attr[mask]
 
     if edge_attr is None:
         edge_attr = np.ones(idx0.size, dtype=np.float32)
@@ -142,8 +143,7 @@ def to_dense(x: Array, edge_index: Array, edge_attr: Array, batch: Array):
     E = encode_no_edge(E)
 
     return (
-        Graph(
-            x=X, e=E, y=None
-        ),  # FIXME: y is None, that'll break if you try to mask or do other stuff with it
+        X,
+        E,
         node_mask,
     )

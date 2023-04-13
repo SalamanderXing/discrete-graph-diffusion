@@ -1,4 +1,5 @@
 import jax.numpy as np
+from hashlib import md5
 
 
 def cosine_beta_schedule_discrete(timesteps, s=0.008):
@@ -37,13 +38,13 @@ def custom_beta_schedule_discrete(timesteps, average_num_nodes=50, s=0.008):
 
 
 class PredefinedNoiseScheduleDiscrete:
-    def __init__(self, noise_schedule: str, timesteps: int):
-        self.timesteps = timesteps
+    def __init__(self, noise_schedule: str, diffusion_steps: int):
+        self.diffusion_steps = diffusion_steps
 
         if noise_schedule == "cosine":
-            betas = cosine_beta_schedule_discrete(timesteps)
+            betas = cosine_beta_schedule_discrete(diffusion_steps)
         elif noise_schedule == "custom":
-            betas = custom_beta_schedule_discrete(timesteps)
+            betas = custom_beta_schedule_discrete(diffusion_steps)
         else:
             raise NotImplementedError(noise_schedule)
 
@@ -58,12 +59,18 @@ class PredefinedNoiseScheduleDiscrete:
         """Get the beta value at timestep t."""
         if t_int is None:
             assert t_normalized is not None
-            t_int = np.round(t_normalized * self.timesteps)
+            t_int = np.round(t_normalized * self.diffusion_steps)
         return self.betas[np.array(t_int, dtype=np.int32)]
 
     def get_alpha_bar(self, t_normalized=None, t_int=None):
         """Get the cumulative product of alphas up to timestep t."""
         if t_int is None:
             assert t_normalized is not None
-            t_int = np.round(t_normalized * self.timesteps)
+            t_int = np.round(t_normalized * self.diffusion_steps).astype(int)
         return self.alphas_bar[t_int]
+
+    def __hash__(self):
+        data = str(
+            self.betas.tolist() + self.alphas.tolist() + self.alphas_bar.tolist()
+        ).encode()
+        return int(md5(data).hexdigest(), 16)

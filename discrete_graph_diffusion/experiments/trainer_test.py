@@ -2,7 +2,6 @@ from mate import mate
 from dataclasses import dataclass, asdict
 from ..data_loaders.qm9_p import QM9DataModule, QM9Infos, get_train_smiles
 import os
-import ipdb
 from ..models.graph_transformer import GraphTransformer, GraphTransformerConfig
 from ..trainers.discrete_diffusion import train_model, TrainingConfig
 import ipdb
@@ -24,7 +23,6 @@ dataset_infos = QM9Infos(
     datamodule=datamodule,
     remove_h=remove_h,
 )
-ipdb.set_trace()
 datamodule.prepare_data()
 uba = next(iter(datamodule.train_dataloader()))
 
@@ -55,9 +53,14 @@ graph_transformer_config = GraphTransformerConfig.from_dict(
         n_layers=5,
     )
 )
+dataset_dict = dataset_infos.__dict__
+dataset_dict["n_nodes"] = np.array(dataset_dict["n_nodes"])
+dataset_dict["node_types"] = np.array(dataset_dict["node_types"])
+dataset_dict["edge_types"] = np.array(dataset_dict["edge_types"])
+dataset_dict["valency_distribution"] = np.array(dataset_dict["valency_distribution"])
 training_config = TrainingConfig.from_dict(
     dict(
-        dataset=dataset_infos.__dict__,
+        dataset=dataset_dict,
         diffusion_steps=500,
         diffusion_noise_schedule="cosine",
         learning_rate=1e-3,
@@ -70,12 +73,14 @@ training_config = TrainingConfig.from_dict(
 
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
 key = random.PRNGKey(2)
-x = random.normal(key, (batch_size, 9, graph_transformer_config.input_dims.X))
+# X.shape=torch.Size([200, 9, 12]), E.shape=torch.Size([200, 9, 9, 5]), y.shape=torch.Size([200, 13]), node_mask.shape=torch.Size([200, 9])
+x = random.normal(key, (batch_size, 9, 10))
 e = random.normal(key, (batch_size, 9, 9, graph_transformer_config.input_dims.E))
-y = random.normal(key, (batch_size, graph_transformer_config.input_dims.y))
+y = random.normal(key, (batch_size, 11))
 node_mask = np.ones((batch_size, 9))
 
 graph_transformer = GraphTransformer(graph_transformer_config)
+print(f"Model init shapes: {x.shape}, {e.shape}, {y.shape}, {node_mask.shape}")
 params = graph_transformer.init(rngs, x, e, y, node_mask)
 
 # this is the forward pass
@@ -87,6 +92,8 @@ train_model(
     model=graph_transformer,
     params=params,
     rngs=rngs,
+    lr=training_config.learning_rate,
     train_loader=datamodule.train_dataloader(),
     val_loader=datamodule.val_dataloader(),
+    output_dims=graph_transformer_config.output_dims.__dict__,
 )
