@@ -4,7 +4,7 @@ from jax import jit
 from jax import random
 import flax.linen as nn
 from jax import Array
-from jax.random import PRNGKeyArray
+from jax.random import PRNGKey, PRNGKeyArray
 import jax
 import optax
 import ipdb
@@ -33,9 +33,10 @@ from .config import TrainingConfig
 from .utils import Graph
 from .utils.geometric import to_dense
 from .sample import sample_discrete_features
-from .diffusion import kl_prior
+from .diffusion import kl_prior as kl_prior_fn, reconstruction_logp
 from .nodes_distribution import NodesDistribution
 from .extra_features import extra_features
+from .noise_schedule import PredefinedNoiseScheduleDiscrete
 
 
 @dataclass(frozen=True)
@@ -68,13 +69,16 @@ class Logger:
 
 def compute_val_loss(
     *,
+    T: int,
     target: Graph,
     pred: Graph,
-    noisy_data: Array,
-    node_mask: Array,
+    noisy_data: NoisyData,
     node_dist: NodesDistribution,
-    test=False,
+    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    transition_model: TransitionModel,
     state: FrozenDict,
+    limit_dist: Graph,
+    rng_key: PRNGKeyArray,
 ):
     """Computes an estimator for the variational lower bound.
     pred: (batch_size, n, total_features)
@@ -83,30 +87,46 @@ def compute_val_loss(
     node_mask : (bs, n)
     Output: nll (size 1)
     """
-    t = noisy_data["t"]
+    t = noisy_data.t
+    x = target.x
+    e = target.e
+    y = target.y
+    mask = target.mask
 
     # 1.
-    N = node_mask.sum(1).astype(int)
+    N = mask.sum(1).astype(int)
     log_pN = node_dist.log_prob(N)
-
     # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
-    kl_prior = kl_prior(X, E, node_mask)
+    kl_prior = kl_prior_fn(
+        x=x,
+        e=e,
+        mask=mask,
+        T=T,
+        noise_schedule=noise_schedule,
+        transition_model=transition_model,
+        limit_dist=limit_dist,
+    )
 
     # 3. Diffusion loss
-    loss_all_t = compute_Lt(X, E, y, pred, noisy_data, node_mask, test)
+    loss_all_t = compute_Lt(
+        target=target,
+        pred=pred,
+        noisy_data=noisy_data,
+        T=T,
+        transition_model=transition_model,
+    )
 
     # 4. Reconstruction loss
     # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
-    prob0 = reconstruction_logp(t, X, E, node_mask)
+    prob0 = reconstruction_logp(rng_key=rng_key, state=state, graph=target, t=t, noise_schedule=noise_schedule)
 
-    loss_term_0 = val_X_logp(X * prob0.X.log()) + val_E_logp(E * prob0.E.log())
+    loss_term_0 = np.sum(x * prob0.X.log(), axis=1) + np.sum(e * prob0.E.log(), axis=1)
 
     # Combine terms
     nlls = -log_pN + kl_prior + loss_all_t - loss_term_0
     assert len(nlls.shape) == 1, f"{nlls.shape} has more than only batch dim."
 
-    # Update NLL metric object and return batch nll
-    nll = (test_nll if test else val_nll)(nlls)  # Average over the batch
+    nll = np.mean(nlls, 1)
 
     print(
         {
@@ -114,7 +134,6 @@ def compute_val_loss(
             "Estimator loss terms": loss_all_t.mean(),
             "log_pn": log_pN.mean(),
             "loss_term_0": loss_term_0,
-            "batch_test_nll" if test else "val_nll": nll,
         },
     )
     return nll

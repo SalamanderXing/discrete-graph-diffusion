@@ -15,91 +15,70 @@ from .transition_model import TransitionModel
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .sample import sample_discrete_features
 from .utils import Graph, NoisyData, softmax_kl_div
+from .extra_features import extra_features
 
 
 def reconstruction_logp(
     *,
     rng_key: PRNGKeyArray,
-    model: nn.Module,
     state: TrainState,
     noise_schedule: PredefinedNoiseScheduleDiscrete,
     t: int,
-    X: Array,
-    E: Array,
-    node_mask: Array,
+    graph: Graph,
     transition_model: TransitionModel,
     get_extra_features: Callable[[NoisyData], Graph],
     get_domain_features: Callable[[NoisyData], Graph],
 ):
+    e = graph.e
+    x = graph.x
+    mask = graph.mask
     # Compute noise values for t = 0.
     t_zeros = np.zeros_like(t)
     beta_0 = noise_schedule(t_zeros)
     Q0 = transition_model.get_Qt(beta_t=beta_0)
 
-    probX0 = X @ Q0.X  # (bs, n, dx_out)
-    probE0 = np.matmul(E, np.expand_dims(Q0.E, 1))  # (bs, n, n, de_out)
+    probX0 = x @ Q0.x  # (bs, n, dx_out)
+    probE0 = np.matmul(e, np.expand_dims(Q0.e, 1))  # (bs, n, n, de_out)
 
     sampled0 = sample_discrete_features(
-        rng_key=rng_key, probX=probX0, probE=probE0, node_mask=node_mask
+        rng_key=rng_key, probX=probX0, probE=probE0, node_mask=mask
     )
 
-    X0 = np.eye(X.shape[-1])[sampled0.X].astype(np.float32)
-    E0 = np.eye(E.shape[-1])[sampled0.E].astype(np.float32)
+    X0 = np.eye(x.shape[-1])[sampled0.x]
+    E0 = np.eye(e.shape[-1])[sampled0.e]
     y0 = sampled0.y
-    assert (X.shape == X0.shape) and (E.shape == E0.shape)
+    assert (x.shape == X0.shape) and (e.shape == E0.shape)
 
-    sampled_0 = Graph(x=X0, e=E0, y=y0, mask=node_mask)
+    sampled_0 = Graph(x=X0, e=E0, y=y0, mask=mask)
 
     noisy_data = NoisyData(
         graph=sampled_0,
         t=np.zeros((X0.shape[0], 1), dtype=y0.dtype),
     )
-    extra_data = compute_extra_data(noisy_data, get_extra_features, get_domain_features)
+    extra_data = extra_features(
+        noisy_data=noisy_data
+    )  # compute_extra_data(noisy_data, get_extra_features, get_domain_features)
     # pred0 = model.apply(noisy_data, extra_data, node_mask)
     # passes the parameters to the model and calls the apply
-    x, e, y = model.apply(state.params, noisy_data, extra_data, node_mask)
-    pred0 = Graph(x=x, e=e, y=y, mask=node_mask)
+    x, e, y = state.apply_fn(state.params, noisy_data, extra_data, mask)
+    pred0 = Graph(x=x, e=e, y=y, mask=mask)
 
     # Normalize predictions
-    probX0 = jax.nn.softmax(pred0.X, axis=-1)
-    probE0 = jax.nn.softmax(pred0.E, axis=-1)
+    probX0 = jax.nn.softmax(pred0.x, axis=-1)
+    probE0 = jax.nn.softmax(pred0.e, axis=-1)
     proby0 = jax.nn.softmax(pred0.y, axis=-1)
 
     # Set masked rows to arbitrary values that don't contribute to loss
-    probX0 = probX0.at[np.logical_not(node_mask)].set(np.ones(X.shape[-1]))
+    probX0 = probX0.at[np.logical_not(mask)].set(np.ones(x.shape[-1]))
     probE0 = probE0.at[
-        np.logical_not(np.expand_dims(node_mask, 1) * np.expand_dims(node_mask, 2))
-    ].set(np.ones(E.shape[-1]))
+        np.logical_not(np.expand_dims(mask, 1) * np.expand_dims(mask, 2))
+    ].set(np.ones(e.shape[-1]))
 
     diag_mask = np.eye(probE0.shape[1], dtype=bool)
     diag_mask = np.expand_dims(diag_mask, 0).repeat(probE0.shape[0], axis=0)
-    probE0 = probE0.at[diag_mask].set(np.ones(E.shape[-1]))
+    probE0 = probE0.at[diag_mask].set(np.ones(e.shape[-1]))
 
     return Graph(x=probX0, e=probE0, y=proby0)
-
-
-from typing import Callable
-
-
-def compute_extra_data(
-    noisy_data: NoisyData,
-    get_extra_features: Callable[[NoisyData], Graph],
-    get_domain_features: Callable[[NoisyData], Graph],
-):
-    """At every training step (after adding noise) and step in sampling, compute extra information and append to
-    the network input."""
-
-    extra_features = get_extra_features(noisy_data)
-    extra_molecular_features = get_domain_features(noisy_data)
-
-    extra_X = np.concatenate((extra_features.x, extra_molecular_features.x), axis=-1)
-    extra_E = np.concatenate((extra_features.e, extra_molecular_features.e), axis=-1)
-    extra_y = np.concatenate((extra_features.y, extra_molecular_features.y), axis=-1)
-
-    t = noisy_data.t
-    extra_y = np.concatenate((extra_y, t), axis=1)
-
-    return Graph(x=extra_X, e=extra_E, y=extra_y)
 
 
 def compute_Lt(
@@ -292,13 +271,13 @@ def apply_noise(
 
 def kl_prior(
     *,
-    X: Array,
-    E: Array,
-    node_mask: Array,
+    x: Array,
+    e: Array,
+    mask: Array,
     T: float,
-    noise_schedule,
-    transition_model,
-    limit_dist,
+    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    transition_model: TransitionModel,
+    limit_dist: Graph,
 ) -> Array:
     """Computes the KL between q(z1 | x) and the prior p(z1) = Normal(0, 1).
 
@@ -306,21 +285,21 @@ def kl_prior(
     compute it so that you see it when you've made a mistake in your noise schedule.
     """
     # Compute the last alpha value, alpha_T.
-    ones = np.ones((X.shape[0], 1))
+    ones = np.ones((x.shape[0], 1))
     Ts = T * ones
     alpha_t_bar = noise_schedule.get_alpha_bar(t_int=Ts)  # (bs, 1)
 
     Qtb = transition_model.get_Qt_bar(alpha_t_bar)
 
     # Compute transition probabilities
-    probX = X @ Qtb.X  # (bs, n, dx_out)
-    probE = E @ np.expand_dims(Qtb.E, 1)  # (bs, n, n, de_out)
-    assert probX.shape == X.shape
+    probX = x @ Qtb.x  # (bs, n, dx_out)
+    probE = e @ np.expand_dims(Qtb.e, 1)  # (bs, n, n, de_out)
+    assert probX.shape == x.shape
 
     bs, n, _ = probX.shape
 
-    limit_X = np.broadcast_to(np.expand_dims(limit_dist.X, (0, 1)), (bs, n, -1))
-    limit_E = np.broadcast_to(np.expand_dims(limit_dist.E, (0, 1, 2)), (bs, n, n, -1))
+    limit_X = np.broadcast_to(np.expand_dims(limit_dist.x, (0, 1)), (bs, n, -1))
+    limit_E = np.broadcast_to(np.expand_dims(limit_dist.e, (0, 1, 2)), (bs, n, n, -1))
 
     # Make sure that masked rows do not contribute to the loss
     limit_dist_X, limit_dist_E, probX, probE = mask_distributions(
@@ -328,7 +307,7 @@ def kl_prior(
         true_E=np.copy(limit_E),
         pred_X=probX,
         pred_E=probE,
-        node_mask=node_mask,
+        node_mask=mask,
     )
 
     kl_distance_X = kl_div(np.log(probX), limit_dist_X).sum(1)

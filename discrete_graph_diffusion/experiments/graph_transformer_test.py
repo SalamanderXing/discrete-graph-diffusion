@@ -52,4 +52,6 @@ params = graph_transformer.init(rngs, x, e, y, node_mask)
 out = graph_transformer.apply(
     params, x, e, y, node_mask, rngs={"dropout": rngs["dropout"]}
 )
-
+out = graph_transformer.apply(
+    params, x, e, y, node_mask, rngs={"dropout": rngs["dropout"]}
+)
