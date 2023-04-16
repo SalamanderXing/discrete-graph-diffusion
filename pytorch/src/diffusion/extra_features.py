@@ -1,5 +1,6 @@
 import torch
 from src import utils
+import ipdb
 
 
 class DummyExtraFeatures:
@@ -56,12 +57,20 @@ class ExtraFeatures:
                 k_lowest_eigvec,
             ) = eigenfeatures  # (bs, 1), (bs, 10),
             # (bs, n, 1), (bs, n, 2)
-
+            print("nonlcc_indicator.shape", nonlcc_indicator.shape)
+            print("k_lowest_eigvec.shape", k_lowest_eigvec.shape)
+            print("n_components.shape", n_components.shape)
+            print("batched_eigenvalues.shape", batched_eigenvalues.shape)
+            print("x_cycles.shape", x_cycles.shape)
+            print("y_cycles.shape", y_cycles.shape)
             return utils.PlaceHolder(
                 X=torch.cat((x_cycles, nonlcc_indicator, k_lowest_eigvec), dim=-1),
                 E=extra_edge_attr,
                 y=torch.hstack((n, y_cycles, n_components, batched_eigenvalues)),
             )
+            #print("tmp.X.shape", tmp.X.shape)
+            #print("tmp.E.shape", tmp.E.shape)
+            #print("tmp.y.shape", tmp.y.shape)
         else:
             raise ValueError(f"Features type {self.features_type} not implemented")
 
@@ -214,6 +223,7 @@ def get_eigenvectors_features(vectors, node_mask, n_connected, k=2):
     ) + n_connected.unsqueeze(
         2
     )  # bs, 1, k
+    # print(f"{indices.shape=}")
     indices = indices.expand(-1, n, -1)  # bs, n, k
     first_k_ev = torch.gather(vectors, dim=2, index=indices)  # bs, n, k
     first_k_ev = first_k_ev * node_mask.unsqueeze(2)
@@ -265,11 +275,9 @@ class KNodeCycles:
 
     def k4_cycle(self):
         diag_a4 = batch_diagonal(self.k4_matrix)
-        c4 = (
-            diag_a4
-            - self.d * (self.d - 1)
-            - (self.adj_matrix @ self.d.unsqueeze(-1)).sum(dim=-1)
-        )
+        last = (self.adj_matrix @ self.d.unsqueeze(-1)).sum(dim=-1)
+        second = self.d * (self.d - 1)
+        c4 = diag_a4 - second - last
         return (c4 / 2).unsqueeze(-1).float(), (torch.sum(c4, dim=-1) / 8).unsqueeze(
             -1
         ).float()
@@ -334,4 +342,8 @@ class KNodeCycles:
 
         kcyclesx = torch.cat([k3x, k4x, k5x], dim=-1)
         kcyclesy = torch.cat([k3y, k4y, k5y, k6y], dim=-1)
+        # prints all the shapes of k3, k4, k5, k6
+        # print(f"{k3x.shape=}, {k4x.shape=}, {k5x.shape=}")
+        # print(f"{k3y.shape=}, {k4y.shape=}, {k5y.shape=}, {k6y.shape=}")
+        # print(f"{kcyclesx.shape=}, {kcyclesy.shape=}")
         return kcyclesx, kcyclesy

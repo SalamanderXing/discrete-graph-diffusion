@@ -39,7 +39,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         domain_features,
     ):
         super().__init__()
-
+        print(cfg)
         input_dims = dataset_infos.input_dims
         output_dims = dataset_infos.output_dims
         nodes_dist = dataset_infos.nodes_dist
@@ -142,9 +142,21 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         dense_data = dense_data.mask(node_mask)
         X, E = dense_data.X, dense_data.E
         # if i == 0:
-        #    ipdb.set_trace()
         noisy_data = self.apply_noise(X, E, data.y, node_mask)
         extra_data = self.compute_extra_data(noisy_data)
+        # prints out the shapes of x, e, y, of noisy data (a dict) and extra data
+        print(
+            "noisy data shapes: ",
+            noisy_data["X_t"].shape,
+            noisy_data["E_t"].shape,
+            noisy_data["y_t"].shape,
+        )
+        print(
+            "extra data shapes: ",
+            extra_data.X.shape,
+            extra_data.E.shape,
+            extra_data.y.shape,
+        )
         pred = self.forward(noisy_data, extra_data, node_mask)
         loss = self.train_loss(
             masked_pred_X=pred.X,
@@ -209,7 +221,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         return {"loss": nll}
 
-    def validation_epoch_end(self, outs) -> None:
+    def on_validation_epoch_end(self) -> None:
         metrics = [
             self.val_nll.compute(),
             self.val_X_kl.compute() * self.T,
@@ -300,7 +312,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         return {"loss": nll}
 
-    def test_epoch_end(self, outs) -> None:
+    def on_test_epoch_end(self, outs) -> None:
         """Measure likelihood on a test set and compute stability metrics."""
         metrics = [
             self.test_nll.compute(),
@@ -442,15 +454,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         pred_probs_X = F.softmax(pred.X, dim=-1)
         pred_probs_E = F.softmax(pred.E, dim=-1)
         pred_probs_y = F.softmax(pred.y, dim=-1)
-
         Qtb = self.transition_model.get_Qt_bar(noisy_data["alpha_t_bar"], self.device)
         Qsb = self.transition_model.get_Qt_bar(noisy_data["alpha_s_bar"], self.device)
         Qt = self.transition_model.get_Qt(noisy_data["beta_t"], self.device)
 
         # Compute distributions to compare with KL
         bs, n, d = X.shape
-        prob_true = diffusion_utils.posterior_distributions(
-            X=X,
+        prob_true = diffusion_utils.posterior_distributions(  # looks like bug is here.
+            X=X, # this here is G but below it is G_t-1 in same argument positoin
             E=E,
             y=y,
             X_t=noisy_data["X_t"],
@@ -461,6 +472,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             Qtb=Qtb,
         )
         prob_true.E = prob_true.E.reshape((bs, n, n, -1))
+        # this is actually p_theta and 
         prob_pred = diffusion_utils.posterior_distributions(
             X=pred_probs_X,
             E=pred_probs_E,
@@ -473,6 +485,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             Qtb=Qtb,
         )
         prob_pred.E = prob_pred.E.reshape((bs, n, n, -1))
+        """
+        import matplotlib.pyplot as plt
+        plt.plot(prob_true.X[0, 0])
+        plt.plot(prob_pred.X[0, 0])
+        plt.show()
+        """
 
         # Reshape and filter masked rows
         (
@@ -488,8 +506,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             node_mask=node_mask,
         )
         to_call = self.test_X_kl if test else self.val_X_kl
+
+        # plt.plot(prob_true.X[0, 0])
+        # plt.plot(prob_pred.X[0, 0])
+        # plt.show()
         kl_x = to_call(prob_true.X, prob_pred.X)
         kl_e = (self.test_E_kl if test else self.val_E_kl)(prob_true.E, prob_pred.E)
+        print(f"{kl_x=} {kl_e=}")
         res = self.T * (kl_x + kl_e)
         return res
 
@@ -505,7 +528,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         sampled0 = diffusion_utils.sample_discrete_features(
             probX=probX0, probE=probE0, node_mask=node_mask
         )
-        ipdb.set_trace()
         X0 = F.one_hot(sampled0.X, num_classes=self.Xdim_output).float()
         E0 = F.one_hot(sampled0.E, num_classes=self.Edim_output).float()
         y0 = sampled0.y
@@ -565,7 +587,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
         assert (abs(Qtb.X.sum(dim=2) - 1.0) < 1e-4).all(), Qtb.X.sum(dim=2) - 1
         assert (abs(Qtb.E.sum(dim=2) - 1.0) < 1e-4).all()
-
         # Compute transition probabilities
         probX = X @ Qtb.X  # (bs, n, dx_out)
         probE = E @ Qtb.E.unsqueeze(1)  # (bs, n, n, de_out)
@@ -573,7 +594,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         sampled_t = diffusion_utils.sample_discrete_features(
             probX=probX, probE=probE, node_mask=node_mask
         )
-        ipdb.set_trace()
         X_t = F.one_hot(sampled_t.X, num_classes=self.Xdim_output)
         E_t = F.one_hot(sampled_t.E, num_classes=self.Edim_output)
         assert (X.shape == X_t.shape) and (E.shape == E_t.shape)
@@ -609,7 +629,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
 
         # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
         kl_prior = self.kl_prior(X, E, node_mask)
-        ipdb.set_trace()
         # 3. Diffusion loss
         loss_all_t = self.compute_Lt(X, E, y, pred, noisy_data, node_mask, test)
 
@@ -640,10 +659,17 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         return nll
 
     def forward(self, noisy_data, extra_data, node_mask):
+        print(
+            "extra data shapes: ",
+            extra_data.X.shape,
+            extra_data.E.shape,
+            extra_data.y.shape,
+        )
         X = torch.cat((noisy_data["X_t"], extra_data.X), dim=2).float()
         E = torch.cat((noisy_data["E_t"], extra_data.E), dim=3).float()
         y = torch.hstack((noisy_data["y_t"], extra_data.y)).float()
-        # what is y? y is the target, which is the same as the input in this case
+        # prints out all the shapes
+        print(f"{X.shape=}, {E.shape=}, {y.shape=}, {node_mask.shape=}")
         return self.model(X, E, y, node_mask)
 
     @torch.no_grad()
@@ -798,6 +824,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             "node_mask": node_mask,
         }
         extra_data = self.compute_extra_data(noisy_data)
+        print(
+            f"Noisy data shapes: X={noisy_data['X_t'].shape}, E={noisy_data['E_t'].shape}, y={noisy_data['y_t'].shape}, mask={noisy_data['node_mask'].shape}"
+        )
         pred = self.forward(noisy_data, extra_data, node_mask)
 
         # Normalize predictions

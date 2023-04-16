@@ -260,7 +260,6 @@ def sample_discrete_features(probX, probE, node_mask):
     # The masked rows should define probability distributions as well
     inverse_edge_mask = ~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))
     diag_mask = torch.eye(n).unsqueeze(0).expand(bs, -1, -1)
-
     probE[inverse_edge_mask] = 1 / probE.shape[-1]
     probE[diag_mask.bool()] = 1 / probE.shape[-1]
 
@@ -274,27 +273,33 @@ def sample_discrete_features(probX, probE, node_mask):
     return PlaceHolder(X=X_t, E=E_t, y=torch.zeros(bs, 0).type_as(X_t))
 
 
-def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M):
+def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M, mode="giulios"):
     """M: X or E
     Compute xt @ Qt.T * x0 @ Qsb / x0 @ Qtb @ xt.T
+
+            (M_T @ Q_t.T) * (M @ Qsb) / x_0 @ Qtb @ M
     """
     # Flatten feature tensors
     M = M.flatten(start_dim=1, end_dim=-2).to(
         torch.float32
     )  # (bs, N, d) with N = n or n * n
-    M_t = M_t.flatten(start_dim=1, end_dim=-2).to(torch.float32)  # same
+    M_t = M_t.flatten(start_dim=1, end_dim=-2)  # same
 
-    Qt_M_T = torch.transpose(Qt_M, -2, -1)  # (bs, d, d)
+    Qt_M_T = Qt_M.transpose(-2, -1)  # (bs, d, d)
 
     left_term = M_t @ Qt_M_T  # (bs, N, d)
     right_term = M @ Qsb_M  # (bs, N, d)
     product = left_term * right_term  # (bs, N, d)
 
     denom = M @ Qtb_M  # (bs, N, d) @ (bs, d, d) = (bs, N, d)
-    denom = (denom * M_t).sum(dim=-1)  # (bs, N, d) * (bs, N, d) + sum = (bs, N)
+    if mode == "giulios":
+        denom = (denom @ M_t.transpose(1, 2)) #.sum(-1)  # modified by meee
+    else:
+        denom = (denom * M_t).sum(
+            dim=-1
+        )  # (bs, N, d) * (bs, N, d) + sum = (bs, N) FIXME: this does not match with the above formula
     # denom = product.sum(dim=-1)
     # denom[denom == 0.] = 1
-
     prob = product / denom.unsqueeze(-1)  # (bs, N, d)
 
     return prob
