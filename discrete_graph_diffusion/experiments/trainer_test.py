@@ -3,7 +3,7 @@ from dataclasses import dataclass, asdict
 from ..data_loaders.qm9_p import QM9DataModule, QM9Infos, get_train_smiles
 import os
 from ..models.graph_transformer import GraphTransformer, GraphTransformerConfig
-from ..trainers.discrete_diffusion import train_model, TrainingConfig
+from ..trainers.discrete_denoising_diffusion import train_model, TrainingConfig
 import ipdb
 from jax import numpy as np
 from jax import random

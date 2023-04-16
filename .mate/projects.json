@@ -108,11 +108,11 @@
                         ],
                         [
                             "pandas",
-                            "1.5.2"
+                            "1.5.3"
                         ],
                         [
                             "pytorch_lightning",
-                            "1.9.0"
+                            "2.0.1"
                         ],
                         [
                             "rdkit",
@@ -120,7 +120,7 @@
                         ],
                         [
                             "torch",
-                            "2.0.0+cu118"
+                            "2.0.0"
                         ],
                         [
                             "torch_geometric",
@@ -128,7 +128,7 @@
                         ],
                         [
                             "tqdm",
-                            "4.64.1"
+                            "4.65.0"
                         ],
                         [
                             "wandb",
@@ -138,13 +138,18 @@
                 }
             },
             "trainers": {
-                "discrete_diffusion": {
-                    "name": "discrete_diffusion",
-                    "exports": [],
-                    "errors": [
-                        "No exports found in trainers.discrete_diffusion. Consider exporting with 'mate export <module>'"
+                "discrete_denoising_diffusion": {
+                    "name": "discrete_denoising_diffusion",
+                    "exports": [
+                        "train_model",
+                        "TrainingConfig"
                     ],
+                    "errors": [],
                     "dependencies": [
+                        [
+                            "dacite",
+                            "1.8.0"
+                        ],
                         [
                             "flax",
                             "0.6.8"
@@ -163,16 +168,25 @@
                         ],
                         [
                             "rich",
-                            "13.3.3"
+                            "13.3.4"
                         ],
                         [
-                            "torchmetrics",
-                            "0.11.0"
+                            "tqdm",
+                            "4.64.1"
                         ]
                     ]
                 }
             },
             "experiments": {
+                "trainer_test": {
+                    "name": "trainer_test",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ]
+                },
                 "graph_transformer_test": {
                     "name": "graph_transformer_test",
                     "errors": [],

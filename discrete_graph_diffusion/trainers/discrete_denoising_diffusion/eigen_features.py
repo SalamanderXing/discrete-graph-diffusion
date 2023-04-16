@@ -1,3 +1,6 @@
+"""
+This file contains the code for computing the egienvalues/vectors features. These are hardcoded computations that are added to the the input of the graph transformer.
+"""
 from jax import numpy as np
 from jax import Array
 from jax import random

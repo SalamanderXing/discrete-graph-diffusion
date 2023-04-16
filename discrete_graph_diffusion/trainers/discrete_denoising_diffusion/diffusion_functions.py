@@ -1,7 +1,9 @@
+"""
+A lot of functions related to diffusion models. But which do not depend on the on the model itself.
+"""
 from typing import Callable
-from jax.random import PRNGKey, PRNGKeyArray
+from jax.random import PRNGKeyArray
 import jax
-import optax
 import ipdb
 from rich import print
 from jax import Array
@@ -9,12 +11,12 @@ import jax
 from jax import numpy as np
 from flax import linen as nn
 from flax.training.train_state import TrainState
-from dataclasses import dataclass
 
 from .transition_model import TransitionModel
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .sample import sample_discrete_features
-from .utils import Graph, NoisyData, softmax_kl_div
+from .utils import softmax_kl_div
+from .diffusion_types import Graph, NoisyData
 from .extra_features import extra_features
 
 

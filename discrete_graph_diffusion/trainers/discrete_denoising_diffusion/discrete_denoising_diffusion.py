@@ -1,39 +1,31 @@
+"""
+Entrypoint of the discrete denoising diffusion model.
+The function `train_model` is the main entrypoint.
+"""
 from jax import numpy as np
 from flax.training import train_state
 from jax import jit
-from jax import random
 import flax.linen as nn
 from jax import Array
-from jax.random import PRNGKey, PRNGKeyArray
+from jax.random import PRNGKeyArray
 import jax
 import optax
 import ipdb
 from rich import print
-from torch import dropout_
 from tqdm import tqdm
-from typing import Iterable
 from dataclasses import dataclass
-from typing import FrozenSet
 from flax.core.frozen_dict import FrozenDict
-from .utils import NoisyData
-from .train_loss import train_loss
 
-# from .train_loss import TrainLossDiscrete
-# from .metrics import AverageMetric
-# from .metrics.sum_except_batch import SumExceptBatchMetric
-# from .metrics.sum_except_batch_kl import SumExceptBatchKL
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .transition_model import (
     DiscreteUniformTransition,
-    MarginalUniformTransition,
     TransitionModel,
 )
-from .diffusion import apply_noise, compute_Lt, kl_prior, compute_extra_data
+from .diffusion_functions import apply_noise, compute_Lt
 from .config import TrainingConfig
-from .utils import Graph
+from .diffusion_types import Graph, NoisyData
 from .utils.geometric import to_dense
-from .sample import sample_discrete_features
-from .diffusion import kl_prior as kl_prior_fn, reconstruction_logp
+from .diffusion_functions import kl_prior as kl_prior_fn, reconstruction_logp
 from .nodes_distribution import NodesDistribution
 from .extra_features import extra_features
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
@@ -41,6 +33,10 @@ from .noise_schedule import PredefinedNoiseScheduleDiscrete
 
 @dataclass(frozen=True)
 class DataBatch:
+    """
+    Data structure mimicking the PyTorch Geometric DataBatch.
+    """
+
     edge_index: Array
     edge_attr: Array
     x: Array
@@ -62,9 +58,48 @@ class TrainState(train_state.TrainState):
     key: jax.random.KeyArray
 
 
-class Logger:
-    def add_scalar(self, name: str, val: float | int, epoch: int):
-        print(f"{name} {val} {epoch}")
+def train_loss(
+    masked_pred_x: Array,
+    masked_pred_e: Array,
+    pred_y: Array,
+    true_x: Array,
+    true_e: Array,
+    true_y: Array,
+    lambda_train_x: float = 1,
+    lambda_train_e: float = 5,
+    lambda_train_y: float = 0,
+):
+    """Compute train metrics
+    masked_pred_X : tensor -- (bs, n, dx)
+    masked_pred_E : tensor -- (bs, n, n, de)
+    pred_y : tensor -- (bs, )
+    true_X : tensor -- (bs, n, dx)
+    true_E : tensor -- (bs, n, n, de)
+    true_y : tensor -- (bs, )
+    log : boolean."""
+
+    loss_fn = lambda x, y: optax.softmax_cross_entropy(logits=x, labels=y).sum()
+    true_x = true_x.reshape(-1, true_x.shape[-1])  # (bs*n, dx)
+    true_e = true_e.reshape(-1, true_e.shape[-1])  # (bs*n*n, de)
+    masked_pred_x = masked_pred_x.reshape(-1, masked_pred_x.shape[-1])  # (bs*n, dx)
+    masked_pred_e = masked_pred_e.reshape(-1, masked_pred_e.shape[-1])  # (bs*n*n, de)
+
+    # Remove masked rows
+    mask_x = (true_x != 0).any(axis=-1)
+    mask_e = (true_e != 0).any(axis=-1)
+
+    flat_true_x = true_x[mask_x]
+    flat_true_e = true_e[mask_e]
+
+    flat_pred_x = masked_pred_x[mask_x]
+    flat_pred_e = masked_pred_e[mask_e]
+
+    # Compute metrics
+    loss_x = loss_fn(flat_pred_x, flat_true_x) if true_x.size else 0
+    loss_e = loss_fn(flat_pred_e, flat_true_e) if true_e.size else 0
+    loss_y = loss_fn(pred_y, true_y)
+
+    return lambda_train_x * loss_x + lambda_train_e * loss_e + lambda_train_y * loss_y
 
 
 def compute_val_loss(
@@ -80,13 +115,7 @@ def compute_val_loss(
     limit_dist: Graph,
     rng_key: PRNGKeyArray,
 ):
-    """Computes an estimator for the variational lower bound.
-    pred: (batch_size, n, total_features)
-    noisy_data: dict
-    X, E, y : (bs, n, dx),  (bs, n, n, de), (bs, dy)
-    node_mask : (bs, n)
-    Output: nll (size 1)
-    """
+    # TODO: this still has to be fully ported
     t = noisy_data.t
     x = target.x
     e = target.e
@@ -118,7 +147,9 @@ def compute_val_loss(
 
     # 4. Reconstruction loss
     # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
-    prob0 = reconstruction_logp(rng_key=rng_key, state=state, graph=target, t=t, noise_schedule=noise_schedule)
+    prob0 = reconstruction_logp(
+        rng_key=rng_key, state=state, graph=target, t=t, noise_schedule=noise_schedule
+    )
 
     loss_term_0 = np.sum(x * prob0.X.log(), axis=1) + np.sum(e * prob0.E.log(), axis=1)
 
@@ -141,30 +172,23 @@ def compute_val_loss(
 
 def forward(
     params: FrozenDict,
-    nX: Array,
-    nE: Array,
-    y: Array,
+    graph_x: Array,
+    graph_e: Array,
+    graph_y: Array,
     node_mask: Array,
     state: TrainState,
     extra_data: Graph,
     dropout_key: PRNGKeyArray,
 ):
-    X = np.concatenate((nX, extra_data.x), axis=2).astype(float)
-    E = np.concatenate((nE, extra_data.e), axis=3).astype(float)
-    y = np.hstack((y, extra_data.y)).astype(float)
-    # print(f"{noisy_data.graph=}")
-    # print(f"{extra_data=}")
-    # print(
-    #    f"Forward shapes: {X.shape=}, {E.shape=}, {y.shape=} {noisy_data.graph.mask.shape=}"
-    # )
-    # __import__('sys').exit()
+    X = np.concatenate((graph_x, extra_data.x), axis=2)
+    E = np.concatenate((graph_e, extra_data.e), axis=3)
+    y = np.hstack((graph_y, extra_data.y))
     return state.apply_fn(
         params,
         X,
         E,
         y,
         node_mask,
-        # training=True,
         rngs={"dropout": dropout_key},
     )
 
@@ -182,7 +206,7 @@ def training_step(
     dropout_train_key = jax.random.fold_in(key=rng, data=state.step)
     if data.edge_index.size == 0:
         print("Found a batch with no edges. Skipping.")
-        return
+        return state, 0.0
     X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
     dense_data = Graph(x=X, e=E, y=data.y, mask=node_mask)
     X, E, y = dense_data.x, dense_data.e, dense_data.y
@@ -202,13 +226,6 @@ def training_step(
     )
     # prints the shapes of the noisy data's X, E, y
     extra_data = extra_features(noisy_data)
-
-    # extra data shapes:  torch.Size([200, 9, 8]) torch.Size([200, 9, 9, 0]) torch.Size([200, 13])
-    # assert extra_data.x.shape[2] == 8, f"{extra_data.x.shape=}"
-    # assert extra_data.e.shape[3] == 0, f"{extra_data.e.shape=}"
-    # assert extra_data.y.shape[1] == 13, f"{extra_data.y.shape=}"
-    # extra_data = Graph(x=extra_data.x[:, :, :8], e=extra_data.e, y=extra_data.y[:, :13])
-    # print(f"{extra_data=}")
     nX, nE, ny, n_mask = (
         noisy_data.graph.x,
         noisy_data.graph.e,
@@ -231,29 +248,10 @@ def training_step(
         )
         return loss, pred
 
-    # loss, pred = loss_fn(state)
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (loss, pred), grads = gradient_fn(state.params)
+    (loss, _), grads = gradient_fn(state.params)
     state = state.apply_gradients(grads=grads)
     return state, loss
-
-
-'''
-@jit
-def apply_model(state: TrainState, images, labels):
-    """Computes gradients, loss and accuracy for a single batch."""
-
-    def loss_fn(params):
-        logits = state.apply_fn({"params": params}, images)
-        one_hot = jax.nn.one_hot(labels, 10)
-        loss = np.mean(optax.softmax_cross_entropy(logits=logits, labels=one_hot))
-        return loss, logits
-
-    grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
-    (loss, logits), grads = grad_fn(state.params)
-    accuracy = np.mean(np.argmax(logits, -1) == labels)
-    return grads, loss, accuracy
-'''
 
 
 def train_model(
@@ -284,8 +282,6 @@ def train_model(
         e_classes=output_dims["E"],
         y_classes=output_dims["y"],
     )
-    # We first need to create optimizer and the scheduler for the given number of epochs
-    logger = Logger()
     # Track best eval accuracy
     for epoch_idx in range(1, num_epochs + 1):
         rng, input_rng = jax.random.split(rng)
@@ -298,7 +294,6 @@ def train_model(
             transition_model=transition_model,
             noise_schedule=noise_schedule,
         )
-        # _, test_loss = apply_model(state, val_loader)
 
 
 def training_epoch(
@@ -324,11 +319,14 @@ def training_epoch(
             transition_model=transition_model,
         )
         run_loss += loss
+    avg_loss = run_loss / len(train_loader)
     # prints the average loss for the epoch
-    print(f"Epoch {epoch} loss: {run_loss / len(train_loader)}")
+    print(f"Epoch {epoch} loss: {avg_loss:.4f}")
+    return state, avg_loss
 
 
 def validation_step(model: nn.Module, data: Array, i: int):
+    # TODO: this is still not ported.
     dense_data, node_mask = utils.to_dense(
         data.x, data.edge_index, data.edge_attr, data.batch
     )
@@ -340,81 +338,3 @@ def validation_step(model: nn.Module, data: Array, i: int):
         pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=False
     )
     return {"loss": nll}
-
-
-"""
-class DiscreteDenoisingDiffusion:
-    def __init__(
-        self,
-        model: nn.Module,
-        cfg: GeneralConfig,
-        sampling_metrics: AverageMetric,
-    ):
-        self.model = model
-        self.cfg = cfg
-        self.train_loss = TrainLossDiscrete(self.cfg.train.lambda_train)
-
-        self.val_nll = AverageMetric()
-        self.val_X_kl = SumExceptBatchKL()
-        self.val_E_kl = SumExceptBatchKL()
-        self.val_X_logp = SumExceptBatchMetric()
-        self.val_E_logp = SumExceptBatchMetric()
-
-        self.test_nll = AverageMetric()
-        self.test_X_kl = SumExceptBatchKL()
-        self.test_E_kl = SumExceptBatchKL()
-        self.test_X_logp = SumExceptBatchMetric()
-        self.test_E_logp = SumExceptBatchMetric()
-
-        self.noise_schedule = PredefinedNoiseScheduleDiscrete(
-            cfg.train.diffusion_noise_schedule, timesteps=cfg.train.diffusion_steps
-        )
-        self.sampling_metrics = sampling_metrics
-        if cfg.train.transition == "uniform":
-            self.transition_model = DiscreteUniformTransition(
-                x_classes=self.cfg.dataset.out_dims.X,
-                e_classes=self.cfg.dataset.out_dims.E,
-                y_classes=self.cfg.dataset.out_dims.y,
-            )
-            x_limit = np.ones(self.cfg.dataset.out_dims.X) / self.cfg.dataset.out_dims.X
-            e_limit = np.ones(self.cfg.dataset.out_dims.E) / self.cfg.dataset.out_dims.E
-            y_limit = np.ones(self.cfg.dataset.out_dims.y) / self.cfg.dataset.out_dims.y
-            self.limit_dist = Graph(x=x_limit, e=e_limit, y=y_limit)
-
-        elif cfg.train.transition == "marginal":
-            node_types = self.cfg.dataset.node_types.astype(float)
-            x_marginals = node_types / np.sum(node_types)
-
-            edge_types = self.cfg.dataset.edge_types.astype(float)
-            e_marginals = edge_types / np.sum(edge_types)
-            print(
-                f"Marginal distribution of the classes: {x_marginals} for nodes, {e_marginals} for edges"
-            )
-            self.transition_model = MarginalUniformTransition(
-                x_marginals=x_marginals,
-                e_marginals=e_marginals,
-                y_classes=self.cfg.dataset.out_dims.y,
-            )
-            self.limit_dist = Graph(
-                x=x_marginals,
-                e=e_marginals,
-                y=np.ones(self.cfg.dataset.out_dims.y) / self.cfg.dataset.out_dims.y,
-            )
-
-        # self.save_hyperparameters(ignore=[train_metrics, sampling_metrics]) # TODO: implement this maybe?
-        self.start_epoch_time = None
-        self.train_iterations = None
-        self.val_iterations = None
-        self.log_every_steps = cfg.train.log_every_steps
-        self.number_chain_steps = cfg.train.number_chain_steps
-        self.best_val_nll = 1e8
-        self.val_counter = 0
-
-    def on_validation_epoch_start(self) -> None:
-        self.val_nll.reset()
-        self.val_X_kl.reset()
-        self.val_E_kl.reset()
-        self.val_X_logp.reset()
-        self.val_E_logp.reset()
-        self.sampling_metrics.reset()
-"""

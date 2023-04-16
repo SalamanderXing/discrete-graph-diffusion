@@ -1,3 +1,6 @@
+"""
+This file contains the code for computing the features. These are hardcoded computations that are added to the the input of the graph transformer. It uses functions defined the `eigen_features.py` and `cycle_features.py` files.
+"""
 import jax.numpy as np
 from .cycle_features import node_cycle_features
 from .eigen_features import eigen_features

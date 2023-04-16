@@ -1,3 +1,7 @@
+"""
+Functions related to sampling.
+"""
+# TODO: organize this better
 from jax import numpy as np
 from flax import linen as nn
 from jax import Array
@@ -8,7 +12,7 @@ from jax._src.random import PRNGKey
 from jax.scipy.special import logit
 import ipdb
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
-from .utils import Graph
+from .diffusion_types import Graph
 from .nodes_distribution import NodesDistribution
 from .transition_model import TransitionModel
 
@@ -119,7 +123,7 @@ def sample_discrete_feature_noise(*, limit_dist, node_mask):
 
     assert np.all(U_E == np.transpose(U_E, (0, 2, 1, 3)))
 
-    return Graph(x=U_X, e=U_E, y=U_y).mask(node_mask)
+    return Graph(x=U_X, e=U_E, y=U_y, mask=node_mask)
 
 
 def sample_batch(
@@ -347,130 +351,3 @@ def compute_extra_data(*, noisy_data: dict, extra_features, domain_features):
     extra_y = np.concatenate((extra_y, t), axis=1)
 
     return Graph(x=extra_X, e=extra_E, y=extra_y)
-
-
-'''
-def sample_batch(
-    batch_id: int,
-    batch_size: int,
-    keep_chain: int,
-    number_chain_steps: int,
-    save_final: int,
-    device: t.device,
-    T: int,
-    num_nodes=None,
-    visualization_tools=None,
-):
-    """
-    :param batch_id: int
-    :param batch_size: int
-    :param num_nodes: int, <int>tensor (batch_size) (optional) for specifying number of nodes
-    :param save_final: int: number of predictions to save to file
-    :param keep_chain: int: number of chains to save to file
-    :param keep_chain_steps: number of timesteps to save for each chain
-    :return: molecule_list. Each element of this list is a tuple (atom_types, charges, positions)
-    """
-
-    if num_nodes is None:
-        n_nodes = node_dist.sample_n(batch_size, device)
-    elif type(num_nodes) == int:
-        n_nodes = num_nodes * t.ones(batch_size, device=device, dtype=t.int)
-    else:
-        assert isinstance(num_nodes, t.Tensor)
-        n_nodes = num_nodes
-    n_max = t.max(n_nodes).item()
-    # Build the masks
-    arange = t.arange(n_max, device=device).unsqueeze(0).expand(batch_size, -1)
-    node_mask = arange < n_nodes.unsqueeze(1)
-    # TODO: how to move node_mask on the right device in the multi-gpu case?
-    # TODO: everything else depends on its device
-    # Sample noise  -- z has size (n_samples, n_nodes, n_features)
-    z_T = diffusion_utils.sample_discrete_feature_noise(
-        limit_dist=limit_dist, node_mask=node_mask
-    )
-    X, E, y = z_T.X, z_T.E, z_T.y
-
-    assert (E == t.transpose(E, 1, 2)).all()
-    assert number_chain_steps < T
-    chain_X_size = t.Size((number_chain_steps, keep_chain, X.size(1)))
-    chain_E_size = t.Size((number_chain_steps, keep_chain, E.size(1), E.size(2)))
-
-    chain_X = t.zeros(chain_X_size)
-    chain_E = t.zeros(chain_E_size)
-
-    # Iteratively sample p(z_s | z_t) for t = 1, ..., T, with s = t - 1.
-    for s_int in reversed(range(0, T)):
-        s_array = s_int * t.ones((batch_size, 1)).type_as(y)
-        t_array = s_array + 1
-        s_norm = s_array / T
-        t_norm = t_array / T
-
-        # Sample z_s
-        sampled_s, discrete_sampled_s = sample_p_zs_given_zt(
-            s_norm, t_norm, X, E, y, node_mask
-        )
-        X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
-
-        # Save the first keep_chain graphs
-        write_index = (s_int * number_chain_steps) // T
-        chain_X[write_index] = discrete_sampled_s.X[:keep_chain]
-        chain_E[write_index] = discrete_sampled_s.E[:keep_chain]
-
-    # Sample
-    sampled_s = sampled_s.mask(node_mask, collapse=True)
-    X, E, y = sampled_s.X, sampled_s.E, sampled_s.y
-
-    # Prepare the chain for saving
-    if keep_chain > 0:
-        final_X_chain = X[:keep_chain]
-        final_E_chain = E[:keep_chain]
-
-        chain_X[0] = final_X_chain  # Overwrite last frame with the resulting X, E
-        chain_E[0] = final_E_chain
-
-        chain_X = diffusion_utils.reverse_tensor(chain_X)
-        chain_E = diffusion_utils.reverse_tensor(chain_E)
-
-        # Repeat last frame to see final sample better
-        chain_X = t.cat([chain_X, chain_X[-1:].repeat(10, 1, 1)], dim=0)
-        chain_E = t.cat([chain_E, chain_E[-1:].repeat(10, 1, 1, 1)], dim=0)
-        assert chain_X.size(0) == (number_chain_steps + 10)
-
-    molecule_list = []
-    for i in range(batch_size):
-        n = n_nodes[i]
-        atom_types = X[i, :n].cpu()
-        edge_types = E[i, :n, :n].cpu()
-        molecule_list.append([atom_types, edge_types])
-
-    # Visualize chains
-    if visualization_tools is not None:
-        print("Visualizing chains...")
-        current_path = os.getcwd()
-        num_molecules = chain_X.size(1)  # number of molecules
-        for i in range(num_molecules):
-            result_path = os.path.join(
-                current_path,
-                f"chains/{self.cfg.general.name}/"
-                f"epoch{self.current_epoch}/"
-                f"chains/molecule_{batch_id + i}",
-            )
-            if not os.path.exists(result_path):
-                os.makedirs(result_path)
-                _ = self.visualization_tools.visualize_chain(
-                    result_path, chain_X[:, i, :].numpy(), chain_E[:, i, :].numpy()
-                )
-            print("\r{}/{} complete".format(i + 1, num_molecules), end="", flush=True)
-        print("\nVisualizing molecules...")
-
-        # Visualize the final molecules
-        current_path = os.getcwd()
-        result_path = os.path.join(
-            current_path,
-            f"graphs/{self.name}/epoch{self.current_epoch}_b{batch_id}/",
-        )
-        visualization_tools.visualize(result_path, molecule_list, save_final)
-        print("Done.")
-
-    return molecule_list
-'''

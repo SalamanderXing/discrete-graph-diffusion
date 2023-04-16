@@ -1,3 +1,7 @@
+"""
+Contains all dataclasses used to store the configuration of the training.
+"""
+
 from dataclasses import dataclass
 from jax import Array
 from typing import Any

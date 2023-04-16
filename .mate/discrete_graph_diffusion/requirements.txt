@@ -10,7 +10,7 @@ anyio==3.6.2
 appdirs==1.4.4
 arandr==0.1.11
 archey4==4.14.1.0
-archinstall==2.5.4
+archinstall==2.5.5
 argon2-cffi==21.3.0
 argon2-cffi-bindings==21.2.0
 arrow==1.2.3
@@ -54,7 +54,7 @@ confection==0.0.3
 configobj==5.1.0.dev0
 contourpy==1.0.6
 -e git+https://github.com/j-towns/craystack@f1b68511bbcb24dde3bc6b6d374ca62e038fba27#egg=craystack
-cryptography==39.0.2
+cryptography==40.0.1
 cssselect==1.2.0
 cuda-python==11.8.1
 cycler==0.11.0
@@ -280,7 +280,7 @@ Pygments==2.14.0
 PyGObject==3.44.1
 PyGSP==0.5.1
 pynauty==2.8.6
-pyOpenSSL==23.1.0
+pyOpenSSL==23.1.1
 pyparsing==3.0.9
 pyperclip==1.8.2
 pyproject_hooks==1.0.0
@@ -338,7 +338,7 @@ six==1.16.0
 smart-open==5.2.1
 smmap==5.0.0
 sniffio==1.3.0
-solaar==1.1.8
+solaar==1.1.9
 soupsieve==2.3.2.post1
 sources==1.1.0
 spacy==3.4.3

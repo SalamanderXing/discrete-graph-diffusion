@@ -4,7 +4,6 @@ from jax import Array
 import jax.numpy as np
 import ipdb
 
-from .graph import Graph
 
 
 def remove_self_loops(

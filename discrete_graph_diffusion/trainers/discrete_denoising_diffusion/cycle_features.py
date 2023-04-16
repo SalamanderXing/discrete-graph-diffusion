@@ -1,6 +1,8 @@
+"""
+This file contains the code for computing the cycle features. These are hardcoded computations that are added to the the input of the graph transformer.
+"""
 import jax.numpy as np
 from jax import Array
-import ipdb
 
 from .utils import NoisyData
 

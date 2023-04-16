@@ -1,3 +1,7 @@
+"""
+Class defining the noise schedule for the discrete diffusion model. 
+"""
+# TODO: implement a **learnable noise schedule**. As in https://arxiv.org/pdf/2107.00630.pdf appendix H
 import jax.numpy as np
 from hashlib import md5
 

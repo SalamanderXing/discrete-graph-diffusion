@@ -1,3 +1,7 @@
+"""
+Check out the class docstring. 
+"""
+# TODO: remove this class. It's overly complicated.
 from jax import numpy as np
 from jax.random import PRNGKeyArray
 from jax import Array
@@ -6,8 +10,8 @@ import jax
 
 class NodesDistribution:
     def __init__(self, histogram: Array | dict, rng: PRNGKeyArray):
-        """Compute the distribution of the number of nodes in the dataset, and sample from this distribution.
-        historgram: dict. The keys are num_nodes, the values are counts
+        """
+        Represents the distribution of the number of nodes in a graph and allows sampling from it.
         """
         self.rng = rng
         prob = np.array([])

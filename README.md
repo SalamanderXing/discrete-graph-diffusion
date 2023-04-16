@@ -5,9 +5,16 @@
 - `pytorch` $\rightarrow$ Almost identical to the [original code](https://github.com/cvignac/DiGress), adapted for debugging.
 - `discrete_graph_diffusion` $\rightarrow$ new code in JAX
 
+### The `discrete_graph_diffusion` folder
+
+All the code regarding diffusion lies in the `trainers/discrete_denoising_diffusion` folder. 
+The entrypoint is the file `trainers/discrete_denoising_diffusion/discrete_denoising_diffusion.py`
+
 ## Status
 
-Only the graph transformer works.
+- Graph transformer: looks like its working
+- Data loader: I kept the same from the original code.
+- Trainer (diffusion stuff): only training seems to work.
 
 ## Running the code
 
