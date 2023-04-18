@@ -4,7 +4,7 @@ This file contains the code for computing the cycle features. These are hardcode
 import jax.numpy as np
 from jax import Array
 
-from .utils import NoisyData
+from .diffusion_types import Graph
 
 
 def batch_trace(X: Array) -> Array:
@@ -129,11 +129,11 @@ def k_cycles(adj_matrix: Array) -> tuple[Array, Array]:
     return kcyclesx, kcyclesy
 
 
-def node_cycle_features(noisy_data: NoisyData) -> tuple[Array, Array]:
-    adj_matrix = noisy_data.graph.e[..., 1:].sum(axis=-1).astype(float)
+def node_cycle_features(graph: Graph) -> tuple[Array, Array]:
+    adj_matrix = graph.e[..., 1:].sum(axis=-1).astype(float)
 
     x_cycles, y_cycles = k_cycles(adj_matrix=adj_matrix)  # (bs, n_cycles)
-    x_cycles = x_cycles.astype(adj_matrix.dtype) * noisy_data.graph.mask[..., None]
+    x_cycles = x_cycles.astype(adj_matrix.dtype) * graph.mask[..., None]
     # Avoid large values when the graph is dense
     x_cycles = x_cycles / 10
     y_cycles = y_cycles / 10

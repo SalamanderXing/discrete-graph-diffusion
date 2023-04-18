@@ -1,12 +1,12 @@
 import jax.numpy as np
-from .utils import Graph
+from .diffusion_types import Q
 from abc import ABC, abstractmethod
 from jax import Array
 
 
 class TransitionModel(ABC):
     @abstractmethod
-    def get_Qt(self, beta_t: Array) -> Graph:
+    def get_Qt(self, beta_t: Array) -> Q:
         """Returns one-step transition matrices for X and E, from step t - 1 to step t.
         Qt = (1 - beta_t) * I + beta_t / K
 
@@ -16,7 +16,7 @@ class TransitionModel(ABC):
         pass
 
     @abstractmethod
-    def get_Qt_bar(self, alpha_bar_t: Array) -> Graph:
+    def get_Qt_bar(self, alpha_bar_t: Array) -> Q:
         """Returns t-step transition matrices for X and E, from step 0 to step t.
         Qt = prod(1 - beta_t) * I + (1 - prod(1 - beta_t)) / K
 
@@ -60,7 +60,7 @@ class DiscreteUniformTransition(TransitionModel):
         q_e = beta_t * self.u_e + (1 - beta_t) * np.eye(self.E_classes)[None]
         q_y = beta_t * self.u_y + (1 - beta_t) * np.eye(self.y_classes)[None]
 
-        return Graph(x=q_x, e=q_e, y=q_y)
+        return Q(x=q_x, e=q_e, y=q_y)
 
     def get_Qt_bar(self, alpha_bar_t: Array):
         """Returns t-step transition matrices for X and E, from step 0 to step t.
@@ -75,7 +75,7 @@ class DiscreteUniformTransition(TransitionModel):
         q_e = alpha_bar_t * np.eye(self.E_classes)[None] + (1 - alpha_bar_t) * self.u_e
         q_y = alpha_bar_t * np.eye(self.y_classes)[None] + (1 - alpha_bar_t) * self.u_y
 
-        return Graph(x=q_x, e=q_e, y=q_y)
+        return Q(x=q_x, e=q_e, y=q_y)
 
 
 class MarginalUniformTransition(TransitionModel):
@@ -119,7 +119,7 @@ class MarginalUniformTransition(TransitionModel):
         )
         q_y = beta_t * self.u_y + (1 - beta_t) * np.eye(self.y_classes)[None]
 
-        return Graph(x=q_x, e=q_e, y=q_y)
+        return Q(x=q_x, e=q_e, y=q_y)
 
     def get_Qt_bar(self, alpha_bar_t: Array):
         """Returns t-step transition matrices for X and E, from step 0 to step t.
@@ -138,4 +138,4 @@ class MarginalUniformTransition(TransitionModel):
         q_e = alpha_bar_t * np.eye(self.E_classes)[None] + (1 - alpha_bar_t) * self.u_e
         q_y = alpha_bar_t * np.eye(self.y_classes)[None] + (1 - alpha_bar_t) * self.u_y
 
-        return Graph(x=q_x, e=q_e, y=q_y)
+        return Q(x=q_x, e=q_e, y=q_y)

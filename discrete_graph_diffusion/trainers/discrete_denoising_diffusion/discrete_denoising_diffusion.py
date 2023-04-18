@@ -15,7 +15,7 @@ from rich import print
 from tqdm import tqdm
 from dataclasses import dataclass
 from flax.core.frozen_dict import FrozenDict
-
+from mate import typed
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .transition_model import (
     DiscreteUniformTransition,
@@ -23,35 +23,11 @@ from .transition_model import (
 )
 from .diffusion_functions import apply_noise, compute_Lt
 from .config import TrainingConfig
-from .diffusion_types import Graph, NoisyData
-from .utils.geometric import to_dense
+from .diffusion_types import EmbeddedGraph, NoisyData
 from .diffusion_functions import kl_prior as kl_prior_fn, reconstruction_logp
 from .nodes_distribution import NodesDistribution
 from .extra_features import extra_features
 from .noise_schedule import PredefinedNoiseScheduleDiscrete
-
-
-@dataclass(frozen=True)
-class DataBatch:
-    """
-    Data structure mimicking the PyTorch Geometric DataBatch.
-    """
-
-    edge_index: Array
-    edge_attr: Array
-    x: Array
-    y: Array
-    batch: Array
-
-    @classmethod
-    def from_pytorch(cls, data):
-        return cls(
-            edge_index=np.array(data.edge_index),
-            edge_attr=np.array(data.edge_attr),
-            x=np.array(data.x),
-            y=np.array(data.y),
-            batch=np.array(data.batch),
-        )
 
 
 class TrainState(train_state.TrainState):
@@ -59,12 +35,8 @@ class TrainState(train_state.TrainState):
 
 
 def train_loss(
-    masked_pred_x: Array,
-    masked_pred_e: Array,
-    pred_y: Array,
-    true_x: Array,
-    true_e: Array,
-    true_y: Array,
+    pred_graph: EmbeddedGraph,
+    true_graph: EmbeddedGraph,
     lambda_train_x: float = 1,
     lambda_train_e: float = 5,
     lambda_train_y: float = 0,
@@ -77,12 +49,11 @@ def train_loss(
     true_E : tensor -- (bs, n, n, de)
     true_y : tensor -- (bs, )
     log : boolean."""
-
-    loss_fn = lambda x, y: optax.softmax_cross_entropy(logits=x, labels=y).sum()
-    true_x = true_x.reshape(-1, true_x.shape[-1])  # (bs*n, dx)
-    true_e = true_e.reshape(-1, true_e.shape[-1])  # (bs*n*n, de)
-    masked_pred_x = masked_pred_x.reshape(-1, masked_pred_x.shape[-1])  # (bs*n, dx)
-    masked_pred_e = masked_pred_e.reshape(-1, masked_pred_e.shape[-1])  # (bs*n*n, de)
+    loss_fn = optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
+    true_x = true_graph.x.reshape(-1, true_graph.x.shape[-1])  # (bs*n, dx)
+    true_e = true_graph.e.reshape(-1, true_graph.e.shape[-1])  # (bs*n*n, de)
+    masked_pred_x = pred_graph.x.reshape(-1, pred_graph.x.shape[-1])  # (bs*n, dx)
+    masked_pred_e = pred_graph.e.reshape(-1, pred_graph.e.shape[-1])  # (bs*n*n, de)
 
     # Remove masked rows
     mask_x = (true_x != 0).any(axis=-1)
@@ -95,9 +66,9 @@ def train_loss(
     flat_pred_e = masked_pred_e[mask_e]
 
     # Compute metrics
-    loss_x = loss_fn(flat_pred_x, flat_true_x) if true_x.size else 0
-    loss_e = loss_fn(flat_pred_e, flat_true_e) if true_e.size else 0
-    loss_y = loss_fn(pred_y, true_y)
+    loss_x = loss_fn(flat_pred_x, flat_true_x).sum() if true_x.size else 0
+    loss_e = loss_fn(flat_pred_e, flat_true_e).sum() if true_e.size else 0
+    loss_y = loss_fn(pred_graph.y, true_graph.y).sum()
 
     return lambda_train_x * loss_x + lambda_train_e * loss_e + lambda_train_y * loss_y
 
@@ -105,14 +76,14 @@ def train_loss(
 def compute_val_loss(
     *,
     T: int,
-    target: Graph,
-    pred: Graph,
+    target: EmbeddedGraph,
+    pred: EmbeddedGraph,
     noisy_data: NoisyData,
     node_dist: NodesDistribution,
     noise_schedule: PredefinedNoiseScheduleDiscrete,
     transition_model: TransitionModel,
     state: FrozenDict,
-    limit_dist: Graph,
+    limit_dist: EmbeddedGraph,
     rng_key: PRNGKeyArray,
 ):
     # TODO: this still has to be fully ported
@@ -177,7 +148,7 @@ def forward(
     graph_y: Array,
     node_mask: Array,
     state: TrainState,
-    extra_data: Graph,
+    extra_data: EmbeddedGraph,
     dropout_key: PRNGKeyArray,
 ):
     X = np.concatenate((graph_x, extra_data.x), axis=2)
@@ -195,7 +166,7 @@ def forward(
 
 def training_step(
     *,
-    data: DataBatch,
+    data,
     i: int,
     state: TrainState,
     rng: PRNGKeyArray,
@@ -207,25 +178,23 @@ def training_step(
     if data.edge_index.size == 0:
         print("Found a batch with no edges. Skipping.")
         return state, 0.0
-    X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
-    dense_data = Graph(x=X, e=E, y=data.y, mask=node_mask)
-    X, E, y = dense_data.x, dense_data.e, dense_data.y
+    # X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
+    # dense_data = EmbeddedGraph(x=X, e=E, y=data.y, mask=node_mask)
+    dense_data = EmbeddedGraph.from_sparse_torch(data)
+    X, E = dense_data.x, dense_data.e
     if i == 0:
         ipdb.set_trace()
 
     noisy_data = apply_noise(
-        x=X,
-        e=E,
-        y=y,
+        graph=dense_data,
         training=True,
-        node_mask=node_mask,
         rng=rng,
         T=config.diffusion_steps,
         noise_schedule=noise_schedule,
         transition_model=transition_model,
     )
     # prints the shapes of the noisy data's X, E, y
-    extra_data = extra_features(noisy_data)
+    extra_data = extra_features(noisy_data.graph)
     nX, nE, ny, n_mask = (
         noisy_data.graph.x,
         noisy_data.graph.e,
@@ -239,12 +208,8 @@ def training_step(
             params, nX, nE, ny, n_mask, state, extra_data, dropout_key=dropout_train_key
         )
         loss = train_loss(
-            masked_pred_x=pred.x,
-            masked_pred_e=pred.e,
-            pred_y=pred.y,
-            true_x=X,
-            true_e=E,
-            true_y=data.y,
+            pred_graph=pred,
+            true_graph=dense_data
         )
         return loss, pred
 
@@ -308,7 +273,6 @@ def training_epoch(
 ):
     run_loss = 0.0
     for batch in tqdm(train_loader):
-        batch = DataBatch.from_pytorch(batch)
         state, loss = training_step(
             data=batch,
             i=epoch,

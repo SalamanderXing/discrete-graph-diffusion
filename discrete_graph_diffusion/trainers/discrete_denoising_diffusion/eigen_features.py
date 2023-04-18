@@ -7,7 +7,7 @@ from jax import random
 
 # imports mode from scipy.stats
 from jax.scipy.stats import mode
-from .utils import NoisyData
+from .diffusion_types import Graph
 import ipdb
 
 
@@ -86,9 +86,9 @@ def compute_laplacian(adjacency: Array, normalize: bool) -> Array:
     return (L + L.transpose((0, 2, 1))) / 2
 
 
-def eigen_features(mode: str, noisy_data: NoisyData) -> tuple[Array, ...]:
-    E_t = noisy_data.graph.e
-    mask = noisy_data.graph.mask
+def eigen_features(mode: str, graph: Graph) -> tuple[Array, ...]:
+    E_t = graph.e
+    mask = graph.mask
     A = E_t[..., 1:].sum(axis=-1).astype(np.float32) * mask[:, None] * mask[:, :, None]
     L = compute_laplacian(A, normalize=False)
     mask_diag = 2 * L.shape[-1] * np.eye(A.shape[-1], dtype=L.dtype)[None, :, :]
@@ -116,7 +116,7 @@ def eigen_features(mode: str, noisy_data: NoisyData) -> tuple[Array, ...]:
         # Retrieve eigenvectors features
         nonlcc_indicator, k_lowest_eigenvector = get_eigenvectors_features(
             vectors=eigvectors,
-            node_mask=noisy_data.graph.mask,
+            node_mask=graph.mask,
             n_connected=n_connected_comp,
         )
         return (

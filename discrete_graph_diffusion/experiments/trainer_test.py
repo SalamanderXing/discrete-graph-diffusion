@@ -11,7 +11,7 @@ import jax
 
 remove_h = True
 batch_size = 32
-data_dir = "/Users/giuliozani/Documents/discrete-graph-diffusion/results/experiments/dataloader_test/qm9/qm9_pyg/"
+data_dir = os.path.join(mate.save_dir, "qm9/qm9_pyg/")
 datamodule = QM9DataModule(
     datadir=data_dir,
     train_batch_size=32,
