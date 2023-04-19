@@ -10,7 +10,6 @@ import flax.linen as nn
 from jaxtyping import Float, Int, Bool
 import jax
 import optax
-from typing import cast
 import ipdb
 from rich import print
 from tqdm import tqdm
@@ -83,12 +82,11 @@ def val_loss(
     nodes_dist: NodesDistribution,
     noise_schedule: PredefinedNoiseScheduleDiscrete,
     transition_model: TransitionModel,
-    state: FrozenDict,
+    state: TrainState,
     limit_dist: Distribution,
     rng_key: Key,
 ):
     # TODO: this still has to be fully ported
-    t = noisy_data.t
     x = target.x
     e = target.e
     y = target.y
@@ -173,7 +171,7 @@ def training_step(
     noise_schedule: PredefinedNoiseScheduleDiscrete,
     transition_model: TransitionModel,
 ) -> tuple[TrainState, float]:
-    dropout_train_key = cast(Key, jax.random.fold_in(key=rng, data=state.step))
+    dropout_train_key = jax.random.fold_in(key=rng, data=state.step)
     if data.edge_index.size == 0:
         print("Found a batch with no edges. Skipping.")
         return state, 0.0
@@ -188,7 +186,7 @@ def training_step(
         graph=dense_data,
         training=np.array(True),
         rng=rng,
-        T=config.diffusion_steps,
+        T=array(config.diffusion_steps),
         noise_schedule=noise_schedule,
         transition_model=transition_model,
     )
@@ -286,6 +284,7 @@ def train_model(
             transition_model=transition_model,
             noise_schedule=noise_schedule,
             limit_dist=limit_dist,
+            nodes_dist=nodes_dist,
         )
 
 
@@ -304,7 +303,7 @@ def val_step(
     dropout_test_key = jax.random.fold_in(key=rng, data=state.step)
     if data.edge_index.size == 0:
         print("Found a batch with no edges. Skipping.")
-        return 0.0
+        return array(0.0)
     # X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
     # dense_data = EmbeddedGraph(x=X, e=E, y=data.y, mask=node_mask)
     dense_data = EmbeddedGraph.from_sparse_torch(data)
@@ -323,18 +322,18 @@ def val_step(
         pred = forward(
             params, noisy_data.graph, state, extra_data, dropout_key=dropout_test_key
         )
-        # loss = train_loss(pred_graph=pred, true_graph=dense_data) # just for testing
-        loss = val_loss(
-            state=state,
-            target=dense_data,
-            pred=pred,
-            T=config.diffusion_steps,
-            noise_schedule=noise_schedule,
-            transition_model=transition_model,
-            rng_key=rng,
-            limit_dist=limit_dist,
-            nodes_dist=nodes_dist,
-        )
+        loss = train_loss(pred_graph=pred, true_graph=dense_data)  # just for testing
+        # loss = val_loss(
+        #     state=state,
+        #     target=dense_data,
+        #     pred=pred,
+        #     T=array(config.diffusion_steps),
+        #     noise_schedule=noise_schedule,
+        #     transition_model=transition_model,
+        #     rng_key=rng,
+        #     limit_dist=limit_dist,
+        #     nodes_dist=nodes_dist,
+        # )
         return loss, pred
 
     loss, _ = loss_fn(state.params)
@@ -363,6 +362,7 @@ def val_epoch(
             noise_schedule=noise_schedule,
             transition_model=transition_model,
             limit_dist=limit_dist,
+            nodes_dist=nodes_dist,
         )
         run_loss += loss
     avg_loss = run_loss / len(val_loader)

@@ -31,7 +31,7 @@ class NodesDistribution:
 
     @classmethod
     def from_torch(cls, obj, rng: Key):
-        return cls(obj.prob, rng)
+        return cls(np.array(obj.prob), rng)
 
     def sample_n(self, n_samples):
         return jax.random.choice(
