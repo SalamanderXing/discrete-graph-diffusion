@@ -5,7 +5,6 @@ The function `train_model` is the main entrypoint.
 from jax import numpy as np
 from jax.numpy import array
 from flax.training import train_state
-from jax import jit
 import flax.linen as nn
 from jaxtyping import Float, Int, Bool
 import jax
@@ -42,14 +41,6 @@ def train_loss(
     lambda_train_e: SFloat = array(5.0),
     lambda_train_y: SFloat = array(0.0),
 ):
-    """Compute train metrics
-    masked_pred_X : tensor -- (bs, n, dx)
-    masked_pred_E : tensor -- (bs, n, n, de)
-    pred_y : tensor -- (bs, )
-    true_X : tensor -- (bs, n, dx)
-    true_E : tensor -- (bs, n, n, de)
-    true_y : tensor -- (bs, )
-    log : boolean."""
     loss_fn = optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
     true_x = true_graph.x.reshape(-1, true_graph.x.shape[-1])  # (bs*n, dx)
     true_e = true_graph.e.reshape(-1, true_graph.e.shape[-1])  # (bs*n*n, de)
@@ -149,7 +140,7 @@ def forward(
     X = np.concatenate((graph.x, extra_data.x), axis=2)
     E = np.concatenate((graph.e, extra_data.e), axis=3)
     y = np.hstack((graph.y, extra_data.y))
-    pred = state.apply_fn(
+    pred = state.apply_fn(  # TODO: suffix dist for distributions
         params,
         X,
         E,
@@ -157,7 +148,9 @@ def forward(
         graph.mask.astype(float),
         rngs={"dropout": dropout_key},
     )
-    return EmbeddedGraph(x=pred.x, e=pred.e, y=pred.y, mask=graph.mask)
+    return EmbeddedGraph(
+        x=pred.x, e=pred.e, y=pred.y, mask=graph.mask
+    )  # consider changing the name of this class to something that suggests ditribution
 
 
 @typed
@@ -177,8 +170,7 @@ def training_step(
         return state, 0.0
     # X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
     # dense_data = EmbeddedGraph(x=X, e=E, y=data.y, mask=node_mask)
-    dense_data = EmbeddedGraph.from_sparse_torch(data)
-    X, E = dense_data.x, dense_data.e
+    dense_data = EmbeddedGraph.from_sparse_torch(data)  # TODO: cache this!
     if i == 0:
         ipdb.set_trace()
 
@@ -305,7 +297,6 @@ def val_step(
         print("Found a batch with no edges. Skipping.")
         return array(0.0)
     # X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
-    # dense_data = EmbeddedGraph(x=X, e=E, y=data.y, mask=node_mask)
     dense_data = EmbeddedGraph.from_sparse_torch(data)
     X, E = dense_data.x, dense_data.e
     noisy_data = df.apply_random_noise(
