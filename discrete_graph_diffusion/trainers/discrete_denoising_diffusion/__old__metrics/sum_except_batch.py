@@ -7,6 +7,6 @@ class SumExceptBatchMetric(AverageMetric):
     def __init__(self):
         super().__init__()
 
-    def update(self, values:Array) -> None:
+    def update(self, values: Array) -> None:
         self._accumulator += np.sum(values)
         self._count += values.shape[0]

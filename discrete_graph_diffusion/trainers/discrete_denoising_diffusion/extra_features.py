@@ -5,10 +5,15 @@ import jax.numpy as np
 import ipdb
 from .cycle_features import node_cycle_features
 from .eigen_features import eigen_features
-from .diffusion_types import Graph, EmbeddedGraph
+from .diffusion_types import EmbeddedGraph
+from mate.jax import typed
+import mate as m
 
 
-def extra_features(graph: Graph, features_type="all", max_n_nodes=100) -> EmbeddedGraph:
+@typed
+def extra_features(
+    graph: EmbeddedGraph, features_type="all", max_n_nodes=100
+) -> EmbeddedGraph:
     n = np.sum(graph.mask, axis=1, keepdims=True) / max_n_nodes
     x_cycles, y_cycles = node_cycle_features(graph)  # (bs, n_cycles)
 

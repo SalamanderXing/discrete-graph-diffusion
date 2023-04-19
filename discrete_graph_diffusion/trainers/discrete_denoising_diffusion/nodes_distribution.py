@@ -6,16 +6,18 @@ from jax import numpy as np
 from jax.random import PRNGKeyArray
 from jax import Array
 import jax
+from mate.jax import typed, Key
+from jaxtyping import Float, Bool
 
 
 class NodesDistribution:
-    def __init__(self, histogram: Array | dict, rng: PRNGKeyArray):
+    def __init__(self, histogram: Float[Array, "n"] | dict, rng: Key):
         """
         Represents the distribution of the number of nodes in a graph and allows sampling from it.
         """
         self.rng = rng
         prob = np.array([])
-        if type(histogram) == dict:
+        if isinstance(histogram, dict):
             max_n_nodes = max(histogram.keys())
             prob = np.zeros(max_n_nodes + 1)
             for num_nodes, count in histogram.items():
@@ -26,6 +28,10 @@ class NodesDistribution:
             raise TypeError("histogram must be a dict or a jax Array")
 
         self.prob = prob / prob.sum()
+
+    @classmethod
+    def from_torch(cls, obj, rng: Key):
+        return cls(obj.prob, rng)
 
     def sample_n(self, n_samples):
         return jax.random.choice(

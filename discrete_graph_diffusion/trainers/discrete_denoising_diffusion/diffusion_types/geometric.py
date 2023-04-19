@@ -5,7 +5,6 @@ import jax.numpy as np
 import ipdb
 
 
-
 def remove_self_loops(
     edge_index: Array,
     edge_attr: Optional[Array] = None,

@@ -1,8 +1,9 @@
 from dataclasses import dataclass
+from flax.linen import Embed
 
 from jax import Array
 
-from .graph import Graph
+from .embedded_graph import EmbeddedGraph
 
 import jax_dataclasses as jdc
 from typing import Annotated
@@ -15,7 +16,7 @@ class NoisyData:
         (),
         float,
     ]
-    graph: Graph
+    graph: EmbeddedGraph
     t_int: Annotated[
         Array,
         (),

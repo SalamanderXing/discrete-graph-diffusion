@@ -7,9 +7,9 @@ from jaxtyping import Float, Bool, jaxtyped
 from typeguard import typechecked
 from typing import Annotated
 
+
 @jdc.pytree_dataclass
 class Q(jdc.EnforcedAnnotationsMixin):
     x: Float[Array, "b n"]
     e: Float[Array, "b n n"]
     y: Float[Array, "b n"]
-

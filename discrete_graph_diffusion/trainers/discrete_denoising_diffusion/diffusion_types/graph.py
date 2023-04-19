@@ -3,7 +3,7 @@ from jax import Array
 from jax import numpy as np
 import ipdb
 import jax_dataclasses as jdc
-from mate import typed
+from mate.jax import typed
 from jaxtyping import Float, Bool
 from typing import Annotated
 

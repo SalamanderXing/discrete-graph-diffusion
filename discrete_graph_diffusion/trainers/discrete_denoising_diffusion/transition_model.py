@@ -2,6 +2,7 @@ import jax.numpy as np
 from .diffusion_types import Q
 from abc import ABC, abstractmethod
 from jax import Array
+import ipdb
 
 
 class TransitionModel(ABC):
@@ -74,7 +75,7 @@ class DiscreteUniformTransition(TransitionModel):
         q_x = alpha_bar_t * np.eye(self.X_classes)[None] + (1 - alpha_bar_t) * self.u_x
         q_e = alpha_bar_t * np.eye(self.E_classes)[None] + (1 - alpha_bar_t) * self.u_e
         q_y = alpha_bar_t * np.eye(self.y_classes)[None] + (1 - alpha_bar_t) * self.u_y
-
+        ipdb.set_trace()
         return Q(x=q_x, e=q_e, y=q_y)
 
 

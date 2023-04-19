@@ -3,6 +3,7 @@ Class defining the noise schedule for the discrete diffusion model.
 """
 # TODO: implement a **learnable noise schedule**. As in https://arxiv.org/pdf/2107.00630.pdf appendix H
 import jax.numpy as np
+import jax
 from hashlib import md5
 
 
@@ -78,3 +79,12 @@ class PredefinedNoiseScheduleDiscrete:
             self.betas.tolist() + self.alphas.tolist() + self.alphas_bar.tolist()
         ).encode()
         return int(md5(data).hexdigest(), 16)
+
+
+if __name__ == "__main__":
+    jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+    import matplotlib.pyplot as plt
+
+    noise_schedule = PredefinedNoiseScheduleDiscrete("cosine", 1000)
+    plt.plot(noise_schedule.betas)
+    plt.show()
