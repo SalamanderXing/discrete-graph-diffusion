@@ -1,11 +1,15 @@
 import jax.numpy as np
-from .diffusion_types import Q
+from .q import Q
 from abc import ABC, abstractmethod
 from jax import Array
-from mate.jax import SFloat, SInt
+from jaxtyping import Float
+from mate.jax import SFloat, SInt, typed
+import jax_dataclasses as jdc
 import ipdb
+from .noise_schedule import NoiseSchedule
+from .q import Q
 
-
+'''
 class TransitionModel(ABC):
     @abstractmethod
     def get_Qt(self, beta_t: Array) -> Q:
@@ -49,7 +53,10 @@ class DiscreteUniformTransition(TransitionModel):
         if self.y_classes > 0:
             self.u_y = self.u_y / self.y_classes
 
-    def get_Qt(self, beta_t: Array):
+
+        
+
+    def get_Qt(self, beta_t: SFloat):
         """Returns one-step transition matrices for X and E, from step t - 1 to step t.
         $Q_t = (1 - \beta_t) * I + \beta_t / K$
 
@@ -64,7 +71,7 @@ class DiscreteUniformTransition(TransitionModel):
 
         return Q(x=q_x, e=q_e, y=q_y)
 
-    def get_Qt_bar(self, alpha_bar_t: Array):
+    def get_Qt_bar(self, alpha_bar_t: SFloat):
         """Returns t-step transition matrices for X and E, from step 0 to step t.
         Qt = prod(1 - beta_t) * I + (1 - prod(1 - beta_t)) / K
 
@@ -78,27 +85,65 @@ class DiscreteUniformTransition(TransitionModel):
         q_y = alpha_bar_t * np.eye(self.y_classes)[None] + (1 - alpha_bar_t) * self.u_y
         ipdb.set_trace()
         return Q(x=q_x, e=q_e, y=q_y)
+'''
 
 
-class MarginalUniformTransition(TransitionModel):
-    def __init__(self, x_marginals: Array, e_marginals: Array, y_classes: int):
-        self.X_classes = len(x_marginals)
-        self.E_classes = len(e_marginals)
-        self.y_classes = y_classes
-        self.x_marginals = x_marginals
-        self.e_marginals = e_marginals
+@jdc.pytree_dataclass
+class TransitionModel(jdc.EnforcedAnnotationsMixin):
+    x_marginals: Float[Array, "n"]
+    e_marginals: Float[Array, "m"]
+    y_classes: int
+    diffusion_steps: int
+    qs: Q
+    q_bars: Q
 
-        self.u_x = np.broadcast_to(
-            x_marginals[None, None], (1, self.X_classes, x_marginals.shape[0])
+    @classmethod
+    @typed
+    def create(
+        cls,
+        x_marginals: Float[Array, "n"],
+        e_marginals: Float[Array, "m"],
+        y_classes: int,
+        diffusion_steps: int,
+    ) -> "TransitionModel":
+        x_classes = len(x_marginals)
+        e_classes = len(e_marginals)
+        u_x = np.broadcast_to(
+            x_marginals[None, None], (1, x_classes, x_marginals.shape[0])
         )
-        self.u_e = np.broadcast_to(
-            e_marginals[None, None], (1, self.E_classes, e_marginals.shape[0])
+        u_e = np.broadcast_to(
+            e_marginals[None, None], (1, e_classes, e_marginals.shape[0])
+        )
+        u_y = np.ones((1, y_classes, y_classes)) / (y_classes if y_classes > 0 else 1)
+        noise_schedule = NoiseSchedule.create("cosine", diffusion_steps)
+        betas = noise_schedule.betas[:, None, None]
+        q_xs = betas * u_x + (1 - betas) * np.eye(x_classes)[None]
+        q_es = (
+            betas * u_e
+            + (1 - betas)
+            * np.eye(
+                e_classes,
+            )[None]
+        )
+        q_ys = betas * u_y + (1 - betas) * np.eye(y_classes)[None]
+        qs = Q(x=q_xs, e=q_es, y=q_ys)
+
+        alpha_bars = noise_schedule.alphas_bar[:, None, None]
+        q_bar_xs = alpha_bars * np.eye(x_classes)[None] + (1 - alpha_bars) * u_x
+        q_bar_es = alpha_bars * np.eye(e_classes)[None] + (1 - alpha_bars) * u_e
+        q_bar_ys = alpha_bars * np.eye(y_classes)[None] + (1 - alpha_bars) * u_y
+        q_bars = Q(x=q_bar_xs, e=q_bar_es, y=q_bar_ys)
+
+        return cls(
+            x_marginals=x_marginals,
+            e_marginals=e_marginals,
+            y_classes=y_classes,
+            diffusion_steps=diffusion_steps,
+            qs=qs,
+            q_bars=q_bars,
         )
 
-        self.u_y = np.ones((1, self.y_classes, self.y_classes))
-        if self.y_classes > 0:
-            self.u_y = self.u_y / self.y_classes
-
+    '''
     def get_Qt(self, beta_t: SFloat) -> Q:
         """Returns one-step transition matrices for X and E, from step t - 1 to step t.
         Qt = (1 - beta_t) * I + beta_t / K
@@ -129,12 +174,10 @@ class MarginalUniformTransition(TransitionModel):
         """
         alpha_bar_t = alpha_bar_t[:, None]
         alpha_bar_t = alpha_bar_t
-        self.u_x = self.u_x
-        self.u_e = self.u_e
-        self.u_y = self.u_y
 
         q_x = alpha_bar_t * np.eye(self.X_classes)[None] + (1 - alpha_bar_t) * self.u_x
         q_e = alpha_bar_t * np.eye(self.E_classes)[None] + (1 - alpha_bar_t) * self.u_e
         q_y = alpha_bar_t * np.eye(self.y_classes)[None] + (1 - alpha_bar_t) * self.u_y
 
         return Q(x=q_x, e=q_e, y=q_y)
+    '''

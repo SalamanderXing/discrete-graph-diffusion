@@ -13,7 +13,7 @@ from jax.scipy.special import logit
 import ipdb
 from .diffusion_types import Q, GraphDistribution, NoiseSchedule
 from .nodes_distribution import NodesDistribution
-from .transition_model import TransitionModel
+from .diffusion_types import TransitionModel
 
 
 def sample_discrete_features(

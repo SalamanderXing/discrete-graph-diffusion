@@ -15,13 +15,9 @@ from tqdm import tqdm
 from dataclasses import dataclass
 from flax.core.frozen_dict import FrozenDict
 from mate.jax import SFloat, SInt, SBool, SUInt, typed, Key
-from .transition_model import (
-    MarginalUniformTransition,
-    TransitionModel,
-)
 from . import diffusion_functions as df
 from .config import TrainingConfig
-from .diffusion_types import GraphDistribution, NoisyData, Distribution, NoiseSchedule
+from .diffusion_types import GraphDistribution, NoisyData, Distribution, NoiseSchedule, TransitionModel, TransitionModel
 from .nodes_distribution import NodesDistribution
 from .extra_features import extra_features
 
@@ -91,7 +87,6 @@ def val_loss(
         transition_model=transition_model,
         prior_dist=prior_dist,
     )
-
     # 3. Diffusion loss
     loss_all_t = df.compute_Lt(
         target=target,
@@ -236,10 +231,11 @@ def train_model(
         y=np.ones(output_dims["y"]) / output_dims["y"],
     )
     # Key idea proposed in the DiGress paper: use the prior distribution to gnerate Q_t
-    transition_model = MarginalUniformTransition(
+    transition_model = TransitionModel.create(
         x_marginals=prior_dist.x,
         e_marginals=prior_dist.e,
         y_classes=output_dims["y"],
+        diffusion_steps=config.diffusion_steps,
     )
     # Track best eval accuracy
     for epoch_idx in range(1, num_epochs + 1):

@@ -2,8 +2,6 @@
 A lot of functions related to diffusion models. But which do not depend on the on the model itself.
 """
 from typing import Callable
-from jax.random import PRNGKeyArray
-from jax import jit
 import jax
 import ipdb
 from rich import print
@@ -17,7 +15,7 @@ from mate.jax import typed
 from mate.jax import SInt, SFloat, Key
 from jaxtyping import Int, Float, Bool
 
-from .transition_model import TransitionModel
+from .diffusion_types import TransitionModel
 from .sample import sample_discrete_features
 from .utils import softmax_kl_div
 from .diffusion_types import GraphDistribution, NoisyData, Distribution, NoiseSchedule
@@ -27,7 +25,7 @@ from .extra_features import extra_features
 @typed
 def reconstruction_logp(
     *,
-    rng_key: PRNGKeyArray,
+    rng_key: Key,
     state: TrainState,
     noise_schedule: NoiseSchedule,
     t: SInt,
@@ -96,6 +94,7 @@ def compute_Lt(
     noisy_data: NoisyData,
     T: SFloat,
     transition_model: TransitionModel,
+    t: SInt,
 ) -> Array:
     pred_probs = GraphDistribution.with_trivial_mask(
         x=jax.nn.softmax(pred.x, axis=-1),
@@ -145,45 +144,59 @@ def compute_Lt(
 
 
 @typed
-def compute_posterior_distribution(
-    M: Array, M_t: Array, Qt_M: Array, Qsb_M: Array, Qtb_M: Array
-) -> Array:
-    """M: X or E
-    Compute xt @ Qt.T * x0 @ Qsb / x0 @ Qtb @ xt.T
-    """
-    # Flatten feature tensors
-    M = np.reshape(M, (M.shape[0], -1, M.shape[-1])).astype(
-        np.float32
-    )  # (bs, N, d) with N = n or n * n
-    M_t = np.reshape(M_t, (M_t.shape[0], -1, M_t.shape[-1])).astype(np.float32)  # same
-
-    Qt_M_T = np.transpose(Qt_M, (0, 2, 1))  # (bs, d, d)
-
-    left_term = M_t @ Qt_M_T  # (bs, N, d)
-    right_term = M @ Qsb_M  # (bs, N, d)
-    product = left_term * right_term  # (bs, N, d)
-
-    denom = M @ Qtb_M  # (bs, N, d) @ (bs, d, d) = (bs, N, d)
-    denom = (denom * M_t).sum(axis=-1)  # (bs, N, d) * (bs, N, d) + sum = (bs, N)
-
-    prob = product / denom[..., None]  # (bs, N, d)
-
-    return prob
+def posterior_distribution(
+    t: SInt,
+    original_embedded_graph: GraphDistribution,
+    transition_model: TransitionModel,
+) -> SFloat:
+    q_t = transition_model.qs[t]
+    q_t_bar = transition_model.q_bars[t]
+    q_s_bar = transition_model.q_bars[t - 1]
+    #dist_s_given_original = original_embedded_graph
 
 
-@typed
-def posterior_distributions(
-    graph: GraphDistribution, graph_t: GraphDistribution, Qt, Qsb, Qtb
-) -> GraphDistribution:
-    return GraphDistribution.with_trivial_mask(
-        x=compute_posterior_distribution(
-            M=graph.x, M_t=graph_t.x, Qt_M=Qt.X, Qsb_M=Qsb.X, Qtb_M=Qtb.X
-        ),  # (bs, n, dx),
-        e=compute_posterior_distribution(
-            M=graph.e, M_t=graph_t.e, Qt_M=Qt.E, Qsb_M=Qsb.E, Qtb_M=Qtb.E
-        ).reshape((graph.e.shape[0], graph.e.shape[1], graph.e.shape[1], -1)),
-        y=graph_t.y,
-    )
+
+
+# @typed
+# def compute_posterior_distribution(
+#     M: Array, M_t: Array, Qt_M: Array, Qsb_M: Array, Qtb_M: Array
+# ) -> Array:
+#     """M: X or E
+#     Compute xt @ Qt.T * x0 @ Qsb / x0 @ Qtb @ xt.T
+#     """
+#     # Flatten feature tensors
+#     M = np.reshape(M, (M.shape[0], -1, M.shape[-1])).astype(
+#         np.float32
+#     )  # (bs, N, d) with N = n or n * n
+#     M_t = np.reshape(M_t, (M_t.shape[0], -1, M_t.shape[-1])).astype(np.float32)  # same
+
+#     Qt_M_T = np.transpose(Qt_M, (0, 2, 1))  # (bs, d, d)
+
+#     left_term = M_t @ Qt_M_T  # (bs, N, d)
+#     right_term = M @ Qsb_M  # (bs, N, d)
+#     product = left_term * right_term  # (bs, N, d)
+
+#     denom = M @ Qtb_M  # (bs, N, d) @ (bs, d, d) = (bs, N, d)
+#     denom = (denom * M_t).sum(axis=-1)  # (bs, N, d) * (bs, N, d) + sum = (bs, N)
+
+#     prob = product / denom[..., None]  # (bs, N, d)
+
+#     return prob
+
+
+# @typed
+# def posterior_distributions(
+#     graph: GraphDistribution, graph_t: GraphDistribution, Qt, Qsb, Qtb
+# ) -> GraphDistribution:
+#     return GraphDistribution.with_trivial_mask(
+#         x=compute_posterior_distribution(
+#             M=graph.x, M_t=graph_t.x, Qt_M=Qt.X, Qsb_M=Qsb.X, Qtb_M=Qtb.X
+#         ),  # (bs, n, dx),
+#         e=compute_posterior_distribution(
+#             M=graph.e, M_t=graph_t.e, Qt_M=Qt.E, Qsb_M=Qsb.E, Qtb_M=Qtb.E
+#         ).reshape((graph.e.shape[0], graph.e.shape[1], graph.e.shape[1], -1)),
+#         y=graph_t.y,
+#     )
 
 
 def kl_div(p: Array, q: Array, eps: float = 2**-17) -> Array:
@@ -224,7 +237,7 @@ def mask_distributions(
 @typed
 def apply_random_noise(
     *,
-    rng: Array,
+    rng: Key,
     graph: GraphDistribution,
     T: SInt,
     noise_schedule: NoiseSchedule,
@@ -248,7 +261,7 @@ def apply_random_noise(
 @typed
 def apply_noise(
     *,
-    rng: Array,
+    rng: Key,
     graph: GraphDistribution,
     T: SInt,
     noise_schedule: NoiseSchedule,
@@ -266,14 +279,16 @@ def apply_noise(
     alpha_s_bar = noise_schedule.alphas_bar[s_int]  # (bs, 1)
     alpha_t_bar = noise_schedule.alphas_bar[s_int]  # (bs, 1)
 
-    Qt_bar = transition_model.get_Qt_bar(
-        alpha_t_bar
-    )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
+    Qt_bar = transition_model.q_bars[t_int]
+    # .get_Qt_bar(
+    #    alpha_t_bar
+    # )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
     assert (abs(Qt_bar.x.sum(axis=2) - 1.0) < 1e-4).all(), Qt_bar.x.sum(axis=2) - 1
     assert (abs(Qt_bar.e.sum(axis=2) - 1.0) < 1e-4).all()
     # Compute transition probabilities
-    probX = graph.x @ Qt_bar.x  # (bs, n, dx_out)
-    probE = graph.e @ Qt_bar.e[:, None]  # (bs, n, n, de_out)
+    #probX = graph.x @ Qt_bar.x  # (bs, n, dx_out)
+    #probE = graph.e @ Qt_bar.e[:, None]  # (bs, n, n, de_out)
+    prob_graph = graph @ Qt_bar
 
     sampled_graph_t = sample_discrete_features(
         probX=probX, probE=probE, node_mask=graph.mask, rng_key=rng

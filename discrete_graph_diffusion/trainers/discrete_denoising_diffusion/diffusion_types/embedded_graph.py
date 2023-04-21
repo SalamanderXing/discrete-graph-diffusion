@@ -6,6 +6,7 @@ from mate.jax import typed
 from jaxtyping import Float, Bool
 from .geometric import to_dense
 from .data_batch import DataBatch
+from .q import Q
 
 
 @jdc.pytree_dataclass
@@ -113,4 +114,10 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         x = np.concatenate((self.x, other.x), axis=2)
         e = np.concatenate((self.e, other.e), axis=3)
         y = np.hstack((self.y, other.y))
-        return GraphDistribution.with_trivial_mask(x, e, y)
+        return GraphDistribution(x=x, e=e, y=y, mask=self.mask)
+
+    def __matmul__(self, q: Q) -> "GraphDistribution":
+        x = self.x @ q.x
+        e = self.e @ q.e[:, None]
+        # TODO: why isn't y applied? It seems like it's like this in the original code.
+        return GraphDistribution(x=x, e=e, y=self.y, mask=self.mask)
