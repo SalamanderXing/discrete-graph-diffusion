@@ -5,22 +5,22 @@ import jax.numpy as np
 import ipdb
 from .cycle_features import node_cycle_features
 from .eigen_features import eigen_features
-from .diffusion_types import EmbeddedGraph
+from . import GraphDistribution
 from mate.jax import typed
 import mate as m
 
 
 @typed
-def extra_features(
-    graph: EmbeddedGraph, features_type="all", max_n_nodes=100
-) -> EmbeddedGraph:
+def compute(
+    graph: GraphDistribution, features_type="all", max_n_nodes=100
+) -> GraphDistribution:
     n = np.sum(graph.mask, axis=1, keepdims=True) / max_n_nodes
     x_cycles, y_cycles = node_cycle_features(graph)  # (bs, n_cycles)
 
     if features_type == "cycles":
         E = graph.e
         extra_edge_attr = np.zeros((*E.shape[:-1], 0), dtype=E.dtype)
-        return EmbeddedGraph.with_trivial_mask(
+        return GraphDistribution.with_trivial_mask(
             x=x_cycles, e=extra_edge_attr, y=np.hstack((n, y_cycles))
         )
 
@@ -29,7 +29,7 @@ def extra_features(
         E = graph.e
         extra_edge_attr = np.zeros((*E.shape[:-1], 0), dtype=E.dtype)
         n_components, batched_eigenvalues = eigenfeatures  # (bs, 1), (bs, 10)
-        return EmbeddedGraph.with_trivial_mask(
+        return GraphDistribution.with_trivial_mask(
             x=x_cycles,
             e=extra_edge_attr,
             y=np.hstack((n, y_cycles, n_components, batched_eigenvalues)),
@@ -47,7 +47,7 @@ def extra_features(
         # (bs, n, 1), (bs, n, 2)
         y = np.concatenate((n, y_cycles, n_components, batched_eigenvalues), axis=-1)
         x = np.concatenate((x_cycles, nonlcc_indicator, k_lowest_eigvec), axis=-1)
-        return EmbeddedGraph.with_trivial_mask(
+        return GraphDistribution.with_trivial_mask(
             e=extra_edge_attr,
             x=x,
             y=y,

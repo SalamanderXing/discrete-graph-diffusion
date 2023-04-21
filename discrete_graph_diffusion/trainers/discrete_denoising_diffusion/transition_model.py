@@ -2,6 +2,7 @@ import jax.numpy as np
 from .diffusion_types import Q
 from abc import ABC, abstractmethod
 from jax import Array
+from mate.jax import SFloat, SInt
 import ipdb
 
 
@@ -98,7 +99,7 @@ class MarginalUniformTransition(TransitionModel):
         if self.y_classes > 0:
             self.u_y = self.u_y / self.y_classes
 
-    def get_Qt(self, beta_t: Array):
+    def get_Qt(self, beta_t: SFloat) -> Q:
         """Returns one-step transition matrices for X and E, from step t - 1 to step t.
         Qt = (1 - beta_t) * I + beta_t / K
 
@@ -106,9 +107,6 @@ class MarginalUniformTransition(TransitionModel):
         returns: qx (bs, dx, dx), qe (bs, de, de), qy (bs, dy, dy)."""
         beta_t = beta_t[:, None]
         beta_t = beta_t
-        self.u_x = self.u_x
-        self.u_e = self.u_e
-        self.u_y = self.u_y
 
         q_x = beta_t * self.u_x + (1 - beta_t) * np.eye(self.X_classes)[None]
         q_e = (

@@ -9,8 +9,3 @@ def assert_correctly_masked(variable, node_mask):
         np.abs(variable * (1 - node_mask.astype(variable.dtype))).max().item() < 1e-4
     )
     assert condition, "Variables not masked properly."
-
-
-
-
-

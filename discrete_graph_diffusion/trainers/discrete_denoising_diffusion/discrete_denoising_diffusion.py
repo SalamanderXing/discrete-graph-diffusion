@@ -15,18 +15,15 @@ from tqdm import tqdm
 from dataclasses import dataclass
 from flax.core.frozen_dict import FrozenDict
 from mate.jax import SFloat, SInt, SBool, SUInt, typed, Key
-from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .transition_model import (
-    DiscreteUniformTransition,
     MarginalUniformTransition,
     TransitionModel,
 )
 from . import diffusion_functions as df
 from .config import TrainingConfig
-from .diffusion_types import EmbeddedGraph, NoisyData, Distribution
+from .diffusion_types import GraphDistribution, NoisyData, Distribution, NoiseSchedule
 from .nodes_distribution import NodesDistribution
 from .extra_features import extra_features
-from .noise_schedule import PredefinedNoiseScheduleDiscrete
 
 
 class TrainState(train_state.TrainState):
@@ -35,8 +32,8 @@ class TrainState(train_state.TrainState):
 
 @typed
 def train_loss(
-    pred_graph: EmbeddedGraph,
-    true_graph: EmbeddedGraph,
+    pred_graph: GraphDistribution,
+    true_graph: GraphDistribution,
     lambda_train_x: SFloat = array(1.0),
     lambda_train_e: SFloat = array(5.0),
     lambda_train_y: SFloat = array(0.0),
@@ -68,13 +65,13 @@ def train_loss(
 def val_loss(
     *,
     T: SInt,
-    target: EmbeddedGraph,
-    pred: EmbeddedGraph,
+    target: GraphDistribution,
+    pred: GraphDistribution,
     nodes_dist: NodesDistribution,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
     state: TrainState,
-    limit_dist: Distribution,
+    prior_dist: Distribution,
     rng_key: Key,
 ):
     # TODO: this still has to be fully ported
@@ -92,7 +89,7 @@ def val_loss(
         T=T,
         noise_schedule=noise_schedule,
         transition_model=transition_model,
-        limit_dist=limit_dist,
+        prior_dist=prior_dist,
     )
 
     # 3. Diffusion loss
@@ -130,38 +127,14 @@ def val_loss(
 
 
 @typed
-def forward(
-    params: FrozenDict,
-    graph: EmbeddedGraph,
-    state: TrainState,
-    extra_data: EmbeddedGraph,
-    dropout_key: Key,
-) -> EmbeddedGraph:
-    X = np.concatenate((graph.x, extra_data.x), axis=2)
-    E = np.concatenate((graph.e, extra_data.e), axis=3)
-    y = np.hstack((graph.y, extra_data.y))
-    pred = state.apply_fn(  # TODO: suffix dist for distributions
-        params,
-        X,
-        E,
-        y,
-        graph.mask.astype(float),
-        rngs={"dropout": dropout_key},
-    )
-    return EmbeddedGraph(
-        x=pred.x, e=pred.e, y=pred.y, mask=graph.mask
-    )  # consider changing the name of this class to something that suggests ditribution
-
-
-@typed
-def training_step(
+def train_step(
     *,
     data,
     i: SInt,
     state: TrainState,
     rng: Key,
     config: TrainingConfig,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
 ) -> tuple[TrainState, float]:
     dropout_train_key = jax.random.fold_in(key=rng, data=state.step)
@@ -170,7 +143,7 @@ def training_step(
         return state, 0.0
     # X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
     # dense_data = EmbeddedGraph(x=X, e=E, y=data.y, mask=node_mask)
-    dense_data = EmbeddedGraph.from_sparse_torch(data)  # TODO: cache this!
+    dense_data = GraphDistribution.from_sparse_torch(data)  # TODO: cache this!
     if i == 0:
         ipdb.set_trace()
 
@@ -182,13 +155,27 @@ def training_step(
         noise_schedule=noise_schedule,
         transition_model=transition_model,
     )
-    # prints the shapes of the noisy data's X, E, y
-    extra_data = extra_features(noisy_data.graph)
+    # concatenates the extra features to the graph
+    graph_dist_with_extra_data = noisy_data.embedded_graph | extra_features.compute(
+        noisy_data.embedded_graph
+    )
 
     def loss_fn(params: FrozenDict):
-        pred = forward(
-            params, noisy_data.graph, state, extra_data, dropout_key=dropout_train_key
+        raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
+            params,
+            graph_dist_with_extra_data.x,
+            graph_dist_with_extra_data.e,
+            graph_dist_with_extra_data.y,
+            noisy_data.embedded_graph.mask.astype(float),
+            rngs={"dropout": dropout_train_key},
         )
+        pred = GraphDistribution(
+            x=raw_pred.x,
+            e=raw_pred.e,
+            y=raw_pred.y,
+            mask=noisy_data.embedded_graph.mask,
+        )  # consider changing the name of this class to something that suggests ditribution
+
         loss = train_loss(pred_graph=pred, true_graph=dense_data)
         return loss, pred
 
@@ -220,18 +207,15 @@ def train_model(
         tx=optax.adam(lr),
         key=rngs["dropout"],
     )
-    noise_schedule = PredefinedNoiseScheduleDiscrete(
+    noise_schedule = NoiseSchedule.create(
         "cosine", diffusion_steps=config.diffusion_steps
     )
     """
-    transition_model = DiscreteUniformTransition(
-        x_classes=output_dims["X"],
-        e_classes=output_dims["E"],
-        y_classes=output_dims["y"],
-    )
+    The following is the prior of the data. It is used to generate matrices Q_t, 
+    and also to compute the prior loss term in the ELBO.
     """
     # TODO: replace hardcoded values with computed ones
-    limit_dist = Distribution(
+    prior_dist = Distribution(
         x=np.array(
             [
                 0.7230000495910645,
@@ -251,9 +235,10 @@ def train_model(
         ),
         y=np.ones(output_dims["y"]) / output_dims["y"],
     )
+    # Key idea proposed in the DiGress paper: use the prior distribution to gnerate Q_t
     transition_model = MarginalUniformTransition(
-        x_marginals=limit_dist.x,
-        e_marginals=limit_dist.e,
+        x_marginals=prior_dist.x,
+        e_marginals=prior_dist.e,
         y_classes=output_dims["y"],
     )
     # Track best eval accuracy
@@ -275,7 +260,7 @@ def train_model(
             config=config,
             transition_model=transition_model,
             noise_schedule=noise_schedule,
-            limit_dist=limit_dist,
+            limit_dist=prior_dist,
             nodes_dist=nodes_dist,
         )
 
@@ -287,7 +272,7 @@ def val_step(
     state: TrainState,
     config: TrainingConfig,
     rng: Key,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
     limit_dist: Distribution,
     nodes_dist: NodesDistribution,
@@ -297,7 +282,7 @@ def val_step(
         print("Found a batch with no edges. Skipping.")
         return array(0.0)
     # X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
-    dense_data = EmbeddedGraph.from_sparse_torch(data)
+    dense_data = GraphDistribution.from_sparse_torch(data)
     X, E = dense_data.x, dense_data.e
     noisy_data = df.apply_random_noise(
         graph=dense_data,
@@ -307,13 +292,30 @@ def val_step(
         noise_schedule=noise_schedule,
         transition_model=transition_model,
     )
-    extra_data = extra_features(noisy_data.graph)
+    graph_dist_with_extra_data = noisy_data.embedded_graph | extra_features.compute(
+        noisy_data.embedded_graph
+    )
 
     def loss_fn(params: FrozenDict):
-        pred = forward(
-            params, noisy_data.graph, state, extra_data, dropout_key=dropout_test_key
+        raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
+            params,
+            graph_dist_with_extra_data.x,
+            graph_dist_with_extra_data.e,
+            graph_dist_with_extra_data.y,
+            noisy_data.embedded_graph.mask.astype(float),
+            rngs={"dropout": dropout_test_key},
         )
-        loss = train_loss(pred_graph=pred, true_graph=dense_data)  # just for testing
+        pred = GraphDistribution(
+            x=raw_pred.x,
+            e=raw_pred.e,
+            y=raw_pred.y,
+            mask=noisy_data.embedded_graph.mask,
+        )  # consider changing the name of this class to something that suggests distribution
+        loss = train_loss(
+            pred_graph=pred,
+            true_graph=dense_data,
+        ) 
+
         # loss = val_loss(
         #     state=state,
         #     target=dense_data,
@@ -338,7 +340,7 @@ def val_epoch(
     state: TrainState,
     config: TrainingConfig,
     rng: Key,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
     limit_dist: Distribution,
     nodes_dist: NodesDistribution,
@@ -370,12 +372,12 @@ def train_epoch(
     state: TrainState,
     config: TrainingConfig,
     rng: Key,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
 ):
     run_loss = 0.0
     for batch in tqdm(train_loader):
-        state, loss = training_step(
+        state, loss = train_step(
             data=batch,
             i=np.array(epoch),
             state=state,

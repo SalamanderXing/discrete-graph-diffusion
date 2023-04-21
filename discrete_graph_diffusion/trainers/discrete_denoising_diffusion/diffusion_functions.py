@@ -18,10 +18,9 @@ from mate.jax import SInt, SFloat, Key
 from jaxtyping import Int, Float, Bool
 
 from .transition_model import TransitionModel
-from .noise_schedule import PredefinedNoiseScheduleDiscrete
 from .sample import sample_discrete_features
 from .utils import softmax_kl_div
-from .diffusion_types import EmbeddedGraph, NoisyData, Distribution
+from .diffusion_types import GraphDistribution, NoisyData, Distribution, NoiseSchedule
 from .extra_features import extra_features
 
 
@@ -30,12 +29,12 @@ def reconstruction_logp(
     *,
     rng_key: PRNGKeyArray,
     state: TrainState,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     t: SInt,
-    graph: EmbeddedGraph,
+    graph: GraphDistribution,
     transition_model: TransitionModel,
-    get_extra_features: Callable[[NoisyData], EmbeddedGraph],
-    get_domain_features: Callable[[NoisyData], EmbeddedGraph],
+    get_extra_features: Callable[[NoisyData], GraphDistribution],
+    get_domain_features: Callable[[NoisyData], GraphDistribution],
 ):
     e = graph.e
     x = graph.x
@@ -57,10 +56,10 @@ def reconstruction_logp(
     y0 = sampled0.y
     assert (x.shape == X0.shape) and (e.shape == E0.shape)
 
-    sampled_0 = EmbeddedGraph(x=X0, e=E0, y=y0, mask=mask)
+    sampled_0 = GraphDistribution(x=X0, e=E0, y=y0, mask=mask)
 
     noisy_data = NoisyData(
-        graph=sampled_0,
+        embedded_graph=sampled_0,
         t=np.zeros((X0.shape[0], 1), dtype=y0.dtype),
     )
     extra_data = extra_features(
@@ -69,7 +68,7 @@ def reconstruction_logp(
     # pred0 = model.apply(noisy_data, extra_data, node_mask)
     # passes the parameters to the model and calls the apply
     x, e, y = state.apply_fn(state.params, noisy_data, extra_data, mask)
-    pred0 = EmbeddedGraph(x=x, e=e, y=y, mask=mask)
+    pred0 = GraphDistribution(x=x, e=e, y=y, mask=mask)
 
     # Normalize predictions
     probX0 = jax.nn.softmax(pred0.x, axis=-1)
@@ -86,19 +85,19 @@ def reconstruction_logp(
     diag_mask = np.expand_dims(diag_mask, 0).repeat(probE0.shape[0], axis=0)
     probE0 = probE0.at[diag_mask].set(np.ones(e.shape[-1]))
 
-    return EmbeddedGraph(x=probX0, e=probE0, y=proby0)
+    return GraphDistribution(x=probX0, e=probE0, y=proby0)
 
 
 @typed
 def compute_Lt(
     *,
-    target: EmbeddedGraph,
-    pred: EmbeddedGraph,
+    target: GraphDistribution,
+    pred: GraphDistribution,
     noisy_data: NoisyData,
     T: SFloat,
     transition_model: TransitionModel,
 ) -> Array:
-    pred_probs = EmbeddedGraph(
+    pred_probs = GraphDistribution.with_trivial_mask(
         x=jax.nn.softmax(pred.x, axis=-1),
         e=jax.nn.softmax(pred.e, axis=-1),
         y=jax.nn.softmax(pred.y, axis=-1),
@@ -115,14 +114,14 @@ def compute_Lt(
     # Compute distributions to compare with KL
     prob_true = posterior_distributions(
         target,
-        noisy_data.graph,
+        noisy_data.embedded_graph,
         Qt=Qt,
         Qsb=Qs_bar,
         Qtb=Qt_bar,
     )
     prob_pred_unmasked = posterior_distributions(
         pred_probs,
-        noisy_data.graph,
+        noisy_data.embedded_graph,
         Qt=Qt,
         Qsb=Qs_bar,
         Qtb=Qt_bar,
@@ -174,9 +173,9 @@ def compute_posterior_distribution(
 
 @typed
 def posterior_distributions(
-    graph: EmbeddedGraph, graph_t: EmbeddedGraph, Qt, Qsb, Qtb
-) -> EmbeddedGraph:
-    return EmbeddedGraph(
+    graph: GraphDistribution, graph_t: GraphDistribution, Qt, Qsb, Qtb
+) -> GraphDistribution:
+    return GraphDistribution.with_trivial_mask(
         x=compute_posterior_distribution(
             M=graph.x, M_t=graph_t.x, Qt_M=Qt.X, Qsb_M=Qsb.X, Qtb_M=Qtb.X
         ),  # (bs, n, dx),
@@ -226,9 +225,9 @@ def mask_distributions(
 def apply_random_noise(
     *,
     rng: Array,
-    graph: EmbeddedGraph,
+    graph: GraphDistribution,
     T: SInt,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
     training: Bool[Array, ""],
 ) -> NoisyData:
@@ -250,40 +249,26 @@ def apply_random_noise(
 def apply_noise(
     *,
     rng: Array,
-    graph: EmbeddedGraph,
+    graph: GraphDistribution,
     T: SInt,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
     t_int: Int[Array, "batch_size 1"],
 ) -> NoisyData:
     """Sample noise and apply it to the data."""
 
-    # Sample a timestep t.
-    # When evaluating, the loss for t=0 is computed separately
-    # t_int = jax.random.randint(  # sample t_int from U[lowest_t, T]
-    #     rng, (graph.x.shape[0], 1), lowest_t, T + 1
-    # )  # why as type float?
     s_int = t_int - 1
 
     t_float = t_int / T  # current normalized timestep
-    s_float = s_int / T  # previous normalized timestep
 
     # beta_t and alpha_s_bar are used for denoising/loss computation
-    beta_t = noise_schedule(
-        t_normalized=t_float
-    )  # (bs, 1) beta_t is the noise level at t
-    alpha_s_bar = noise_schedule.get_alpha_bar(t_normalized=s_float)  # (bs, 1)
-    alpha_t_bar = noise_schedule.get_alpha_bar(t_normalized=t_float)  # (bs, 1)
+    beta_t = noise_schedule.betas[t_int]  # (bs, 1) beta_t is the noise level at t
+    alpha_s_bar = noise_schedule.alphas_bar[s_int]  # (bs, 1)
+    alpha_t_bar = noise_schedule.alphas_bar[s_int]  # (bs, 1)
 
     Qt_bar = transition_model.get_Qt_bar(
         alpha_t_bar
     )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
-    """
-    import matplotlib.pyplot as plt
-    plt.title(t_int[0][0])
-    plt.imshow(Qt_bar.x[0])
-    plt.show()
-    """
     assert (abs(Qt_bar.x.sum(axis=2) - 1.0) < 1e-4).all(), Qt_bar.x.sum(axis=2) - 1
     assert (abs(Qt_bar.e.sum(axis=2) - 1.0) < 1e-4).all()
     # Compute transition probabilities
@@ -298,7 +283,7 @@ def apply_noise(
     E_t = jax.nn.one_hot(sampled_graph_t.e, num_classes=probE.shape[-1])
     assert (graph.x.shape == X_t.shape) and (graph.e.shape == E_t.shape)
 
-    z_t = EmbeddedGraph(x=X_t, e=E_t, y=graph.y, mask=graph.mask).type_as(X_t)
+    z_t = GraphDistribution(x=X_t, e=E_t, y=graph.y, mask=graph.mask).type_as(X_t)
 
     vals = (E_t.reshape(E_t.shape[0], -1) == 0).all(axis=-1)
     if vals.any():
@@ -310,19 +295,19 @@ def apply_noise(
         beta_t=beta_t,
         alpha_s_bar=alpha_s_bar,  # alpha_s_bar is the alpha value at the previous timestep
         alpha_t_bar=alpha_t_bar,  # alpha_t_bar is the alpha value at the current timestep
-        graph=z_t,
+        embedded_graph=z_t,
     )
 
 
 @typed
 def kl_prior(
     *,
-    target: EmbeddedGraph,
-    T: Float[Array, ""],
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    target: GraphDistribution,
+    T: SInt,
+    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
-    limit_dist: Distribution,
-) -> Array:
+    prior_dist: Distribution,
+) -> SFloat:
     """Computes the KL between q(z1 | x) and the prior p(z1) = Normal(0, 1).
 
     This is essentially a lot of work for something that is in practice negligible in the loss. However, you
@@ -331,7 +316,7 @@ def kl_prior(
     # Compute the last alpha value, alpha_T.
     ones = np.ones((target.x.shape[0], 1))
     Ts = T * ones
-    alpha_t_bar = noise_schedule.get_alpha_bar(t_int=Ts)  # (bs, 1)
+    alpha_t_bar = noise_schedule.alphas_bar[Ts]  # (bs, 1)
 
     Qtb = transition_model.get_Qt_bar(alpha_t_bar)
 
@@ -342,8 +327,8 @@ def kl_prior(
 
     bs, n, _ = probX.shape
 
-    limit_X = np.broadcast_to(np.expand_dims(limit_dist.x, (0, 1)), (bs, n, -1))
-    limit_E = np.broadcast_to(np.expand_dims(limit_dist.e, (0, 1, 2)), (bs, n, n, -1))
+    limit_X = np.broadcast_to(np.expand_dims(prior_dist.x, (0, 1)), (bs, n, -1))
+    limit_E = np.broadcast_to(np.expand_dims(prior_dist.e, (0, 1, 2)), (bs, n, n, -1))
 
     # Make sure that masked rows do not contribute to the loss
     limit_dist_X, limit_dist_E, probX, probE = mask_distributions(

@@ -11,8 +11,7 @@ from jax import random
 from jax._src.random import PRNGKey
 from jax.scipy.special import logit
 import ipdb
-from .noise_schedule import PredefinedNoiseScheduleDiscrete
-from .diffusion_types import Q, EmbeddedGraph
+from .diffusion_types import Q, GraphDistribution, NoiseSchedule
 from .nodes_distribution import NodesDistribution
 from .transition_model import TransitionModel
 
@@ -123,7 +122,7 @@ def sample_discrete_feature_noise(*, limit_dist, node_mask):
 
     assert np.all(U_E == np.transpose(U_E, (0, 2, 1, 3)))
 
-    return EmbeddedGraph(x=U_X, e=U_E, y=U_y, mask=node_mask)
+    return GraphDistribution(x=U_X, e=U_E, y=U_y, mask=node_mask)
 
 
 def sample_batch(
@@ -135,9 +134,9 @@ def sample_batch(
     T: int,
     node_dist: NodesDistribution,
     num_nodes=None,
-    limit_dist: EmbeddedGraph | None = None,
+    limit_dist: GraphDistribution | None = None,
     noise_transition: TransitionModel,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     extra_features: Array,
     domain_features: Array,
     batch_id: int = -1,  # used by the visualization tools
@@ -253,7 +252,7 @@ def sample_p_zs_given_zt(
     E_t: Array,
     y_t: Array,
     node_mask: Array,
-    noise_schedule: PredefinedNoiseScheduleDiscrete,
+    noise_schedule: NoiseSchedule,
     noise_transition: TransitionModel,
     extra_features: Array,
     domain_features: Array,
@@ -265,8 +264,8 @@ def sample_p_zs_given_zt(
     """Samples from zs ~ p(zs | zt). Only used during sampling.
     if last_step, return the graph prediction as well"""
     bs, n, _ = X_t.shape
-    beta_t = noise_schedule(t_normalized=t)  # (bs, 1)
-    alpha_s_bar = noise_schedule.get_alpha_bar(t_normalized=s)
+    beta_t = noise_schedule.betas[t] # (bs, 1)
+    alpha_s_bar = noise_schedule.get_alpha_bar(t_normalized=s) # TODO: covert to updated TransitionModel
     alpha_t_bar = noise_schedule.get_alpha_bar(t_normalized=t)
 
     # Retrieve transitions matrix
@@ -328,8 +327,8 @@ def sample_p_zs_given_zt(
     assert (E_s == np.swapaxes(E_s, 1, 2)).all()
     assert (X_t.shape == X_s.shape) and (E_t.shape == E_s.shape)
 
-    out_one_hot = EmbeddedGraph(x=X_s, e=E_s, y=np.zeros(y_t.shape[0], 0))
-    out_discrete = EmbeddedGraph(x=X_s, e=E_s, y=np.zeros(y_t.shape[0], 0))
+    out_one_hot = GraphDistribution(x=X_s, e=E_s, y=np.zeros(y_t.shape[0], 0))
+    out_discrete = GraphDistribution(x=X_s, e=E_s, y=np.zeros(y_t.shape[0], 0))
 
     return out_one_hot.mask(node_mask).type_as(y_t), out_discrete.mask(
         node_mask, collapse=True
@@ -350,4 +349,4 @@ def compute_extra_data(*, noisy_data: dict, extra_features, domain_features):
     t = noisy_data["t"]
     extra_y = np.concatenate((extra_y, t), axis=1)
 
-    return EmbeddedGraph(x=extra_X, e=extra_E, y=extra_y)
+    return GraphDistribution(x=extra_X, e=extra_E, y=extra_y)

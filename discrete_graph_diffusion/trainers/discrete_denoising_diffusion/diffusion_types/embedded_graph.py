@@ -9,7 +9,7 @@ from .data_batch import DataBatch
 
 
 @jdc.pytree_dataclass
-class EmbeddedGraph(jdc.EnforcedAnnotationsMixin):
+class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     x: Float[Array, "b n en"]
     e: Float[Array, "b n n ee"]
     y: Float[Array, "b ey"]
@@ -51,7 +51,7 @@ class EmbeddedGraph(jdc.EnforcedAnnotationsMixin):
         e: Array | None,
         y: Array | None,
         mask: Array | None,
-    ) -> "EmbeddedGraph":
+    ) -> "GraphDistribution":
         """Sets the values of X, E, y."""
         if x is None:
             x = self.x
@@ -61,7 +61,7 @@ class EmbeddedGraph(jdc.EnforcedAnnotationsMixin):
             y = self.y
         if mask is None:
             mask = self.mask
-        return EmbeddedGraph(x=x, e=e, y=y, mask=mask)
+        return GraphDistribution(x=x, e=e, y=y, mask=mask)
 
     @classmethod
     def from_sparse(cls, data_batch: DataBatch):
@@ -78,10 +78,10 @@ class EmbeddedGraph(jdc.EnforcedAnnotationsMixin):
         )
         return cls(x=x, e=e, y=data_batch.y, mask=node_mask)
 
-    def type_as(self, x: Array) -> "EmbeddedGraph":
+    def type_as(self, x: Array) -> "GraphDistribution":
         """Changes the device and dtype of X, E, y."""
         dtype = x.dtype
-        return EmbeddedGraph(
+        return GraphDistribution(
             x=self.x.astype(dtype),
             e=self.e.astype(dtype),
             y=self.y.astype(dtype),
@@ -107,3 +107,10 @@ class EmbeddedGraph(jdc.EnforcedAnnotationsMixin):
             assert np.allclose(e, np.transpose(e, (0, 2, 1, 3)))
         object.__setattr__(self, "x", x)
         object.__setattr__(self, "e", e)
+
+    # overrides the pipe operator, that takes another EmbeddedGraph as input. This concatenates the two graphs.
+    def __or__(self, other: "GraphDistribution") -> "GraphDistribution":
+        x = np.concatenate((self.x, other.x), axis=2)
+        e = np.concatenate((self.e, other.e), axis=3)
+        y = np.hstack((self.y, other.y))
+        return GraphDistribution.with_trivial_mask(x, e, y)

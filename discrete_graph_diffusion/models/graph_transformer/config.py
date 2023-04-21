@@ -25,7 +25,7 @@ class GraphTransformerConfig:
     n_layers: int
     input_dims: Dimensions
     hidden_mlp_dims: Dimensions
-    hidden_dims: HiddenDimensions 
+    hidden_dims: HiddenDimensions
     output_dims: Dimensions
 
     # has a custom init method that creates a config object from a dictionary

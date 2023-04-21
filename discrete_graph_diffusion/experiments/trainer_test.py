@@ -1,3 +1,6 @@
+import jax
+
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 from mate import mate
 from dataclasses import dataclass, asdict
 from ..data_loaders.qm9_p import QM9DataModule, QM9Infos, get_train_smiles
@@ -7,7 +10,6 @@ from ..trainers.discrete_denoising_diffusion import train_model, TrainingConfig
 import ipdb
 from jax import numpy as np
 from jax import random
-import jax
 
 remove_h = True
 batch_size = 32
@@ -26,7 +28,6 @@ dataset_infos = QM9Infos(
 datamodule.prepare_data()
 uba = next(iter(datamodule.train_dataloader()))
 
-jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 graph_transformer_config = GraphTransformerConfig.from_dict(
     dict(
@@ -96,4 +97,5 @@ train_model(
     train_loader=datamodule.train_dataloader(),
     val_loader=datamodule.val_dataloader(),
     output_dims=graph_transformer_config.output_dims.__dict__,
+    nodes_dist=dataset_infos.nodes_dist,
 )

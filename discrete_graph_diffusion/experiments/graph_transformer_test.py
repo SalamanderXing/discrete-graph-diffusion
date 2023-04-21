@@ -8,7 +8,7 @@ from jax import numpy as np
 from jax import random
 import jax
 
-jax.config.update("jax_platform_name", "cpu") # run on CPU for now.
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 config = GraphTransformerConfig.from_dict(
     dict(

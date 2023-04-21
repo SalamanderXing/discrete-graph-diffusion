@@ -9,7 +9,7 @@ import mate as m
 # imports mode from scipy.stats
 from jax.scipy.stats import mode
 
-from .diffusion_types import EmbeddedGraph
+from . import GraphDistribution
 from mate.jax import typed
 import ipdb
 
@@ -104,7 +104,7 @@ def compute_laplacian(adjacency: Array, normalize: bool) -> Array:
 
 
 @typed
-def eigen_features(mode: str, graph: EmbeddedGraph) -> tuple[Array, ...]:
+def eigen_features(mode: str, graph: GraphDistribution) -> tuple[Array, ...]:
     E_t = graph.e
     mask = graph.mask
     A = E_t[..., 1:].sum(axis=-1).astype(np.float32) * mask[:, None] * mask[:, :, None]

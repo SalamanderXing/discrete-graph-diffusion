@@ -7,6 +7,7 @@ from .xey_transformer_layer import XEYTransformerLayer
 from .utils import PlaceHolder, assert_correctly_masked
 from .config import GraphTransformerConfig
 
+
 class GraphTransformer(nn.Module):
     """
     n_layers: int -- number of layers
