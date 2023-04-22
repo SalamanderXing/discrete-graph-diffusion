@@ -1,5 +1,6 @@
 from jax import Array
 from jax import numpy as np
+from jax.experimental.checkify import check
 import ipdb
 import jax_dataclasses as jdc
 from mate.jax import typed
@@ -8,6 +9,7 @@ from .geometric import to_dense
 from .data_batch import DataBatch
 from .q import Q
 
+check = lambda x, y: None
 
 @jdc.pytree_dataclass
 class GraphDistribution(jdc.EnforcedAnnotationsMixin):
@@ -15,8 +17,6 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     e: Float[Array, "b n n ee"]
     y: Float[Array, "b ey"]
     mask: Bool[Array, "b"]
-
-    collapse: bool = False
 
     @classmethod
     @typed
@@ -93,7 +93,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         x_mask = np.expand_dims(node_mask, -1)  # bs, n, 1
         e_mask1 = np.expand_dims(x_mask, 2)  # bs, n, 1, 1
         e_mask2 = np.expand_dims(x_mask, 1)  # bs, 1, n, e_mask1
-        if self.collapse:
+        if False:  # collapse
             x = np.argmax(self.x, axis=-1)
             e = np.argmax(self.e, axis=-1)
 
@@ -101,11 +101,8 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             e[(e_mask1 * e_mask2).squeeze(-1) == 0] = -1
         else:
             x = self.x * x_mask
-            try:
-                e = self.e * e_mask1 * e_mask2
-            except:
-                ipdb.set_trace()
-            assert np.allclose(e, np.transpose(e, (0, 2, 1, 3)))
+            e = self.e * e_mask1 * e_mask2
+            check(np.allclose(e, np.transpose(e, (0, 2, 1, 3))), "whoops")
         object.__setattr__(self, "x", x)
         object.__setattr__(self, "e", e)
 

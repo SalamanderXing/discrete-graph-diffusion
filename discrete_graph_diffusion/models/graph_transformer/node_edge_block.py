@@ -2,7 +2,6 @@ from flax import linen as nn
 from jax import numpy as np
 from jax import Array
 import ipdb
-from .utils import assert_correctly_masked
 from .layers import XToY, EToY, masked_softmax
 
 
@@ -79,7 +78,7 @@ class NodeEdgeBlock(nn.Module):
         # 1. Map X to keys and queries
         q = self.q(x) * x_mask
         k = self.k(x) * x_mask
-        assert_correctly_masked(q, x_mask)
+        # assert_correctly_masked(q, x_mask)
 
         q = q.reshape(bs, n, 1, self.n_head, df)
         k = k.reshape(bs, 1, n, self.n_head, df)
@@ -87,7 +86,7 @@ class NodeEdgeBlock(nn.Module):
         # Compute unnormalized attention scores. Y is (bs, n, n, n_heads, df)
         attn = q * k
         attn /= np.sqrt(attn.shape[-1])
-        assert_correctly_masked(attn, (e_mask1 * e_mask2)[..., None])
+        # assert_correctly_masked(attn, (e_mask1 * e_mask2)[..., None])
 
         e1 = (self.e_mul(e) * e_mask1 * e_mask2).reshape(bs, n, n, self.n_head, df)
         e2 = (self.e_add(e) * e_mask1 * e_mask2).reshape(bs, n, n, self.n_head, df)
@@ -104,7 +103,7 @@ class NodeEdgeBlock(nn.Module):
 
         # Output E
         new_e = self.e_out(new_e) * e_mask1 * e_mask2
-        assert_correctly_masked(new_e, (e_mask1 * e_mask2))
+        # assert_correctly_masked(new_e, (e_mask1 * e_mask2))
 
         # Compute attentios attn is still (bs, n, n, n_heads, df)
         softmax_mask = np.broadcast_to(e_mask2, (bs, n, n, self.n_head))
@@ -128,7 +127,7 @@ class NodeEdgeBlock(nn.Module):
 
         # Output X
         new_x = self.x_out(new_x) * x_mask
-        assert_correctly_masked(new_x, x_mask)
+        # assert_correctly_masked(new_x, x_mask)
 
         # Process y based on x and e
         y = self.y_y(y)

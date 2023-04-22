@@ -60,7 +60,9 @@ class NoiseSchedule(jdc.EnforcedAnnotationsMixin):
 
     @classmethod
     @typed
-    def create(cls, name: str, diffusion_steps: int) -> "NoiseSchedule":
+    def create(cls, schedule_index: int, diffusion_steps: int) -> "NoiseSchedule":
+        schedule_names = ["cosine", "custom"]
+        name = schedule_names[schedule_index]
         if name == "cosine":
             betas = cosine_beta_schedule_discrete(diffusion_steps)
         elif name == "custom":

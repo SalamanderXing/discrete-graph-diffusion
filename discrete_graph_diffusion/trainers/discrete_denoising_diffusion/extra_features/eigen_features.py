@@ -13,6 +13,8 @@ from . import GraphDistribution
 from mate.jax import typed
 import ipdb
 
+check = lambda x, y="": None
+
 
 @typed
 def get_eigenvectors_features(
@@ -32,12 +34,15 @@ def get_eigenvectors_features(
     mask = ~(first_ev == most_common[:, None])
     not_lcc_indicator = (mask * node_mask)[:, :, None].astype(np.float32)
 
+    # TODO: the following code is not compatible with JAX's jit
     # Get the eigenvectors corresponding to the first nonzero eigenvalues
+    """
     to_extend = np.squeeze(max(n_connected) + k - n)
     if to_extend > 0:
         vectors = np.concatenate(
             (vectors, np.zeros((bs, n, to_extend), dtype=vectors.dtype)), axis=2
         )
+    """
     indices = np.arange(k, dtype=np.int32)[None, None, :] + n_connected[:, :, None]
     indices = np.broadcast_to(indices, (bs, n, k))
     first_k_ev = np.take_along_axis(vectors, indices, axis=2)
@@ -56,21 +61,25 @@ def get_eigenvalues_features(
     ev = eigenvalues
     bs, n = ev.shape
     n_connected_components = np.sum(ev < 1e-5, axis=-1)
-    assert np.all(
-        n_connected_components >= 0
-    ), "Negative number of connected components"
+    check(
+        np.all(n_connected_components >= 0), "Negative number of connected components"
+    )
+    """
     if not np.all(n_connected_components > 0):
         problematic_idx = np.argmin(n_connected_components)
         print("Problematic graph index:", problematic_idx)
         print("Adjacency matrix A:", A[problematic_idx])
         print("Laplacian matrix L:", L[problematic_idx])
         ipdb.set_trace()
+    """
+    # TODO: the following code is not compatible with JAX's jit
+    """
+    to_extend = np.array((32, np.max(n_connected_components) + k - n))
 
-    to_extend = max(n_connected_components) + k - n
-    if to_extend > 0:
-        eigenvalues = np.hstack(
-            (eigenvalues, 2 * np.ones((bs, to_extend), dtype=eigenvalues.dtype))
-        )
+    eigenvalues = np.hstack(
+        (eigenvalues, 2 * np.ones(to_extend, dtype=eigenvalues.dtype))
+    )
+    """
     indices = np.arange(k, dtype=np.int32)[None, :] + n_connected_components[:, None]
     first_k_ev = np.take_along_axis(eigenvalues, indices, axis=1)
     return n_connected_components[..., None], first_k_ev

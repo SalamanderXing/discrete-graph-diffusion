@@ -8,19 +8,20 @@ from rich import print
 from jax import Array
 import jax
 from jax import numpy as np
+from jax.experimental.checkify import check
 from flax import linen as nn
 from flax.training.train_state import TrainState
 import mate as m
-from mate.jax import typed
-from mate.jax import SInt, SFloat, Key
+from mate.jax import SInt, SFloat, Key, typed, jit, SBool
 from jaxtyping import Int, Float, Bool
 
 from .diffusion_types import TransitionModel
 from .sample import sample_discrete_features
 from .utils import softmax_kl_div
-from .diffusion_types import GraphDistribution, NoisyData, Distribution, NoiseSchedule
+from .diffusion_types import GraphDistribution, Distribution, NoiseSchedule
 from .extra_features import extra_features
 
+check = lambda x, y: None
 
 @typed
 def reconstruction_logp(
@@ -31,8 +32,8 @@ def reconstruction_logp(
     t: SInt,
     graph: GraphDistribution,
     transition_model: TransitionModel,
-    get_extra_features: Callable[[NoisyData], GraphDistribution],
-    get_domain_features: Callable[[NoisyData], GraphDistribution],
+    get_extra_features,  #: Callable[[NoisyData], GraphDistribution],
+    get_domain_features,  #: Callable[[NoisyData], GraphDistribution],
 ):
     e = graph.e
     x = graph.x
@@ -52,7 +53,7 @@ def reconstruction_logp(
     X0 = np.eye(x.shape[-1])[sampled0.x]
     E0 = np.eye(e.shape[-1])[sampled0.e]
     y0 = sampled0.y
-    assert (x.shape == X0.shape) and (e.shape == E0.shape)
+    check((x.shape == X0.shape) and (e.shape == E0.shape), "Whoops")
 
     sampled_0 = GraphDistribution(x=X0, e=E0, y=y0, mask=mask)
 
@@ -91,7 +92,7 @@ def compute_Lt(
     *,
     target: GraphDistribution,
     pred: GraphDistribution,
-    noisy_data: NoisyData,
+    noisy_data,
     T: SFloat,
     transition_model: TransitionModel,
     t: SInt,
@@ -152,9 +153,7 @@ def posterior_distribution(
     q_t = transition_model.qs[t]
     q_t_bar = transition_model.q_bars[t]
     q_s_bar = transition_model.q_bars[t - 1]
-    #dist_s_given_original = original_embedded_graph
-
-
+    # dist_s_given_original = original_embedded_graph
 
 
 # @typed
@@ -234,84 +233,56 @@ def mask_distributions(
     return true_X, true_E, pred_X, pred_E
 
 
-@typed
+@jit
 def apply_random_noise(
     *,
     rng: Key,
     graph: GraphDistribution,
     T: SInt,
-    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
-    training: Bool[Array, ""],
-) -> NoisyData:
-    lowest_t = 0 if training else 1
+    test: SBool,
+) -> GraphDistribution:
+    lowest_t = np.array(test).astype(np.int32)
     t_int = jax.random.randint(  # sample t_int from U[lowest_t, T]
         rng, (graph.x.shape[0], 1), lowest_t, T + 1
-    )
+    ).squeeze()
     return apply_noise(
         rng=rng,
         graph=graph,
-        T=T,
-        noise_schedule=noise_schedule,
         transition_model=transition_model,
         t_int=t_int,
     )
 
 
-@typed
+@jit
 def apply_noise(
     *,
     rng: Key,
     graph: GraphDistribution,
-    T: SInt,
-    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
-    t_int: Int[Array, "batch_size 1"],
-) -> NoisyData:
+    t_int: Int[Array, "batch_size"],
+) -> GraphDistribution:
     """Sample noise and apply it to the data."""
 
-    s_int = t_int - 1
-
-    t_float = t_int / T  # current normalized timestep
-
-    # beta_t and alpha_s_bar are used for denoising/loss computation
-    beta_t = noise_schedule.betas[t_int]  # (bs, 1) beta_t is the noise level at t
-    alpha_s_bar = noise_schedule.alphas_bar[s_int]  # (bs, 1)
-    alpha_t_bar = noise_schedule.alphas_bar[s_int]  # (bs, 1)
-
     Qt_bar = transition_model.q_bars[t_int]
-    # .get_Qt_bar(
-    #    alpha_t_bar
-    # )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
-    assert (abs(Qt_bar.x.sum(axis=2) - 1.0) < 1e-4).all(), Qt_bar.x.sum(axis=2) - 1
-    assert (abs(Qt_bar.e.sum(axis=2) - 1.0) < 1e-4).all()
+    check(
+        (abs(Qt_bar.x.sum(axis=2) - 1.0) < 1e-4).all(),
+        "whoops",
+    )
+    check((abs(Qt_bar.e.sum(axis=2) - 1.0) < 1e-4).all(), "whoops")
+
     # Compute transition probabilities
-    #probX = graph.x @ Qt_bar.x  # (bs, n, dx_out)
-    #probE = graph.e @ Qt_bar.e[:, None]  # (bs, n, n, de_out)
     prob_graph = graph @ Qt_bar
 
     sampled_graph_t = sample_discrete_features(
-        probX=probX, probE=probE, node_mask=graph.mask, rng_key=rng
+        probX=prob_graph.x, probE=prob_graph.e, node_mask=graph.mask, rng_key=rng
     )
 
-    X_t = jax.nn.one_hot(sampled_graph_t.x, num_classes=probX.shape[-1])
-    E_t = jax.nn.one_hot(sampled_graph_t.e, num_classes=probE.shape[-1])
-    assert (graph.x.shape == X_t.shape) and (graph.e.shape == E_t.shape)
+    X_t = jax.nn.one_hot(sampled_graph_t.x, num_classes=prob_graph.x.shape[-1])
+    E_t = jax.nn.one_hot(sampled_graph_t.e, num_classes=prob_graph.e.shape[-1])
+    check((graph.x.shape == X_t.shape) and (graph.e.shape == E_t.shape), "whooops")
 
-    z_t = GraphDistribution(x=X_t, e=E_t, y=graph.y, mask=graph.mask).type_as(X_t)
-
-    vals = (E_t.reshape(E_t.shape[0], -1) == 0).all(axis=-1)
-    if vals.any():
-        ipdb.set_trace()
-
-    return NoisyData(
-        t_int=t_int,  # t_int is the timestep at the current timestep
-        t=t_float,
-        beta_t=beta_t,
-        alpha_s_bar=alpha_s_bar,  # alpha_s_bar is the alpha value at the previous timestep
-        alpha_t_bar=alpha_t_bar,  # alpha_t_bar is the alpha value at the current timestep
-        embedded_graph=z_t,
-    )
+    return GraphDistribution(x=X_t, e=E_t, y=graph.y, mask=graph.mask).type_as(X_t)
 
 
 @typed
@@ -319,7 +290,6 @@ def kl_prior(
     *,
     target: GraphDistribution,
     T: SInt,
-    noise_schedule: NoiseSchedule,
     transition_model: TransitionModel,
     prior_dist: Distribution,
 ) -> SFloat:
@@ -338,7 +308,7 @@ def kl_prior(
     # Compute transition probabilities
     probX = target.x @ Qtb.x  # (bs, n, dx_out)
     probE = target.e @ np.expand_dims(Qtb.e, 1)  # (bs, n, n, de_out)
-    assert probX.shape == target.x.shape
+    check(probX.shape == target.x.shape, "whoops")
 
     bs, n, _ = probX.shape
 

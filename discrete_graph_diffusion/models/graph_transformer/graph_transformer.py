@@ -4,7 +4,7 @@ from flax import linen as nn
 import ipdb
 
 from .xey_transformer_layer import XEYTransformerLayer
-from .utils import PlaceHolder, assert_correctly_masked
+from .utils import PlaceHolder  # , assert_correctly_masked
 from .config import GraphTransformerConfig
 
 

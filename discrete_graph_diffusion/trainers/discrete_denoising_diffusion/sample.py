@@ -10,6 +10,7 @@ import jax
 from jax import random
 from jax._src.random import PRNGKey
 from jax.scipy.special import logit
+from mate.jax import typed, jit, SInt, SFloat, SBool, Key
 import ipdb
 from .diffusion_types import Q, GraphDistribution, NoiseSchedule
 from .nodes_distribution import NodesDistribution
@@ -17,7 +18,7 @@ from .diffusion_types import TransitionModel
 
 
 def sample_discrete_features(
-    *, probX: Array, probE: Array, node_mask: Array, rng_key: PRNGKeyArray
+    *, probX: Array, probE: Array, node_mask: Array, rng_key: Key
 ):
     """Sample features from multinomial distribution with given probabilities (probX, probE, proby)
     :param probX: bs, n, dx_out        node features
@@ -27,7 +28,12 @@ def sample_discrete_features(
     bs, n, _ = probX.shape
     # Noise X
     # The masked rows should define probability distributions as well
-    probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
+    # probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
+    probX = np.where(
+        (~node_mask)[:, :, None],
+        1 / probX.shape[-1],
+        probX,
+    )
 
     # Flatten the probability tensor to sample with categorical distribution
     probX = probX.reshape(bs * n, -1)  # (bs * n, dx_out)
@@ -41,8 +47,8 @@ def sample_discrete_features(
     # The masked rows should define probability distributions as well
     inverse_edge_mask = ~(node_mask[:, None] * node_mask[:, :, None])
     diag_mask = np.eye(n)[None].astype(bool).repeat(bs, axis=0)
-    probE = probE.at[inverse_edge_mask].set(1 / probE.shape[-1])
-    probE = probE.at[diag_mask].set(1 / probE.shape[-1])
+    probE = np.where(inverse_edge_mask[..., None], 1 / probE.shape[-1], probE)
+    probE = np.where(diag_mask[...,None], 1 / probE.shape[-1], probE)
 
     probE = probE.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
 
@@ -264,8 +270,10 @@ def sample_p_zs_given_zt(
     """Samples from zs ~ p(zs | zt). Only used during sampling.
     if last_step, return the graph prediction as well"""
     bs, n, _ = X_t.shape
-    beta_t = noise_schedule.betas[t] # (bs, 1)
-    alpha_s_bar = noise_schedule.get_alpha_bar(t_normalized=s) # TODO: covert to updated TransitionModel
+    beta_t = noise_schedule.betas[t]  # (bs, 1)
+    alpha_s_bar = noise_schedule.get_alpha_bar(
+        t_normalized=s
+    )  # TODO: covert to updated TransitionModel
     alpha_t_bar = noise_schedule.get_alpha_bar(t_normalized=t)
 
     # Retrieve transitions matrix

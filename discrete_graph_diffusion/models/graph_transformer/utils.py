@@ -2,13 +2,7 @@ from jax import numpy as np
 from jax import Array
 import ipdb
 
-
-def assert_correctly_masked(variable, node_mask):
-    # condition = (
-    #    np.abs(variable * (1 - node_mask.astype(variable.dtype))).max().item() < 1e-4
-    # )
-    # assert condition, "Variables not masked properly."
-    pass
+check = lambda x, y="": None
 
 
 class PlaceHolder:
@@ -17,14 +11,6 @@ class PlaceHolder:
         self.e = e
         self.y = y
 
-    """
-    def type_as(self, x: Array):
-        ''' Changes the device and dtype of X, E, y. '''
-        self.X = self.X.type_as(x)
-        self.E = self.E.type_as(x)
-        self.y = self.y.type_as(x)
-        return self
-    """
 
     def __str__(self):
         return f"X: {self.x.shape}, E: {self.e.shape}, y: {self.y.shape}"
@@ -44,10 +30,7 @@ class PlaceHolder:
             self.x[node_mask == 0] = -1
             self.e[(e_mask1 * e_mask2).squeeze(-1) == 0] = -1
         else:
-            try:
-                self.x = self.x * x_mask
-            except:
-                ipdb.set_trace()
+            self.x = self.x * x_mask
             self.e = self.e * e_mask1 * e_mask2
-            assert np.allclose(self.e, np.transpose(self.e, (0, 2, 1, 3)))
+            check(np.allclose(self.e, np.transpose(self.e, (0, 2, 1, 3))))
         return self

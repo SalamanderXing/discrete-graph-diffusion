@@ -38,7 +38,5 @@ class EToY(nn.Module):
 
 def masked_softmax(x, mask, **kwargs):
     """Softmax with masking."""
-    if mask.sum() == 0:
-        return x
-    x_masked = x.at[mask == 0].set(-1e9)
+    x_masked = np.where((mask == 0)[..., None], -1e9, x)  # x.at[mask == 0].set(-1e9)
     return nn.softmax(x_masked, **kwargs)

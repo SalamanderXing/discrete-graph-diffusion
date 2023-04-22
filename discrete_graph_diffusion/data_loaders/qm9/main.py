@@ -55,8 +55,7 @@ class SelectHOMOTransform:
 
 class QM9Dataset(InMemoryDataset):
     raw_url = (
-        "https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/"
-        "molnet_publish/qm9.zip"
+        "https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/molnet_publish/qm9.zip"
     )
     raw_url2 = "https://ndownloader.figshare.com/files/3195404"
     processed_url = "https://data.pyg.org/datasets/qm9_v3.zip"
