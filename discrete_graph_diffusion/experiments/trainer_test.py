@@ -13,13 +13,13 @@ from jax import numpy as np
 from jax import random
 
 remove_h = True
-batch_size = 64
+batch_size = 512
 data_dir = os.path.join(mate.save_dir, "qm9/qm9_pyg/")
 datamodule = QM9DataModule(
     datadir=data_dir,
-    train_batch_size=32,
-    val_batch_size=32,
-    test_batch_size=32,
+    train_batch_size=batch_size,
+    val_batch_size=batch_size,
+    test_batch_size=batch_size,
     remove_h=remove_h,
 )
 dataset_infos = QM9Infos(
@@ -28,7 +28,6 @@ dataset_infos = QM9Infos(
 )
 datamodule.prepare_data()
 uba = next(iter(datamodule.train_dataloader()))
-
 
 graph_transformer_config = GraphTransformerConfig.from_dict(
     dict(

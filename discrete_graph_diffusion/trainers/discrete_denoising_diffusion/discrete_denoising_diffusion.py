@@ -128,7 +128,6 @@ def val_loss(
     )
     return nll
 
-
 @jit
 def train_step(
     *,
@@ -258,7 +257,6 @@ def train_model(
         """
 
 
-@jit
 def val_step(
     *,
     dense_data: GraphDistribution,
