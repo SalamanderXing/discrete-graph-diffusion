@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from src import utils
 from src.diffusion import diffusion_utils
+import ipdb
 
 
 class PredefinedNoiseSchedule(torch.nn.Module):
@@ -147,7 +148,7 @@ class DiscreteUniformTransition:
             alpha_bar_t * torch.eye(self.y_classes, device=device).unsqueeze(0)
             + (1 - alpha_bar_t) * self.u_y
         )
-
+        ipdb.set_trace()
         return utils.PlaceHolder(X=q_x, E=q_e, y=q_y)
 
 
@@ -214,7 +215,6 @@ class MarginalUniformTransition:
             alpha_bar_t * torch.eye(self.y_classes, device=device).unsqueeze(0)
             + (1 - alpha_bar_t) * self.u_y
         )
-
         return utils.PlaceHolder(X=q_x, E=q_e, y=q_y)
 
 
@@ -261,3 +261,11 @@ class AbsorbingStateTransition:
         )
 
         return q_x, q_e, q_y
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    noise_schedule = PredefinedNoiseScheduleDiscrete("cosine", 1000)
+    plt.plot(noise_schedule.betas)
+    plt.show()
+

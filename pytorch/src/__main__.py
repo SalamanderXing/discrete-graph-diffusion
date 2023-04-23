@@ -269,7 +269,6 @@ def main(cfg: DictConfig):
         max_epochs=cfg.train.n_epochs,
         check_val_every_n_epoch=cfg.general.check_val_every_n_epochs,
         fast_dev_run=cfg.general.name == "debug",
-        strategy="auto",
         enable_progress_bar=False,
         callbacks=callbacks,
         logger=[],

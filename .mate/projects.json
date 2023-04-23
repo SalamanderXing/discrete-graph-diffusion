@@ -55,19 +55,23 @@
                         ],
                         [
                             "pandas",
-                            "1.5.2"
+                            "2.0.0"
                         ],
                         [
                             "pytorch_lightning",
-                            "1.9.0"
+                            "2.0.1.post0"
                         ],
                         [
                             "rdkit",
                             "2022.9.5"
                         ],
                         [
+                            "rdkit_pypi",
+                            "2022.9.5"
+                        ],
+                        [
                             "torch",
-                            "2.0.0+cu118"
+                            "2.0.0"
                         ],
                         [
                             "torch_geometric",
@@ -75,11 +79,11 @@
                         ],
                         [
                             "tqdm",
-                            "4.64.1"
+                            "4.65.0"
                         ],
                         [
                             "wandb",
-                            "0.14.0"
+                            "0.14.2"
                         ]
                     ]
                 },
@@ -141,10 +145,13 @@
                 "discrete_denoising_diffusion": {
                     "name": "discrete_denoising_diffusion",
                     "exports": [
+                        "install_import_hook",
                         "train_model",
                         "TrainingConfig"
                     ],
-                    "errors": [],
+                    "errors": [
+                        "Only relative imports are allowed in trainers.discrete_denoising_diffusion (for shearability)."
+                    ],
                     "dependencies": [
                         [
                             "dacite",
@@ -163,6 +170,22 @@
                             "0.4.8"
                         ],
                         [
+                            "jax_dataclasses",
+                            "1.5.1"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "mate",
+                            "0.2.0"
+                        ],
+                        [
+                            "matplotlib",
+                            "3.7.1"
+                        ],
+                        [
                             "optax",
                             "0.1.4"
                         ],
@@ -172,7 +195,11 @@
                         ],
                         [
                             "tqdm",
-                            "4.64.1"
+                            "4.65.0"
+                        ],
+                        [
+                            "typeguard",
+                            "3.0.2"
                         ]
                     ]
                 }

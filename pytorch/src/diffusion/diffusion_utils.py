@@ -273,7 +273,7 @@ def sample_discrete_features(probX, probE, node_mask):
     return PlaceHolder(X=X_t, E=E_t, y=torch.zeros(bs, 0).type_as(X_t))
 
 
-def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M, mode="giulios"):
+def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M, mode="default"):
     """M: X or E
     Compute xt @ Qt.T * x0 @ Qsb / x0 @ Qtb @ xt.T
 
@@ -283,9 +283,9 @@ def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M, mode="giulios"):
     M = M.flatten(start_dim=1, end_dim=-2).to(
         torch.float32
     )  # (bs, N, d) with N = n or n * n
-    M_t = M_t.flatten(start_dim=1, end_dim=-2)  # same
+    M_t = M_t.flatten(start_dim=1, end_dim=-2).to(float)  # same
 
-    Qt_M_T = Qt_M.transpose(-2, -1)  # (bs, d, d)
+    Qt_M_T = Qt_M.transpose(-2, -1).to(float)  # (bs, d, d)
 
     left_term = M_t @ Qt_M_T  # (bs, N, d)
     right_term = M @ Qsb_M  # (bs, N, d)
@@ -293,7 +293,7 @@ def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M, mode="giulios"):
 
     denom = M @ Qtb_M  # (bs, N, d) @ (bs, d, d) = (bs, N, d)
     if mode == "giulios":
-        denom = (denom @ M_t.transpose(1, 2)) #.sum(-1)  # modified by meee
+        denom = denom @ M_t.transpose(1, 2)  # .sum(-1)  # modified by meee
     else:
         denom = (denom * M_t).sum(
             dim=-1
@@ -353,10 +353,18 @@ def mask_distributions(true_X, true_E, pred_X, pred_E, node_mask):
     diag_mask = ~torch.eye(
         node_mask.size(1), device=node_mask.device, dtype=torch.bool
     ).unsqueeze(0)
-    true_X[~node_mask] = row_X
-    true_E[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = row_E
-    pred_X[~node_mask] = row_X
-    pred_E[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :] = row_E
+    true_X = true_X.float()
+    true_E = true_E.float()
+    pred_X = pred_X.float()
+    pred_E = pred_E.float()
+    true_X[~node_mask] = row_X.float()
+    true_E[
+        ~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :
+    ] = row_E.float()
+    pred_X[~node_mask] = row_X.float()
+    pred_E[
+        ~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2) * diag_mask), :
+    ] = row_E.float()
 
     return true_X, true_E, pred_X, pred_E
 

@@ -112,6 +112,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             print(
                 f"Marginal distribution of the classes: {x_marginals} for nodes, {e_marginals} for edges"
             )
+            ipdb.set_trace()
             self.transition_model = MarginalUniformTransition(
                 x_marginals=x_marginals,
                 e_marginals=e_marginals,
@@ -167,7 +168,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             true_y=data.y,
             log=i % self.log_every_steps == 0,
         )
-
         self.train_metrics(
             masked_pred_X=pred.X,
             masked_pred_E=pred.E,
@@ -214,6 +214,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         dense_data = dense_data.mask(node_mask)
         noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
+        dense_data.X = dense_data.X.to(torch.float32)
+        dense_data.E = dense_data.E.to(torch.float32)
         extra_data = self.compute_extra_data(noisy_data)
         pred = self.forward(noisy_data, extra_data, node_mask)
         nll = self.compute_val_loss(
@@ -461,7 +463,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # Compute distributions to compare with KL
         bs, n, d = X.shape
         prob_true = diffusion_utils.posterior_distributions(  # looks like bug is here.
-            X=X, # this here is G but below it is G_t-1 in same argument positoin
+            X=X,  # this here is G but below it is G_t-1 in same argument positoin
             E=E,
             y=y,
             X_t=noisy_data["X_t"],
@@ -472,7 +474,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             Qtb=Qtb,
         )
         prob_true.E = prob_true.E.reshape((bs, n, n, -1))
-        # this is actually p_theta and 
+        # this is actually p_theta and
         prob_pred = diffusion_utils.posterior_distributions(
             X=pred_probs_X,
             E=pred_probs_E,
@@ -585,6 +587,13 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         Qtb = self.transition_model.get_Qt_bar(
             alpha_t_bar, device=self.device
         )  # (bs, dx_in, dx_out), (bs, de_in, de_out)
+        """
+        uva = Qtb.X[0].numpy().astype(float)
+        import matplotlib.pyplot as plt
+
+        plt.imshow(uva)
+        plt.show()
+        """
         assert (abs(Qtb.X.sum(dim=2) - 1.0) < 1e-4).all(), Qtb.X.sum(dim=2) - 1
         assert (abs(Qtb.E.sum(dim=2) - 1.0) < 1e-4).all()
         # Compute transition probabilities

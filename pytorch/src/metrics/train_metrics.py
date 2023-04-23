@@ -146,7 +146,7 @@ class TrainLossDiscrete(nn.Module):
         loss_X = self.node_loss(flat_pred_X, flat_true_X) if true_X.numel() > 0 else 0.0
         loss_E = self.edge_loss(flat_pred_E, flat_true_E) if true_E.numel() > 0 else 0.0
         loss_y = self.y_loss(pred_y, true_y) if true_y.numel() > 0 else 0.0
-
+        ipdb.set_trace()
         if log:
             to_log = {
                 "train_loss/batch_CE": (loss_X + loss_E + loss_y).detach(),
