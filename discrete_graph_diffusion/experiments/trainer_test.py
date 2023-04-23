@@ -1,6 +1,7 @@
-import jax
+import tensorflow as tf
 
-# jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+tf.config.experimental.set_visible_devices([], "GPU")
+
 from mate import mate
 from dataclasses import dataclass, asdict
 from ..data_loaders.qm9_p import QM9DataModule, QM9Infos, get_train_smiles
@@ -12,7 +13,7 @@ from jax import numpy as np
 from jax import random
 
 remove_h = True
-batch_size = 10
+batch_size = 64
 data_dir = os.path.join(mate.save_dir, "qm9/qm9_pyg/")
 datamodule = QM9DataModule(
     datadir=data_dir,
