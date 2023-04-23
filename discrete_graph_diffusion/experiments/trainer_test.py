@@ -12,7 +12,7 @@ from jax import numpy as np
 from jax import random
 
 remove_h = True
-batch_size = 32
+batch_size = 10
 data_dir = os.path.join(mate.save_dir, "qm9/qm9_pyg/")
 datamodule = QM9DataModule(
     datadir=data_dir,
