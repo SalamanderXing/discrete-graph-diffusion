@@ -1,6 +1,6 @@
 import jax
 
-jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+# jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 from mate import mate
 from dataclasses import dataclass, asdict
 from ..data_loaders.qm9_p import QM9DataModule, QM9Infos, get_train_smiles
