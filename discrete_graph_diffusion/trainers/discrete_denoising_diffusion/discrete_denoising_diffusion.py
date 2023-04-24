@@ -6,6 +6,7 @@ from jax import numpy as np
 from jax.numpy import array
 from flax.training import train_state
 import flax.linen as nn
+from jax.debug import print as jprint
 from jaxtyping import Float, Int, Bool
 from jax.experimental.checkify import checkify
 import jax
@@ -36,10 +37,11 @@ class TrainState(train_state.TrainState):
 def train_loss(
     pred_graph: GraphDistribution,
     true_graph: GraphDistribution,
-    lambda_train_e: SFloat = array(5.0),
-    lambda_train_y: SFloat = array(0.0),
+    lambda_train_e: SFloat = 5.0,
+    lambda_train_y: SFloat = 0.0,
+    loss_type: SInt = 1,  # 1 in l2, 2 = softmax_cross_entropy
 ):
-    loss_fn = optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
+    loss_fn = optax.l2_loss  # optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
     true_x = true_graph.x.reshape(-1, true_graph.x.shape[-1])  # (bs*n, dx)
     true_e = true_graph.e.reshape(-1, true_graph.e.shape[-1])  # (bs*n*n, de)
     pred_x = pred_graph.x.reshape(-1, pred_graph.x.shape[-1])  # (bs*n, dx)
@@ -56,15 +58,14 @@ def train_loss(
     flat_pred_x = masked_pred_x[mask_x]
     flat_pred_e = masked_pred_e[mask_e]
     """
-
-    loss_x = np.where(mask_x, loss_fn(pred_x, true_x), 0).sum() / mask_x.sum()
-    loss_e = np.where(mask_e, loss_fn(pred_e, true_e), 0).sum() / mask_e.sum()
+    loss_x = np.where(mask_x, loss_fn(pred_x, true_x).mean(-1), 0).sum() / mask_x.sum()
+    loss_e = np.where(mask_e, loss_fn(pred_e, true_e).mean(-1), 0).sum() / mask_e.sum()
 
     # Compute metrics
     # loss_x = loss_fn(pred_x, true_x).mean() if true_x.size else 0
     # loss_e = loss_fn(pred_e, true_e).mean() if true_e.size else 0
-    loss_y = loss_fn(pred_graph.y, true_graph.y).mean()
-    return loss_x + lambda_train_e * loss_e + lambda_train_y * loss_y
+    # loss_y = loss_fn(pred_graph.y, true_graph.y).mean()
+    return loss_x + lambda_train_e * loss_e  # + lambda_train_y * loss_y
 
 
 @typed
@@ -128,7 +129,7 @@ def val_loss(
     )
     return nll
 
-@jit
+
 def train_step(
     *,
     dense_data: GraphDistribution,
@@ -149,13 +150,15 @@ def train_step(
     # dense_data =   # TODO: cache this!
     z_t = df.apply_random_noise(
         graph=dense_data,
-        test=False,
+        test=np.array(False),
         rng=rng,
         T=array(diffusion_steps),
         transition_model=transition_model,
     )
     # concatenates the extra features to the graph
-    graph_dist_with_extra_data = z_t | extra_features.compute(z_t)
+    # FIXME: I disabled temporarely the extra features
+    # graph_dist_with_extra_data = z_t  | extra_features.compute(z_t)
+    graph_dist_with_extra_data = z_t.set("y", np.ones((z_t.y.shape[0], 1)))
 
     def loss_fn(params: FrozenDict):
         raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
@@ -173,10 +176,21 @@ def train_step(
             mask=z_t.mask,
         )  # consider changing the name of this class to something that suggests ditribution
         loss = train_loss(pred_graph=pred, true_graph=dense_data)
+        jprint("loss {loss}", loss=loss)
         return loss, pred
 
+    # loss_fn(state.params)
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
+    there_are_nan = np.any(
+        np.array([np.any(np.isnan(v)) for v in jax.tree_util.tree_flatten(grads)[0]])
+    )
+    print(f"there are nans: {there_are_nan}")
+    grads = jax.tree_map(lambda x: np.where(np.isnan(x), 0.0, x), grads)
+    there_are_nan = np.any(
+        np.array([np.any(np.isnan(v)) for v in jax.tree_util.tree_flatten(grads)[0]])
+    )
+    # print(f"there are nans: {there_are_nan}")
     state = state.apply_gradients(grads=grads)
     return state, loss
 
@@ -351,9 +365,10 @@ def train_epoch(
     transition_model: TransitionModel,
 ):
     run_loss = 0.0
-    for batch in tqdm(train_loader):
+    for batch_index, batch in enumerate(train_loader):
+        dense_data = GraphDistribution.from_sparse_torch(batch)
         state, loss = train_step(
-            dense_data=GraphDistribution.from_sparse_torch(batch),
+            dense_data=dense_data,
             i=np.array(epoch),
             state=state,
             diffusion_steps=diffusion_steps,
@@ -361,6 +376,8 @@ def train_epoch(
             transition_model=transition_model,
         )
         run_loss += loss
+        # if batch_index == 3:
+        #     break
     avg_loss = run_loss / len(train_loader)
     # prints the average loss for the epoch
     print(f"Epoch {epoch} loss: {avg_loss:.4f}")

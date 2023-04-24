@@ -23,6 +23,7 @@ from .extra_features import extra_features
 
 check = lambda x, y: None
 
+
 @typed
 def reconstruction_logp(
     *,
@@ -233,7 +234,7 @@ def mask_distributions(
     return true_X, true_E, pred_X, pred_E
 
 
-@jit
+@typed
 def apply_random_noise(
     *,
     rng: Key,
@@ -254,7 +255,7 @@ def apply_random_noise(
     )
 
 
-@jit
+@typed
 def apply_noise(
     *,
     rng: Key,

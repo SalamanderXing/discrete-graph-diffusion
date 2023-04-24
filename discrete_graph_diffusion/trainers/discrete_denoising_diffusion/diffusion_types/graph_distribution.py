@@ -9,7 +9,8 @@ from .geometric import to_dense
 from .data_batch import DataBatch
 from .q import Q
 
-check = lambda x, y: None
+check = lambda x, y: None  # to be replaced with JAX's checkify.check function
+
 
 @jdc.pytree_dataclass
 class GraphDistribution(jdc.EnforcedAnnotationsMixin):
@@ -46,23 +47,15 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     def __repr__(self):
         return self.__str__()
 
-    def set_values(
+    def set(
         self,
-        x: Array | None,
-        e: Array | None,
-        y: Array | None,
-        mask: Array | None,
+        key:str, value: Array,
     ) -> "GraphDistribution":
         """Sets the values of X, E, y."""
-        if x is None:
-            x = self.x
-        if e is None:
-            e = self.e
-        if y is None:
-            y = self.y
-        if mask is None:
-            mask = self.mask
-        return GraphDistribution(x=x, e=e, y=y, mask=mask)
+
+        #return GraphDistribution(x=x, e=e, y=y, mask=mask)
+        new_vals = self.__dict__.copy() | {key: value}
+        return GraphDistribution(**new_vals)
 
     @classmethod
     def from_sparse(cls, data_batch: DataBatch):
