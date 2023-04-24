@@ -3,7 +3,7 @@ from jax import numpy as np
 from jax.experimental.checkify import check
 import ipdb
 import jax_dataclasses as jdc
-from mate.jax import typed
+from mate.jax import typed, SBool
 from jaxtyping import Float, Bool
 from .geometric import to_dense
 from .data_batch import DataBatch
@@ -11,50 +11,86 @@ from .q import Q
 
 check = lambda x, y: None  # to be replaced with JAX's checkify.check function
 
+XType = Float[Array, "b n en"]
+EType = Float[Array, "b n n ee"]
+YType = Float[Array, "b ey"]
+MaskType = Bool[Array, "b n"]
+
 
 @jdc.pytree_dataclass
 class GraphDistribution(jdc.EnforcedAnnotationsMixin):
-    x: Float[Array, "b n en"]
-    e: Float[Array, "b n n ee"]
-    y: Float[Array, "b ey"]
-    mask: Bool[Array, "b"]
+    x: XType
+    e: EType
+    y: YType
+    mask: MaskType
+    _created_internally: SBool  # trick to prevent users from creating this class directly
 
     @classmethod
     @typed
-    def with_trivial_mask(
+    def unmasked(
         cls,
-        x: Float[Array, "b n en"],
-        e: Float[Array, "b n n ee"],
-        y: Float[Array, "b ey"],
-    ):
-        return cls(x=x, e=e, y=y, mask=np.ones(x.shape[:2], dtype=bool))
+        x: XType,
+        e: EType,
+        y: YType,
+    ) -> "GraphDistribution":
+        return cls(
+            x=x,
+            e=e,
+            y=y,
+            mask=np.ones(x.shape[:2], dtype=bool),
+            _created_internally=True,
+        )
 
-    def __post_init__(self):
-        """
-        assert (
-            self.x.shape[0] == self.e.shape[0] == self.y.shape[0]
-        ), f"{self.x.shape}, {self.e.shape}, {self.y.shape}"
-        assert (
-            self.x.shape[1] == self.e.shape[1] == self.e.shape[2]
-        ), (f"{self.x.shape}, {self.e.shape}, {self.y.shape}", ipdb.set_trace())
-        # assert self.x.shape[2] == self.y.shape[1], (f"{self.x.shape}, {self.y.shape}", ipdb.set_trace())
-        """
-        self.__mask(self.mask)
+    @classmethod
+    @typed
+    def masked(
+        cls,
+        x: XType,
+        e: EType,
+        y: YType,
+        mask: MaskType,
+    ) -> "GraphDistribution":
+        x_mask = mask[..., None]  # bs, n, 1
+        e_mask1 = x_mask[:, :, None]  # bs, n, 1, 1
+        e_mask2 = x_mask[:, None]  # bs, 1, n, e_mask1
+        x = x * x_mask
+        e = e * e_mask1 * e_mask2
+        check(np.allclose(e, np.transpose(e, (0, 2, 1, 3))), "whoops")
+        return cls(x=x, e=e, y=y, mask=mask, _created_internally=True)
 
     def __str__(self):
-        return f"Graph(X: {self.x.shape}, E: {self.e.shape}, y: {self.y.shape})"
+        def arr_str(arr: Array):
+            return f"array:({arr.dtype}, {arr.shape})"
+
+        def self_arr(props: dict):
+            return ", ".join(
+                [
+                    f"{key}: {arr_str(val)}"
+                    for key, val in props.items()
+                    if not key.startswith("_")
+                ]
+            )
+
+        return f"GraphDistribution({self_arr(self.__dict__)})"
+
+    @property
+    def shape(self) -> dict[str, tuple[int, ...]]:
+        return dict(x=self.x.shape, e=self.e.shape, y=self.y.shape, mask=self.mask.shape)
 
     def __repr__(self):
         return self.__str__()
 
     def set(
         self,
-        key:str, value: Array,
+        key: str,
+        value: XType | EType | YType | MaskType,
     ) -> "GraphDistribution":
         """Sets the values of X, E, y."""
-
-        #return GraphDistribution(x=x, e=e, y=y, mask=mask)
-        new_vals = self.__dict__.copy() | {key: value}
+        new_vals = {
+            k: v
+            for k, v in (self.__dict__.copy() | {key: value}).items()
+            if not k.startswith("__")
+        }
         return GraphDistribution(**new_vals)
 
     @classmethod
@@ -62,7 +98,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         x, e, node_mask = to_dense(
             data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
         )
-        return cls(x=x, e=e, y=data_batch.y, mask=node_mask)
+        return cls(x=x, e=e, y=data_batch.y, mask=node_mask, _created_internally=True)
 
     @classmethod
     def from_sparse_torch(cls, data_batch_torch):
@@ -70,9 +106,9 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         x, e, node_mask = to_dense(
             data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
         )
-        return cls(x=x, e=e, y=data_batch.y, mask=node_mask)
+        return cls(x=x, e=e, y=data_batch.y, mask=node_mask, _created_internally=True)
 
-    def type_as(self, x: Array) -> "GraphDistribution":
+    def astype(self, x: Array) -> "GraphDistribution":
         """Changes the device and dtype of X, E, y."""
         dtype = x.dtype
         return GraphDistribution(
@@ -80,24 +116,8 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             e=self.e.astype(dtype),
             y=self.y.astype(dtype),
             mask=self.mask,
+            _created_internally=True,
         )
-
-    def __mask(self, node_mask: Array):
-        x_mask = np.expand_dims(node_mask, -1)  # bs, n, 1
-        e_mask1 = np.expand_dims(x_mask, 2)  # bs, n, 1, 1
-        e_mask2 = np.expand_dims(x_mask, 1)  # bs, 1, n, e_mask1
-        if False:  # collapse
-            x = np.argmax(self.x, axis=-1)
-            e = np.argmax(self.e, axis=-1)
-
-            x[node_mask == 0] = -1
-            e[(e_mask1 * e_mask2).squeeze(-1) == 0] = -1
-        else:
-            x = self.x * x_mask
-            e = self.e * e_mask1 * e_mask2
-            check(np.allclose(e, np.transpose(e, (0, 2, 1, 3))), "whoops")
-        object.__setattr__(self, "x", x)
-        object.__setattr__(self, "e", e)
 
     # overrides the pipe operator, that takes another EmbeddedGraph as input. This concatenates the two graphs.
     def __or__(self, other: "GraphDistribution") -> "GraphDistribution":
@@ -110,4 +130,6 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         x = self.x @ q.x
         e = self.e @ q.e[:, None]
         # TODO: why isn't y applied? It seems like it's like this in the original code.
-        return GraphDistribution(x=x, e=e, y=self.y, mask=self.mask)
+        return GraphDistribution(
+            x=x, e=e, y=self.y, mask=self.mask, _created_internally=True
+        )

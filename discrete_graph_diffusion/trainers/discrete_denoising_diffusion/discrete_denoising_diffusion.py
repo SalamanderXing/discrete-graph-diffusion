@@ -2,8 +2,7 @@
 Entrypoint of the discrete denoising diffusion model.
 The function `train_model` is the main entrypoint.
 """
-from jax import numpy as np
-from jax.numpy import array
+from jax import numpy as np, Array
 from flax.training import train_state
 import flax.linen as nn
 from jax.debug import print as jprint
@@ -21,11 +20,8 @@ from . import diffusion_functions as df
 from .config import TrainingConfig
 from .diffusion_types import (
     GraphDistribution,
-    Distribution,
-    TransitionModel,
     TransitionModel,
 )
-from .nodes_distribution import NodesDistribution
 from .extra_features import extra_features
 
 
@@ -74,10 +70,9 @@ def val_loss(
     T: SInt,
     target: GraphDistribution,
     pred: GraphDistribution,
-    nodes_dist: NodesDistribution,
+    nodes_dist: Float[Array, "n"],
     transition_model: TransitionModel,
     state: TrainState,
-    prior_dist: Distribution,
     rng_key: Key,
 ):
     # TODO: this still has to be fully ported
@@ -87,15 +82,15 @@ def val_loss(
     mask = target.mask
 
     # 1.
-    N = mask.sum(1).astype(int)
-    log_pN = nodes_dist.log_prob(N)
+    n = mask.sum(1).astype(int)
+    log_pN = np.log(nodes_dist[n] + 1e-30)
     # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
     kl_prior = df.kl_prior(
         target=target,
-        T=T,
+        diffusion_steps=T,
         transition_model=transition_model,
-        prior_dist=prior_dist,
     )
+    ipdb.set_trace()
     # 3. Diffusion loss
     loss_all_t = df.compute_Lt(
         target=target,
@@ -130,6 +125,20 @@ def val_loss(
     return nll
 
 
+def print_gradient_analysis(grads: FrozenDict):
+    there_are_nan = np.any(
+        np.array([np.any(np.isnan(v)) for v in jax.tree_util.tree_flatten(grads)[0]])
+    )
+    max_value = np.max(
+        np.array([np.max(v) for v in jax.tree_util.tree_flatten(grads)[0]])
+    )
+    min_value = np.min(
+        np.array([np.min(v) for v in jax.tree_util.tree_flatten(grads)[0]])
+    )
+    print(f"{max_value=} {min_value=}")
+    print(f"there are nans: {there_are_nan}")
+
+
 def train_step(
     *,
     dense_data: GraphDistribution,
@@ -140,36 +149,31 @@ def train_step(
     transition_model: TransitionModel,
 ) -> tuple[TrainState, SFloat]:
     dropout_train_key = jax.random.fold_in(key=rng, data=state.step)
-    """
-    if data.edge_index.size == 0:
-        print("Found a batch with no edges. Skipping.")
-        return state, 0.0
-    """
-    # X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
-    # dense_data = EmbeddedGraph(x=X, e=E, y=data.y, mask=node_mask)
-    # dense_data =   # TODO: cache this!
+    # if data.edge_index.size == 0:
+    #     print("Found a batch with no edges. Skipping.")
+    #     return state, 0.0
+
     z_t = df.apply_random_noise(
         graph=dense_data,
         test=np.array(False),
         rng=rng,
-        T=array(diffusion_steps),
+        T=diffusion_steps,
         transition_model=transition_model,
-    )
+    ).set("y", np.ones((dense_data.y.shape[0], 1)))
     # concatenates the extra features to the graph
     # FIXME: I disabled temporarely the extra features
     # graph_dist_with_extra_data = z_t  | extra_features.compute(z_t)
-    graph_dist_with_extra_data = z_t.set("y", np.ones((z_t.y.shape[0], 1)))
 
     def loss_fn(params: FrozenDict):
         raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
             params,
-            graph_dist_with_extra_data.x,
-            graph_dist_with_extra_data.e,
-            graph_dist_with_extra_data.y,
+            z_t.x,
+            z_t.e,
+            z_t.y,
             z_t.mask.astype(float),
             rngs={"dropout": dropout_train_key},
         )
-        pred = GraphDistribution(
+        pred = GraphDistribution.masked(
             x=raw_pred.x,
             e=raw_pred.e,
             y=raw_pred.y,
@@ -179,17 +183,11 @@ def train_step(
         jprint("loss {loss}", loss=loss)
         return loss, pred
 
-    # loss_fn(state.params)
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
-    there_are_nan = np.any(
-        np.array([np.any(np.isnan(v)) for v in jax.tree_util.tree_flatten(grads)[0]])
-    )
-    print(f"there are nans: {there_are_nan}")
+
     grads = jax.tree_map(lambda x: np.where(np.isnan(x), 0.0, x), grads)
-    there_are_nan = np.any(
-        np.array([np.any(np.isnan(v)) for v in jax.tree_util.tree_flatten(grads)[0]])
-    )
+
     # print(f"there are nans: {there_are_nan}")
     state = state.apply_gradients(grads=grads)
     return state, loss
@@ -207,10 +205,10 @@ def train_model(
     lr: float,
     config: TrainingConfig,
     output_dims: dict[str, int],
-    nodes_dist,
+    nodes_dist_torch,
 ):
     rng = rngs["params"]
-    nodes_dist = NodesDistribution.from_torch(nodes_dist, rng)
+    nodes_dist = np.array(nodes_dist_torch.prob)
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
@@ -221,9 +219,10 @@ def train_model(
     The following is the prior of the data. It is used to generate matrices Q_t, 
     and also to compute the prior loss term in the ELBO.
     """
-    # TODO: replace hardcoded values with computed ones
-    prior_dist = Distribution(
-        x=np.array(
+    # Key idea proposed in the DiGress paper: use the prior distribution to gnerate Q_t
+    # These priors are extracted from the dataset.
+    transition_model = TransitionModel.create(
+        x_priors=np.array(
             [
                 0.7230000495910645,
                 0.11510000377893448,
@@ -231,7 +230,7 @@ def train_model(
                 0.0026000002399086952,
             ]
         ),
-        e=np.array(
+        e_priors=np.array(
             [
                 0.7261000275611877,
                 0.23839999735355377,
@@ -240,35 +239,28 @@ def train_model(
                 0.0,
             ]
         ),
-        y=np.ones(output_dims["y"]) / output_dims["y"],
-    )
-    # Key idea proposed in the DiGress paper: use the prior distribution to gnerate Q_t
-    transition_model = TransitionModel.create(
-        x_marginals=prior_dist.x,
-        e_marginals=prior_dist.e,
         y_classes=output_dims["y"],
         diffusion_steps=config.diffusion_steps,
     )
     # Track best eval accuracy
     for epoch_idx in range(1, num_epochs + 1):
         rng, input_rng = jax.random.split(rng)
-        state, _ = train_epoch(
-            rng=rng,
-            state=state,
-            train_loader=train_loader,
-            epoch=epoch_idx,
-            diffusion_steps=np.array(config.diffusion_steps),
-            transition_model=transition_model,
-        )
-        """
+        # state, _ = train_epoch(
+        #     rng=rng,
+        #     state=state,
+        #     train_loader=train_loader,
+        #     epoch=epoch_idx,
+        #     diffusion_steps=np.array(config.diffusion_steps),
+        #     transition_model=transition_model,
+        # )
         val_loss = val_epoch(
             rng=rng,
             state=state,
             val_loader=val_loader,
             config=config,
             transition_model=transition_model,
+            nodes_dist=nodes_dist,
         )
-        """
 
 
 def val_step(
@@ -278,6 +270,7 @@ def val_step(
     diffusion_steps: SInt,
     rng: Key,
     transition_model: TransitionModel,
+    nodes_dist: Float[Array, "n"],
 ) -> SFloat:
     dropout_test_key = jax.random.fold_in(key=rng, data=state.step)
     # X, E, node_mask = to_dense(data.x, data.edge_index, data.edge_attr, data.batch)
@@ -288,9 +281,9 @@ def val_step(
         rng=rng,
         T=np.array(diffusion_steps),
         transition_model=transition_model,
-    )
-    # err.throw()
-    graph_dist_with_extra_data = z_t | extra_features.compute(z_t)
+    ).set("y", np.ones((dense_data.y.shape[0], 1)))
+    # skip extra features for now
+    graph_dist_with_extra_data = z_t  #  | extra_features.compute(z_t)
 
     def loss_fn(params: FrozenDict):
         raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
@@ -301,28 +294,26 @@ def val_step(
             z_t.mask.astype(float),
             rngs={"dropout": dropout_test_key},
         )
-        pred = GraphDistribution(
+        pred = GraphDistribution.masked(
             x=raw_pred.x,
             e=raw_pred.e,
             y=raw_pred.y,
             mask=z_t.mask,
-        )  # consider changing the name of this class to something that suggests distribution
-        loss = train_loss(
-            pred_graph=pred,
-            true_graph=dense_data,
         )
-
-        # loss = val_loss(
-        #     state=state,
-        #     target=dense_data,
-        #     pred=pred,
-        #     T=array(config.diffusion_steps),
-        #     noise_schedule=noise_schedule,
-        #     transition_model=transition_model,
-        #     rng_key=rng,
-        #     limit_dist=limit_dist,
-        #     nodes_dist=nodes_dist,
+        # loss = train_loss(
+        #     pred_graph=pred,
+        #     true_graph=dense_data,
         # )
+
+        loss = val_loss(
+            state=state,
+            target=dense_data,
+            pred=pred,
+            T=diffusion_steps,
+            transition_model=transition_model,
+            rng_key=rng,
+            nodes_dist=nodes_dist,
+        )
         return loss, pred
 
     loss, _ = loss_fn(state.params)
@@ -337,6 +328,7 @@ def val_epoch(
     config: TrainingConfig,
     rng: Key,
     transition_model: TransitionModel,
+    nodes_dist: Float[Array, "n"],
 ):
     run_loss = 0.0
     for batch in tqdm(val_loader):
@@ -346,6 +338,7 @@ def val_epoch(
             diffusion_steps=int(config.diffusion_steps),
             rng=rng,
             transition_model=transition_model,
+            nodes_dist=nodes_dist,
         )
         run_loss += loss
     avg_loss = run_loss / len(val_loader)

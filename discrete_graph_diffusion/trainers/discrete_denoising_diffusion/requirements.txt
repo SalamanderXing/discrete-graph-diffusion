@@ -12,8 +12,6 @@ jaxtyping==0.2.15
 
 mate==0.2.0
 
-matplotlib==3.7.1
-
 optax==0.1.4
 
 rich==13.3.4

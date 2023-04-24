@@ -20,7 +20,7 @@ def compute(
     if features_type == "cycles":
         E = graph.e
         extra_edge_attr = np.zeros((*E.shape[:-1], 0), dtype=E.dtype)
-        return GraphDistribution.with_trivial_mask(
+        return GraphDistribution.unmasked(
             x=x_cycles, e=extra_edge_attr, y=np.hstack((n, y_cycles))
         )
 
@@ -29,7 +29,7 @@ def compute(
         E = graph.e
         extra_edge_attr = np.zeros((*E.shape[:-1], 0), dtype=E.dtype)
         n_components, batched_eigenvalues = eigenfeatures  # (bs, 1), (bs, 10)
-        return GraphDistribution.with_trivial_mask(
+        return GraphDistribution.unmasked(
             x=x_cycles,
             e=extra_edge_attr,
             y=np.hstack((n, y_cycles, n_components, batched_eigenvalues)),
@@ -47,7 +47,7 @@ def compute(
         # (bs, n, 1), (bs, n, 2)
         y = np.concatenate((n, y_cycles, n_components, batched_eigenvalues), axis=-1)
         x = np.concatenate((x_cycles, nonlcc_indicator, k_lowest_eigvec), axis=-1)
-        return GraphDistribution.with_trivial_mask(
+        return GraphDistribution.unmasked(
             e=extra_edge_attr,
             x=x,
             y=y,

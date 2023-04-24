@@ -12,8 +12,7 @@ from jax._src.random import PRNGKey
 from jax.scipy.special import logit
 from mate.jax import typed, jit, SInt, SFloat, SBool, Key
 import ipdb
-from .diffusion_types import Q, GraphDistribution, NoiseSchedule
-from .nodes_distribution import NodesDistribution
+from .diffusion_types import Q, GraphDistribution
 from .diffusion_types import TransitionModel
 
 
@@ -48,7 +47,7 @@ def sample_discrete_features(
     inverse_edge_mask = ~(node_mask[:, None] * node_mask[:, :, None])
     diag_mask = np.eye(n)[None].astype(bool).repeat(bs, axis=0)
     probE = np.where(inverse_edge_mask[..., None], 1 / probE.shape[-1], probE)
-    probE = np.where(diag_mask[...,None], 1 / probE.shape[-1], probE)
+    probE = np.where(diag_mask[..., None], 1 / probE.shape[-1], probE)
 
     probE = probE.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
 
@@ -138,11 +137,11 @@ def sample_batch(
     number_chain_steps: int,
     model: nn.Module,
     T: int,
-    node_dist: NodesDistribution,
+    node_dist,  #: NodesDistribution,
     num_nodes=None,
     limit_dist: GraphDistribution | None = None,
     noise_transition: TransitionModel,
-    noise_schedule: NoiseSchedule,
+    noise_schedule,  #: NoiseSchedule,
     extra_features: Array,
     domain_features: Array,
     batch_id: int = -1,  # used by the visualization tools
@@ -258,7 +257,7 @@ def sample_p_zs_given_zt(
     E_t: Array,
     y_t: Array,
     node_mask: Array,
-    noise_schedule: NoiseSchedule,
+    noise_schedule,  # : NoiseSchedule,
     noise_transition: TransitionModel,
     extra_features: Array,
     domain_features: Array,

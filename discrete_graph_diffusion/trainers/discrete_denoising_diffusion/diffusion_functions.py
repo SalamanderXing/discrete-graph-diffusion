@@ -18,7 +18,7 @@ from jaxtyping import Int, Float, Bool
 from .diffusion_types import TransitionModel
 from .sample import sample_discrete_features
 from .utils import softmax_kl_div
-from .diffusion_types import GraphDistribution, Distribution, NoiseSchedule
+from .diffusion_types import GraphDistribution
 from .extra_features import extra_features
 
 check = lambda x, y: None
@@ -29,7 +29,7 @@ def reconstruction_logp(
     *,
     rng_key: Key,
     state: TrainState,
-    noise_schedule: NoiseSchedule,
+    noise_schedule,  # : NoiseSchedule,
     t: SInt,
     graph: GraphDistribution,
     transition_model: TransitionModel,
@@ -98,7 +98,7 @@ def compute_Lt(
     transition_model: TransitionModel,
     t: SInt,
 ) -> Array:
-    pred_probs = GraphDistribution.with_trivial_mask(
+    pred_probs = GraphDistribution.unmasked(
         x=jax.nn.softmax(pred.x, axis=-1),
         e=jax.nn.softmax(pred.e, axis=-1),
         y=jax.nn.softmax(pred.y, axis=-1),
@@ -221,14 +221,13 @@ def mask_distributions(
     row_E = np.zeros(true_E.shape[-1])
     row_E = row_E.at[0].set(1.0)
 
-    diag_mask = ~jax.numpy.eye(node_mask.shape[1], dtype=bool)[None, ...]
+    diag_mask = ~jax.numpy.eye(node_mask.shape[1], dtype=bool)[None]
     true_X = true_X.at[~node_mask].set(row_X)
-    true_E = true_E.at[
-        ~(node_mask[:, None, None] & node_mask[:, None] & diag_mask), :
-    ].set(row_E)
+    uba = ~(node_mask[:, None, None] & node_mask[:, None] & diag_mask)
+    true_E = true_E.at[uba, :].set(row_E)
     pred_X = pred_X.at[~node_mask].set(row_X)
     pred_E = pred_E.at[
-        ~(node_mask[:, None, None] & node_mask[:, None] & diag_mask), :
+        ~(node_mask[:, None, None] & node_mask[:, None] & diag_mask2), :
     ].set(row_E)
 
     return true_X, true_E, pred_X, pred_E
@@ -279,20 +278,20 @@ def apply_noise(
         probX=prob_graph.x, probE=prob_graph.e, node_mask=graph.mask, rng_key=rng
     )
 
-    X_t = jax.nn.one_hot(sampled_graph_t.x, num_classes=prob_graph.x.shape[-1])
-    E_t = jax.nn.one_hot(sampled_graph_t.e, num_classes=prob_graph.e.shape[-1])
-    check((graph.x.shape == X_t.shape) and (graph.e.shape == E_t.shape), "whooops")
-
-    return GraphDistribution(x=X_t, e=E_t, y=graph.y, mask=graph.mask).type_as(X_t)
+    x_t = jax.nn.one_hot(sampled_graph_t.x, num_classes=prob_graph.x.shape[-1])
+    e_t = jax.nn.one_hot(sampled_graph_t.e, num_classes=prob_graph.e.shape[-1])
+    check((graph.x.shape == x_t.shape) and (graph.e.shape == e_t.shape), "whooops")
+    return GraphDistribution.masked(
+        x=x_t, e=e_t, y=graph.y, mask=graph.mask
+    )  # .astype(X_t)
 
 
 @typed
 def kl_prior(
     *,
     target: GraphDistribution,
-    T: SInt,
+    diffusion_steps: SInt,
     transition_model: TransitionModel,
-    prior_dist: Distribution,
 ) -> SFloat:
     """Computes the KL between q(z1 | x) and the prior p(z1) = Normal(0, 1).
 
@@ -300,32 +299,29 @@ def kl_prior(
     compute it so that you see it when you've made a mistake in your noise schedule.
     """
     # Compute the last alpha value, alpha_T.
-    ones = np.ones((target.x.shape[0], 1))
-    Ts = T * ones
-    alpha_t_bar = noise_schedule.alphas_bar[Ts]  # (bs, 1)
-
-    Qtb = transition_model.get_Qt_bar(alpha_t_bar)
+    timesteps = diffusion_steps * np.ones(target.x.shape[0], int)
+    qt_bar = transition_model.q_bars[timesteps]
+    prior = transition_model.prior
 
     # Compute transition probabilities
-    probX = target.x @ Qtb.x  # (bs, n, dx_out)
-    probE = target.e @ np.expand_dims(Qtb.e, 1)  # (bs, n, n, de_out)
-    check(probX.shape == target.x.shape, "whoops")
-
-    bs, n, _ = probX.shape
-
-    limit_X = np.broadcast_to(np.expand_dims(prior_dist.x, (0, 1)), (bs, n, -1))
-    limit_E = np.broadcast_to(np.expand_dims(prior_dist.e, (0, 1, 2)), (bs, n, n, -1))
-
+    transition_probs = target @ qt_bar
+    bs, n, _ = transition_probs.x.shape
+    limit_X = np.broadcast_to(
+        np.expand_dims(prior.x, (0, 1)), (bs, n, prior.x.shape[-1])
+    )
+    limit_E = np.broadcast_to(
+        np.expand_dims(prior.e, (0, 1, 2)), (bs, n, n, prior.e.shape[-1])
+    )
     # Make sure that masked rows do not contribute to the loss
     limit_dist_X, limit_dist_E, probX, probE = mask_distributions(
-        true_X=np.copy(limit_X),
-        true_E=np.copy(limit_E),
-        pred_X=probX,
-        pred_E=probE,
+        true_X=limit_X,
+        true_E=limit_E,
+        pred_X=transition_probs.x,
+        pred_E=transition_probs.e,
         node_mask=target.mask,
     )
 
-    kl_distance_X = kl_div(np.log(probX), limit_dist_X).sum(1)
-    kl_distance_E = kl_div(np.log(probE), limit_dist_E).sum(1)
+    kl_distance_X = kl_div(probX, limit_dist_X).sum(1)
+    kl_distance_E = kl_div(probE, limit_dist_E).sum(1)
 
     return kl_distance_X + kl_distance_E

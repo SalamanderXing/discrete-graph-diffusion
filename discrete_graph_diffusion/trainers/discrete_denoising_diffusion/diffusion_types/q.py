@@ -16,3 +16,7 @@ class Q(jdc.EnforcedAnnotationsMixin):
     # overrides the square bracket indexing
     def __getitem__(self, key: int | Array) -> "Q":
         return Q(x=self.x[key], e=self.e[key], y=self.y[key])
+
+    @property
+    def shape(self) -> dict[str, tuple[int, ...]]:
+        return dict(x=self.x.shape, e=self.e.shape, y=self.y.shape)
