@@ -90,13 +90,12 @@ def val_loss(
         diffusion_steps=T,
         transition_model=transition_model,
     )
-    ipdb.set_trace()
     # 3. Diffusion loss
     loss_all_t = df.compute_Lt(
         target=target,
         pred=pred,
         noisy_data=noisy_data,
-        T=T,
+        diffusion_steps=T,
         transition_model=transition_model,
     )
 
@@ -317,6 +316,7 @@ def val_step(
         return loss, pred
 
     loss, _ = loss_fn(state.params)
+    print(f"{loss=}")
     return loss
 
 

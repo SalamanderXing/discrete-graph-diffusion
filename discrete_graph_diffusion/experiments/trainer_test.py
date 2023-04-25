@@ -7,7 +7,7 @@ from jax.lib import xla_bridge
 
 print(f"Using device: {xla_bridge.get_backend().platform}")
 
-config.update("jax_debug_nans", True)
+# config.update("jax_debug_nans", True)
 from mate import mate
 from dataclasses import dataclass, asdict
 from ..data_loaders.qm9_p import QM9DataModule, QM9Infos, get_train_smiles
@@ -57,7 +57,7 @@ graph_transformer_config = GraphTransformerConfig.from_dict(
             "dim_ffE": 128,
             "dim_ffy": 128,
         },
-        n_layers=5,
+        n_layers=2,
     )
 )
 dataset_dict = dataset_infos.__dict__
@@ -103,5 +103,5 @@ train_model(
     train_loader=datamodule.train_dataloader(),
     val_loader=datamodule.val_dataloader(),
     output_dims=graph_transformer_config.output_dims.__dict__,
-    nodes_dist=dataset_infos.nodes_dist,
+    nodes_dist_torch=dataset_infos.nodes_dist,
 )

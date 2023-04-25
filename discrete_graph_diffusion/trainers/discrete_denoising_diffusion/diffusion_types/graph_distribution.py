@@ -1,27 +1,28 @@
-from jax import Array
-from jax import numpy as np
+from jax import numpy as np, Array
+import jax
 from jax.experimental.checkify import check
 import ipdb
 import jax_dataclasses as jdc
-from mate.jax import typed, SBool
+from mate.jax import typed, SBool, Key
 from jaxtyping import Float, Bool
 from .geometric import to_dense
+from jax import random
 from .data_batch import DataBatch
 from .q import Q
 
 check = lambda x, y: None  # to be replaced with JAX's checkify.check function
 
-XType = Float[Array, "b n en"]
-EType = Float[Array, "b n n ee"]
-YType = Float[Array, "b ey"]
+XDistType = Float[Array, "b n en"]
+EDistType = Float[Array, "b n n ee"]
+YDistType = Float[Array, "b ey"]
 MaskType = Bool[Array, "b n"]
 
 
 @jdc.pytree_dataclass
 class GraphDistribution(jdc.EnforcedAnnotationsMixin):
-    x: XType
-    e: EType
-    y: YType
+    x: XDistType
+    e: EDistType
+    y: YDistType
     mask: MaskType
     _created_internally: SBool  # trick to prevent users from creating this class directly
 
@@ -29,9 +30,9 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     @typed
     def unmasked(
         cls,
-        x: XType,
-        e: EType,
-        y: YType,
+        x: XDistType,
+        e: EDistType,
+        y: YDistType,
     ) -> "GraphDistribution":
         return cls(
             x=x,
@@ -45,9 +46,9 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     @typed
     def masked(
         cls,
-        x: XType,
-        e: EType,
-        y: YType,
+        x: XDistType,
+        e: EDistType,
+        y: YDistType,
         mask: MaskType,
     ) -> "GraphDistribution":
         x_mask = mask[..., None]  # bs, n, 1
@@ -75,7 +76,9 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
     @property
     def shape(self) -> dict[str, tuple[int, ...]]:
-        return dict(x=self.x.shape, e=self.e.shape, y=self.y.shape, mask=self.mask.shape)
+        return dict(
+            x=self.x.shape, e=self.e.shape, y=self.y.shape, mask=self.mask.shape
+        )
 
     def __repr__(self):
         return self.__str__()
@@ -83,7 +86,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     def set(
         self,
         key: str,
-        value: XType | EType | YType | MaskType,
+        value: XDistType | EDistType | YDistType | MaskType,
     ) -> "GraphDistribution":
         """Sets the values of X, E, y."""
         new_vals = {
@@ -108,6 +111,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         )
         return cls(x=x, e=e, y=data_batch.y, mask=node_mask, _created_internally=True)
 
+    @typed
     def astype(self, x: Array) -> "GraphDistribution":
         """Changes the device and dtype of X, E, y."""
         dtype = x.dtype
@@ -117,6 +121,62 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             y=self.y.astype(dtype),
             mask=self.mask,
             _created_internally=True,
+        )
+
+    @typed
+    def sample_one_hot(self, rng_key: Key) -> "GraphDistribution":
+        """Sample features from multinomial distribution with given probabilities (probX, probE, proby)
+        :param probX: bs, n, dx_out        node features
+        :param probE: bs, n, n, de_out     edge features
+        :param rng_key: random.PRNGKey     random key for JAX operations
+        """
+        bs, n, ne = self.x.shape
+        _, _, _, ee = self.e.shape
+        mask = self.mask
+        prob_x = self.x
+        prob_e = self.e
+        # Noise X
+        # The masked rows should define probability distributions as well
+        # probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
+        probX = np.where(
+            (~mask)[:, :, None],
+            1 / prob_x.shape[-1],
+            prob_x,
+        )
+
+        # Flatten the probability tensor to sample with categorical distribution
+        probX = probX.reshape(bs * n, -1)  # (bs * n, dx_out)
+
+        # Sample X
+        rng_key, subkey = random.split(rng_key)
+        x_t = random.categorical(
+            subkey, jax.scipy.special.logit(probX), axis=-1
+        )  # (bs * n,)
+        x_t = x_t.reshape(bs, n)  # (bs, n)
+
+        # Noise E
+        # The masked rows should define probability distributions as well
+        inverse_edge_mask = ~(mask[:, None] * mask[:, :, None])
+        diag_mask = np.eye(n)[None].astype(bool).repeat(bs, axis=0)
+        prob_e = np.where(inverse_edge_mask[..., None], 1 / prob_e.shape[-1], prob_e)
+        prob_e = np.where(diag_mask[..., None], 1 / prob_e.shape[-1], prob_e)
+
+        probE = prob_e.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
+
+        # Sample E
+        rng_key, subkey = random.split(rng_key)
+        e_t = random.categorical(
+            subkey, jax.scipy.special.logit(probE), axis=-1
+        )  # (bs * n * n,)
+        e_t = e_t.reshape(bs, n, n)  # (bs, n, n)
+        e_t = np.triu(e_t, k=1)
+        e_t = e_t + np.transpose(e_t, (0, 2, 1))
+
+        # return Q(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
+        embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
+        embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
+        return GraphDistribution.masked(
+            x=embedded_x, e=embedded_e, y=np.zeros((bs, 0)), mask=self.mask
         )
 
     # overrides the pipe operator, that takes another EmbeddedGraph as input. This concatenates the two graphs.

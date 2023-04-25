@@ -13,12 +13,17 @@ from flax import linen as nn
 from flax.training.train_state import TrainState
 import mate as m
 from mate.jax import SInt, SFloat, Key, typed, jit, SBool
+from flax.training.train_state import TrainState
 from jaxtyping import Int, Float, Bool
-
+from .diffusion_types import (
+    GraphDistribution,
+    XDistType,
+    EDistType,
+    YDistType,
+    MaskType,
+)
 from .diffusion_types import TransitionModel
-from .sample import sample_discrete_features
 from .utils import softmax_kl_div
-from .diffusion_types import GraphDistribution
 from .extra_features import extra_features
 
 check = lambda x, y: None
@@ -88,15 +93,15 @@ def reconstruction_logp(
     return GraphDistribution(x=probX0, e=probE0, y=proby0)
 
 
+"""
 @typed
 def compute_Lt(
     *,
     target: GraphDistribution,
     pred: GraphDistribution,
     noisy_data,
-    T: SFloat,
+    diffusion_steps: SFloat,
     transition_model: TransitionModel,
-    t: SInt,
 ) -> Array:
     pred_probs = GraphDistribution.unmasked(
         x=jax.nn.softmax(pred.x, axis=-1),
@@ -142,7 +147,21 @@ def compute_Lt(
     )
     kl_x = softmax_kl_div(prob_true.x, prob_pred_x)
     kl_e = softmax_kl_div(prob_true.e, prob_pred_e)
-    return T * (kl_x + kl_e)
+    return diffusion_steps * (kl_x + kl_e)
+    pass
+"""
+
+
+def compute_lt(
+    train_state: TrainState,
+    n_t_samples: SInt,
+    n_g_samples: SInt,
+) -> SFloat:
+    t_acc = 0
+    for _ in range(n_t_samples):
+        g_acc = 0
+        for _ in range(n_g_samples):
+            pass
 
 
 @typed
@@ -199,15 +218,22 @@ def posterior_distribution(
 #     )
 
 
-def kl_div(p: Array, q: Array, eps: float = 2**-17) -> Array:
+@typed
+def kl_div(p: Array, q: Array, eps: SFloat = 2**-17) -> Array:
     """Calculates the Kullback-Leibler divergence between arrays p and q."""
-    return p.dot(np.log(p + eps) - np.log(q + eps))
+    p += eps
+    q += eps
+    return np.sum(p * np.log(p / q), axis=-1)
 
 
 @typed
 def mask_distributions(
-    true_X: Array, true_E: Array, pred_X: Array, pred_E: Array, node_mask: Array
-) -> tuple[Array, Array, Array, Array]:
+    true_X: XDistType,
+    true_E: EDistType,
+    pred_X: XDistType,
+    pred_E: EDistType,
+    node_mask: MaskType,
+) -> tuple[XDistType, EDistType, XDistType, EDistType]:
     # Add a small value everywhere to avoid nans
     pred_X += 1e-7
     pred_X = pred_X / np.sum(pred_X, axis=-1, keepdims=True)
@@ -223,12 +249,10 @@ def mask_distributions(
 
     diag_mask = ~jax.numpy.eye(node_mask.shape[1], dtype=bool)[None]
     true_X = true_X.at[~node_mask].set(row_X)
-    uba = ~(node_mask[:, None, None] & node_mask[:, None] & diag_mask)
-    true_E = true_E.at[uba, :].set(row_E)
+    mask = ~(node_mask[:, None] * node_mask[:, :, None] * diag_mask)
+    true_E = true_E.at[mask, :].set(row_E)
     pred_X = pred_X.at[~node_mask].set(row_X)
-    pred_E = pred_E.at[
-        ~(node_mask[:, None, None] & node_mask[:, None] & diag_mask2), :
-    ].set(row_E)
+    pred_E = pred_E.at[mask,].set(row_E)
 
     return true_X, true_E, pred_X, pred_E
 
@@ -264,26 +288,14 @@ def apply_noise(
 ) -> GraphDistribution:
     """Sample noise and apply it to the data."""
 
+    # get the transition matrix
     Qt_bar = transition_model.q_bars[t_int]
-    check(
-        (abs(Qt_bar.x.sum(axis=2) - 1.0) < 1e-4).all(),
-        "whoops",
-    )
-    check((abs(Qt_bar.e.sum(axis=2) - 1.0) < 1e-4).all(), "whoops")
 
     # Compute transition probabilities
     prob_graph = graph @ Qt_bar
 
-    sampled_graph_t = sample_discrete_features(
-        probX=prob_graph.x, probE=prob_graph.e, node_mask=graph.mask, rng_key=rng
-    )
-
-    x_t = jax.nn.one_hot(sampled_graph_t.x, num_classes=prob_graph.x.shape[-1])
-    e_t = jax.nn.one_hot(sampled_graph_t.e, num_classes=prob_graph.e.shape[-1])
-    check((graph.x.shape == x_t.shape) and (graph.e.shape == e_t.shape), "whooops")
-    return GraphDistribution.masked(
-        x=x_t, e=e_t, y=graph.y, mask=graph.mask
-    )  # .astype(X_t)
+    # sampling returns an 1-hot encoded graph, so still a disctrete distribution
+    return prob_graph.sample_one_hot(rng_key=rng)
 
 
 @typed
@@ -293,7 +305,7 @@ def kl_prior(
     diffusion_steps: SInt,
     transition_model: TransitionModel,
 ) -> SFloat:
-    """Computes the KL between q(z1 | x) and the prior p(z1) = Normal(0, 1).
+    """Computes the KL between q(z1 | x) and the prior p(z1) (extracted from the data)
 
     This is essentially a lot of work for something that is in practice negligible in the loss. However, you
     compute it so that you see it when you've made a mistake in your noise schedule.
@@ -320,8 +332,6 @@ def kl_prior(
         pred_E=transition_probs.e,
         node_mask=target.mask,
     )
-
-    kl_distance_X = kl_div(probX, limit_dist_X).sum(1)
-    kl_distance_E = kl_div(probE, limit_dist_E).sum(1)
-
+    kl_distance_X = kl_div(probX, limit_dist_X).sum()
+    kl_distance_E = kl_div(probE, limit_dist_E).sum()
     return kl_distance_X + kl_distance_E

@@ -342,18 +342,4 @@ def sample_p_zs_given_zt(
     ).type_as(y_t)
 
 
-def compute_extra_data(*, noisy_data: dict, extra_features, domain_features):
-    """At every training step (after adding noise) and step in sampling, compute extra information and append to
-    the network input."""
 
-    extra_features = extra_features(noisy_data)
-    extra_molecular_features = domain_features(noisy_data)
-
-    extra_X = np.concatenate((extra_features.X, extra_molecular_features.X), axis=-1)
-    extra_E = np.concatenate((extra_features.E, extra_molecular_features.E), axis=-1)
-    extra_y = np.concatenate((extra_features.y, extra_molecular_features.y), axis=-1)
-
-    t = noisy_data["t"]
-    extra_y = np.concatenate((extra_y, t), axis=1)
-
-    return GraphDistribution(x=extra_X, e=extra_E, y=extra_y)
