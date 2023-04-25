@@ -3,7 +3,7 @@ import jax
 from jax.experimental.checkify import check
 import ipdb
 import jax_dataclasses as jdc
-from mate.jax import typed, SBool, Key
+from mate.jax import SFloat, SInt, typed, SBool, Key
 from jaxtyping import Float, Bool
 from .geometric import to_dense
 from jax import random
@@ -80,8 +80,48 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             x=self.x.shape, e=self.e.shape, y=self.y.shape, mask=self.mask.shape
         )
 
+    @property
+    def batch_size(self) -> int:
+        return self.x.shape[0]
+
     def __repr__(self):
         return self.__str__()
+
+    def __mul__(
+        self, other: "GraphDistribution" | SFloat | SInt
+    ) -> "GraphDistribution":
+        if isinstance(other, (SFloat, SInt)):
+            return GraphDistribution.masked(
+                x=self.x * other,
+                e=self.e * other,
+                y=self.y * other,
+                mask=self.mask,
+            )
+        else:
+            return GraphDistribution.masked(
+                x=self.x * other.x,
+                e=self.e * other.e,
+                y=self.y * other.y,
+                mask=self.mask,
+            )
+
+    def __truediv__(
+        self, other: "GraphDistribution" | SFloat | SInt
+    ) -> "GraphDistribution":
+        if isinstance(other, (SFloat, SInt)):
+            return GraphDistribution.masked(
+                x=self.x / other,
+                e=self.e / other,
+                y=self.y / other,
+                mask=self.mask,
+            )
+        else:
+            return GraphDistribution.masked(
+                x=self.x / other.x,
+                e=self.e / other.e,
+                y=self.y / other.y,
+                mask=self.mask,
+            )
 
     def set(
         self,
@@ -180,11 +220,11 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         )
 
     # overrides the pipe operator, that takes another EmbeddedGraph as input. This concatenates the two graphs.
-    def __or__(self, other: "GraphDistribution") -> "GraphDistribution":
-        x = np.concatenate((self.x, other.x), axis=2)
-        e = np.concatenate((self.e, other.e), axis=3)
-        y = np.hstack((self.y, other.y))
-        return GraphDistribution(x=x, e=e, y=y, mask=self.mask)
+    # def __or__(self, other: "GraphDistribution") -> "GraphDistribution":
+    #     x = np.concatenate((self.x, other.x), axis=2)
+    #     e = np.concatenate((self.e, other.e), axis=3)
+    #     y = np.hstack((self.y, other.y))
+    #     return GraphDistribution(x=x, e=e, y=y, mask=self.mask)
 
     def __matmul__(self, q: Q) -> "GraphDistribution":
         x = self.x @ q.x

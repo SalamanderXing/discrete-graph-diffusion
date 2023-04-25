@@ -2,6 +2,7 @@
 Entrypoint of the discrete denoising diffusion model.
 The function `train_model` is the main entrypoint.
 """
+from typing import Callable
 from jax import numpy as np, Array
 from flax.training import train_state
 import flax.linen as nn
@@ -47,20 +48,9 @@ def train_loss(
     mask_x = (true_x != 0).any(axis=-1)
     mask_e = (true_e != 0).any(axis=-1)
 
-    """
-    flat_true_x = true_x[mask_x]
-    flat_true_e = true_e[mask_e]
-
-    flat_pred_x = masked_pred_x[mask_x]
-    flat_pred_e = masked_pred_e[mask_e]
-    """
     loss_x = np.where(mask_x, loss_fn(pred_x, true_x).mean(-1), 0).sum() / mask_x.sum()
     loss_e = np.where(mask_e, loss_fn(pred_e, true_e).mean(-1), 0).sum() / mask_e.sum()
 
-    # Compute metrics
-    # loss_x = loss_fn(pred_x, true_x).mean() if true_x.size else 0
-    # loss_e = loss_fn(pred_e, true_e).mean() if true_e.size else 0
-    # loss_y = loss_fn(pred_graph.y, true_graph.y).mean()
     return loss_x + lambda_train_e * loss_e  # + lambda_train_y * loss_y
 
 
@@ -73,6 +63,7 @@ def val_loss(
     nodes_dist: Float[Array, "n"],
     transition_model: TransitionModel,
     state: TrainState,
+    get_probability: Callable[[GraphDistribution], GraphDistribution],
     rng_key: Key,
 ):
     # TODO: this still has to be fully ported
@@ -91,15 +82,18 @@ def val_loss(
         transition_model=transition_model,
     )
     # 3. Diffusion loss
-    loss_all_t = df.compute_Lt(
-        target=target,
-        pred=pred,
-        noisy_data=noisy_data,
+    loss_all_t = df.compute_lt(
+        rng=rng_key,
+        g=target,
+        n_t_samples=1,
+        n_g_samples=1,
         diffusion_steps=T,
         transition_model=transition_model,
+        get_probability=get_probability,
     )
 
     # 4. Reconstruction loss
+    # TODO
     # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
     prob0 = df.reconstruction_logp(
         rng_key=rng_key, state=state, graph=target, t=t, noise_schedule=noise_schedule
@@ -156,13 +150,13 @@ def train_step(
         graph=dense_data,
         test=np.array(False),
         rng=rng,
-        T=diffusion_steps,
+        diffusion_steps=diffusion_steps,
         transition_model=transition_model,
     ).set("y", np.ones((dense_data.y.shape[0], 1)))
+
     # concatenates the extra features to the graph
     # FIXME: I disabled temporarely the extra features
     # graph_dist_with_extra_data = z_t  | extra_features.compute(z_t)
-
     def loss_fn(params: FrozenDict):
         raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
             params,
@@ -178,16 +172,16 @@ def train_step(
             y=raw_pred.y,
             mask=z_t.mask,
         )  # consider changing the name of this class to something that suggests ditribution
+
         loss = train_loss(pred_graph=pred, true_graph=dense_data)
         jprint("loss {loss}", loss=loss)
         return loss, pred
 
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
-
-    grads = jax.tree_map(lambda x: np.where(np.isnan(x), 0.0, x), grads)
-
-    # print(f"there are nans: {there_are_nan}")
+    grads = jax.tree_map(
+        lambda x: np.where(np.isnan(x), 0.0, x), grads
+    )  # remove the nans :(
     state = state.apply_gradients(grads=grads)
     return state, loss
 
@@ -262,6 +256,29 @@ def train_model(
         )
 
 
+def get_probability_from_state(
+    state: TrainState, droput_rng: Key
+) -> Callable[[GraphDistribution], GraphDistribution]:
+    def get_probability(g: GraphDistribution) -> GraphDistribution:
+        raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
+            state.params,
+            g.x,
+            g.e,
+            g.y,
+            g.mask.astype(float),
+            rngs={"dropout": droput_rng},
+        )
+        pred = GraphDistribution.masked(
+            x=raw_pred.x,
+            e=raw_pred.e,
+            y=raw_pred.y,
+            mask=g.mask,
+        )
+        return pred
+
+    return get_probability
+
+
 def val_step(
     *,
     dense_data: GraphDistribution,
@@ -276,43 +293,29 @@ def val_step(
     X, E = dense_data.x, dense_data.e
     z_t = df.apply_random_noise(
         graph=dense_data,
-        test=np.array(False),
+        test=False,
         rng=rng,
-        T=np.array(diffusion_steps),
+        diffusion_steps=diffusion_steps,
         transition_model=transition_model,
     ).set("y", np.ones((dense_data.y.shape[0], 1)))
     # skip extra features for now
     graph_dist_with_extra_data = z_t  #  | extra_features.compute(z_t)
 
     def loss_fn(params: FrozenDict):
-        raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
-            params,
-            graph_dist_with_extra_data.x,
-            graph_dist_with_extra_data.e,
-            graph_dist_with_extra_data.y,
-            z_t.mask.astype(float),
-            rngs={"dropout": dropout_test_key},
+        get_probability = get_probability_from_state(state, dropout_test_key)
+        loss = train_loss(
+            pred_graph=get_probability(z_t),
+            true_graph=dense_data,
         )
-        pred = GraphDistribution.masked(
-            x=raw_pred.x,
-            e=raw_pred.e,
-            y=raw_pred.y,
-            mask=z_t.mask,
-        )
-        # loss = train_loss(
-        #     pred_graph=pred,
-        #     true_graph=dense_data,
+        # loss = val_loss(
+        #     state=state,
+        #     target=dense_data,
+        #     pred=pred,
+        #     T=diffusion_steps,
+        #     transition_model=transition_model,
+        #     rng_key=rng,
+        #     nodes_dist=nodes_dist,
         # )
-
-        loss = val_loss(
-            state=state,
-            target=dense_data,
-            pred=pred,
-            T=diffusion_steps,
-            transition_model=transition_model,
-            rng_key=rng,
-            nodes_dist=nodes_dist,
-        )
         return loss, pred
 
     loss, _ = loss_fn(state.params)

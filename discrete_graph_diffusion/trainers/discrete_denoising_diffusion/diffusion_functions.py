@@ -5,7 +5,7 @@ from typing import Callable
 import jax
 import ipdb
 from rich import print
-from jax import Array
+from jax import Array, random
 import jax
 from jax import numpy as np
 from jax.experimental.checkify import check
@@ -21,6 +21,7 @@ from .diffusion_types import (
     EDistType,
     YDistType,
     MaskType,
+    # Forward,
 )
 from .diffusion_types import TransitionModel
 from .utils import softmax_kl_div
@@ -93,75 +94,32 @@ def reconstruction_logp(
     return GraphDistribution(x=probX0, e=probE0, y=proby0)
 
 
-"""
-@typed
-def compute_Lt(
-    *,
-    target: GraphDistribution,
-    pred: GraphDistribution,
-    noisy_data,
-    diffusion_steps: SFloat,
-    transition_model: TransitionModel,
-) -> Array:
-    pred_probs = GraphDistribution.unmasked(
-        x=jax.nn.softmax(pred.x, axis=-1),
-        e=jax.nn.softmax(pred.e, axis=-1),
-        y=jax.nn.softmax(pred.y, axis=-1),
-    )
-
-    Qt_bar = transition_model.get_Qt_bar(
-        noisy_data.alpha_t_bar
-    )  # this is the transitin matrix up to time t
-    Qs_bar = transition_model.get_Qt_bar(
-        noisy_data.alpha_s_bar
-    )  # this is the transitin matrix up to time t - 1
-    Qt = transition_model.get_Qt(noisy_data.beta_t)
-
-    # Compute distributions to compare with KL
-    prob_true = posterior_distributions(
-        target,
-        noisy_data.embedded_graph,
-        Qt=Qt,
-        Qsb=Qs_bar,
-        Qtb=Qt_bar,
-    )
-    prob_pred_unmasked = posterior_distributions(
-        pred_probs,
-        noisy_data.embedded_graph,
-        Qt=Qt,
-        Qsb=Qs_bar,
-        Qtb=Qt_bar,
-    )
-    # Reshape and filter masked rows
-    (
-        _,
-        _,
-        prob_pred_x,
-        prob_pred_e,
-    ) = mask_distributions(
-        true_X=prob_true.x,
-        true_E=prob_true.e,
-        pred_X=prob_pred_unmasked.x,
-        pred_E=prob_pred_unmasked.e,
-        node_mask=target.mask,
-    )
-    kl_x = softmax_kl_div(prob_true.x, prob_pred_x)
-    kl_e = softmax_kl_div(prob_true.e, prob_pred_e)
-    return diffusion_steps * (kl_x + kl_e)
-    pass
-"""
-
-
 def compute_lt(
-    train_state: TrainState,
+    get_probability: Callable[[GraphDistribution], GraphDistribution],
+    g: GraphDistribution,
     n_t_samples: SInt,
     n_g_samples: SInt,
+    diffusion_steps: SInt,
+    transition_model: TransitionModel,
+    rng: Key,
 ) -> SFloat:
     t_acc = 0
     for _ in range(n_t_samples):
         g_acc = 0
+        t = random.randint(  # sample t_int from U[lowest_t, T]
+            rng, (g.batch_size,), 1, diffusion_steps + 1
+        )
         for _ in range(n_g_samples):
-            pass
+            q_t = transition_model.qs[t]
+            q_t_bar = transition_model.q_bars[t]
+            q_s_bar = transition_model.q_bars[t - 1]
+            g_t = (g @ transition_model.q_bars[t]).sample_one_hot(rng)
+            g_s_probs = get_probability(g_t)
+            g_s = g_s_probs.sample_one_hot(rng)
+            left_term = ((g_s @ q_s_bar) * (g @ q_t_bar)) / (g @ q_t_bar)
+            g_acc += graph_dist_kl_div(left_term, g_s_probs)
+        t_acc += g_acc / n_g_samples
+    return t_acc / n_t_samples
 
 
 @typed
@@ -227,6 +185,12 @@ def kl_div(p: Array, q: Array, eps: SFloat = 2**-17) -> Array:
 
 
 @typed
+def graph_dist_kl_div(p: GraphDistribution, q: GraphDistribution) -> SFloat:
+    """Calculates the Kullback-Leibler divergence between arrays p and q."""
+    return kl_div(p.x, q.x) + kl_div(p.e, q.e)  # + kl_div(p.y, q.y)
+
+
+@typed
 def mask_distributions(
     true_X: XDistType,
     true_E: EDistType,
@@ -262,19 +226,20 @@ def apply_random_noise(
     *,
     rng: Key,
     graph: GraphDistribution,
-    T: SInt,
+    diffusion_steps: SInt,
     transition_model: TransitionModel,
     test: SBool,
 ) -> GraphDistribution:
     lowest_t = np.array(test).astype(np.int32)
-    t_int = jax.random.randint(  # sample t_int from U[lowest_t, T]
-        rng, (graph.x.shape[0], 1), lowest_t, T + 1
-    ).squeeze()
+    bs = graph.x.shape[0]
+    t = jax.random.randint(  # sample t_int from U[lowest_t, T]
+        rng, (bs,), lowest_t, diffusion_steps + 1
+    )
     return apply_noise(
         rng=rng,
         graph=graph,
         transition_model=transition_model,
-        t_int=t_int,
+        t=t,
     )
 
 
@@ -284,12 +249,12 @@ def apply_noise(
     rng: Key,
     graph: GraphDistribution,
     transition_model: TransitionModel,
-    t_int: Int[Array, "batch_size"],
+    t: Int[Array, "batch_size"],
 ) -> GraphDistribution:
     """Sample noise and apply it to the data."""
 
     # get the transition matrix
-    Qt_bar = transition_model.q_bars[t_int]
+    Qt_bar = transition_model.q_bars[t]
 
     # Compute transition probabilities
     prob_graph = graph @ Qt_bar

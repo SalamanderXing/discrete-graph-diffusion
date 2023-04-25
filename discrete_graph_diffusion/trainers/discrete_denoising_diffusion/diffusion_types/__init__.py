@@ -1,4 +1,5 @@
 from jaxtyping import install_import_hook
+from typing import Callable
 
 with install_import_hook("diffusion_types", "typeguard.typechecked"):
     from .graph_distribution import (
@@ -12,3 +13,5 @@ with install_import_hook("diffusion_types", "typeguard.typechecked"):
     from .graph import Graph
     from .distribution import Distribution
     from .transition_model import TransitionModel
+
+    #Forward = 
