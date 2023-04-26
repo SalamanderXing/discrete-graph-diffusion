@@ -116,7 +116,7 @@ def compute_lt(
             g_t = (g @ transition_model.q_bars[t]).sample_one_hot(rng)
             g_s_probs = get_probability(g_t)
             g_s = g_s_probs.sample_one_hot(rng)
-            left_term = ((g_s @ q_s_bar) * (g @ q_t_bar)) / (g @ q_t_bar)
+            left_term = ((g_s @ q_t) * (g @ q_s_bar)) / (g @ q_t_bar)
             g_acc += graph_dist_kl_div(left_term, g_s_probs)
         t_acc += g_acc / n_g_samples
     return t_acc / n_t_samples
@@ -187,7 +187,7 @@ def kl_div(p: Array, q: Array, eps: SFloat = 2**-17) -> Array:
 @typed
 def graph_dist_kl_div(p: GraphDistribution, q: GraphDistribution) -> SFloat:
     """Calculates the Kullback-Leibler divergence between arrays p and q."""
-    return kl_div(p.x, q.x) + kl_div(p.e, q.e)  # + kl_div(p.y, q.y)
+    return kl_div(p.x, q.x).mean() + kl_div(p.e, q.e).mean()  # + kl_div(p.y, q.y)
 
 
 @typed

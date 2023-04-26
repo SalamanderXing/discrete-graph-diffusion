@@ -59,7 +59,6 @@ def val_loss(
     *,
     T: SInt,
     target: GraphDistribution,
-    pred: GraphDistribution,
     nodes_dist: Float[Array, "n"],
     transition_model: TransitionModel,
     state: TrainState,
@@ -91,7 +90,6 @@ def val_loss(
         transition_model=transition_model,
         get_probability=get_probability,
     )
-
     # 4. Reconstruction loss
     # TODO
     # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
@@ -260,18 +258,19 @@ def get_probability_from_state(
     state: TrainState, droput_rng: Key
 ) -> Callable[[GraphDistribution], GraphDistribution]:
     def get_probability(g: GraphDistribution) -> GraphDistribution:
-        raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
+        y = np.ones((g.y.shape[0], 1)) if g.y.size == 0 else g.y
+        raw_pred = state.apply_fn(
             state.params,
             g.x,
             g.e,
-            g.y,
+            y,
             g.mask.astype(float),
             rngs={"dropout": droput_rng},
         )
         pred = GraphDistribution.masked(
-            x=raw_pred.x,
-            e=raw_pred.e,
-            y=raw_pred.y,
+            x=jax.nn.softmax(raw_pred.x, -1),
+            e=jax.nn.softmax(raw_pred.e, -1),
+            y=jax.nn.softmax(raw_pred.y, -1),
             mask=g.mask,
         )
         return pred
@@ -307,15 +306,15 @@ def val_step(
             pred_graph=get_probability(z_t),
             true_graph=dense_data,
         )
-        # loss = val_loss(
-        #     state=state,
-        #     target=dense_data,
-        #     pred=pred,
-        #     T=diffusion_steps,
-        #     transition_model=transition_model,
-        #     rng_key=rng,
-        #     nodes_dist=nodes_dist,
-        # )
+        loss = val_loss(
+            state=state,
+            target=dense_data,
+            T=diffusion_steps,
+            transition_model=transition_model,
+            rng_key=rng,
+            nodes_dist=nodes_dist,
+            get_probability=get_probability,
+        )
         return loss, pred
 
     loss, _ = loss_fn(state.params)

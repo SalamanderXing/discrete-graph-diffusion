@@ -5,6 +5,7 @@ import ipdb
 import jax_dataclasses as jdc
 from mate.jax import SFloat, SInt, typed, SBool, Key
 from jaxtyping import Float, Bool
+from jax.scipy.special import logit
 from .geometric import to_dense
 from jax import random
 from .data_batch import DataBatch
@@ -16,6 +17,11 @@ XDistType = Float[Array, "b n en"]
 EDistType = Float[Array, "b n n ee"]
 YDistType = Float[Array, "b ey"]
 MaskType = Bool[Array, "b n"]
+
+
+def safe_div(a: Array, b: Array):
+    mask = b == 0
+    return np.where(mask, 0, a / np.where(mask, 1, b))
 
 
 @jdc.pytree_dataclass
@@ -88,7 +94,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         return self.__str__()
 
     def __mul__(
-        self, other: "GraphDistribution" | SFloat | SInt
+        self, other: "GraphDistribution | SFloat | SInt"
     ) -> "GraphDistribution":
         if isinstance(other, (SFloat, SInt)):
             return GraphDistribution.masked(
@@ -106,7 +112,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             )
 
     def __truediv__(
-        self, other: "GraphDistribution" | SFloat | SInt
+        self, other: "GraphDistribution | SFloat | SInt"
     ) -> "GraphDistribution":
         if isinstance(other, (SFloat, SInt)):
             return GraphDistribution.masked(
@@ -117,9 +123,9 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             )
         else:
             return GraphDistribution.masked(
-                x=self.x / other.x,
-                e=self.e / other.e,
-                y=self.y / other.y,
+                x=safe_div(self.x, other.x),
+                e=safe_div(self.e, other.e),
+                y=safe_div(self.y, other.y),
                 mask=self.mask,
             )
 
@@ -172,26 +178,25 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         """
         bs, n, ne = self.x.shape
         _, _, _, ee = self.e.shape
+        epsilon = 1e-8
         mask = self.mask
         prob_x = self.x
         prob_e = self.e
         # Noise X
         # The masked rows should define probability distributions as well
         # probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
-        probX = np.where(
+        prob_x = np.where(
             (~mask)[:, :, None],
             1 / prob_x.shape[-1],
             prob_x,
         )
-
+        prob_x = np.clip(prob_x, epsilon, 1 - epsilon)
         # Flatten the probability tensor to sample with categorical distribution
-        probX = probX.reshape(bs * n, -1)  # (bs * n, dx_out)
+        prob_x = prob_x.reshape(bs * n, -1)  # (bs * n, dx_out)
 
         # Sample X
         rng_key, subkey = random.split(rng_key)
-        x_t = random.categorical(
-            subkey, jax.scipy.special.logit(probX), axis=-1
-        )  # (bs * n,)
+        x_t = random.categorical(subkey, logit(prob_x), axis=-1)  # (bs * n,)
         x_t = x_t.reshape(bs, n)  # (bs, n)
 
         # Noise E
@@ -201,13 +206,11 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         prob_e = np.where(inverse_edge_mask[..., None], 1 / prob_e.shape[-1], prob_e)
         prob_e = np.where(diag_mask[..., None], 1 / prob_e.shape[-1], prob_e)
 
-        probE = prob_e.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
-
+        prob_e = prob_e.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
+        prob_e = np.clip(prob_e, epsilon, 1 - epsilon)
         # Sample E
         rng_key, subkey = random.split(rng_key)
-        e_t = random.categorical(
-            subkey, jax.scipy.special.logit(probE), axis=-1
-        )  # (bs * n * n,)
+        e_t = random.categorical(subkey, logit(prob_e), axis=-1)  # (bs * n * n,)
         e_t = e_t.reshape(bs, n, n)  # (bs, n, n)
         e_t = np.triu(e_t, k=1)
         e_t = e_t + np.transpose(e_t, (0, 2, 1))
