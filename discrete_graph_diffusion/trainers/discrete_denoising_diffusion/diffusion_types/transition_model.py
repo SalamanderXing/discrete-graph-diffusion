@@ -58,6 +58,7 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
         y_classes: SInt,
         diffusion_steps: SInt,
     ) -> "TransitionModel":
+        # TODO: review this
         prior = Distribution(x=x_priors, e=e_priors, y=np.ones(y_classes) / y_classes)
         x_classes = len(x_priors)
         e_classes = len(e_priors)
