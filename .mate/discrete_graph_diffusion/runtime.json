@@ -1,1 +1,1 @@
-{"command": "", "checkpoint_path": "/home/bluesk/Documents/discrete-graph-diffusion/results/experiments/checkpoints", "save_dir": "/home/bluesk/Documents/discrete-graph-diffusion/results/experiments/trainer_test"}
+{"command": "train", "checkpoint_path": "/home/bluesk/Documents/discrete-graph-diffusion/results/experiments/checkpoints", "save_dir": "/home/bluesk/Documents/discrete-graph-diffusion/results/experiments/trainer_test"}

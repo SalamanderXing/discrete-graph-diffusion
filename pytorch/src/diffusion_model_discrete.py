@@ -650,6 +650,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         )
         # Combine terms
         nlls = -log_pN + kl_prior + loss_all_t - loss_term_0
+        ipdb.set_trace()
         assert len(nlls.shape) == 1, f"{nlls.shape} has more than only batch dim."
 
         # Update NLL metric object and return batch nll

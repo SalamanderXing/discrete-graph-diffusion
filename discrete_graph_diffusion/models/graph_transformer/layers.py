@@ -1,12 +1,15 @@
 import flax.linen as nn
 import jax.numpy as np
 import ipdb
+import jax
+from .config import initializers
 
 
 class XToY(nn.Module):
     """Maps X to Y."""
 
     dy: int
+    initializer: str
 
     @nn.compact
     def __call__(self, x):
@@ -15,7 +18,9 @@ class XToY(nn.Module):
         ma = x.max(axis=1)
         std = x.std(axis=1)
         z = np.concatenate([m, m1, ma, std], axis=1)
-        out = nn.Dense(features=self.dy, name="out")(z)
+        out = nn.Dense(
+            features=self.dy, name="out", kernel_init=initializers[self.initializer]
+        )(z)
         return out
 
 
@@ -23,6 +28,7 @@ class EToY(nn.Module):
     """Maps Y to X."""
 
     dy: int
+    initializer: str
 
     @nn.compact
     def __call__(self, e):
@@ -32,7 +38,9 @@ class EToY(nn.Module):
         std = e.std(axis=(1, 2))
         z = np.concatenate([m, m1, ma, std], axis=1)
         # prints all the shapes
-        out = nn.Dense(features=self.dy, name="out")(z)
+        out = nn.Dense(
+            features=self.dy, name="out", kernel_init=initializers[self.initializer]
+        )(z)
         return out
 
 

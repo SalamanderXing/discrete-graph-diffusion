@@ -2,9 +2,10 @@ import jax.numpy as np
 from .q import Q
 from abc import ABC, abstractmethod
 from jax import Array
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from mate.jax import SFloat, SInt, typed
 import jax_dataclasses as jdc
+import jax
 import ipdb
 
 # from .noise_schedule import NoiseSchedule
@@ -38,6 +39,25 @@ def compute_noise_schedule(
     return betas, alphas, alphas_bar
 
 
+def get_timestep_embedding(
+    diffusion_steps: Int[Array, "diffusion_steps"], embedding_dim: int, dtype=np.float32
+):
+    """Build sinusoidal embeddings (from Fairseq)."""
+
+    assert len(diffusion_steps.shape) == 1
+    diffusion_steps *= 1000
+
+    half_dim = embedding_dim // 2
+    emb = np.log(10_000) / (half_dim - 1)
+    emb = np.exp(np.arange(half_dim, dtype=dtype) * -emb)
+    emb = diffusion_steps.astype(dtype)[:, None] * emb[None, :]
+    emb = np.concatenate([np.sin(emb), np.cos(emb)], axis=1)
+    if embedding_dim % 2 == 1:  # zero pad
+        emb = jax.lax.pad(emb, dtype(0), ((0, 0, 0), (0, 1, 0)))
+    assert emb.shape == (diffusion_steps.shape[0], embedding_dim)
+    return emb
+
+
 @jdc.pytree_dataclass
 class TransitionModel(jdc.EnforcedAnnotationsMixin):
     prior: Distribution
@@ -48,6 +68,7 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
     betas: Float[Array, "n"]
     alphas: Float[Array, "n"]
     alpha_bars: Float[Array, "n"]
+    temporal_embeddings: Float[Array, "temporal_embedding_dim"]
 
     @classmethod
     @typed
@@ -84,6 +105,7 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
         q_bar_es = alpha_bars * np.eye(e_classes)[None] + (1 - alpha_bars) * u_e
         q_bar_ys = alpha_bars * np.eye(y_classes)[None] + (1 - alpha_bars) * u_y
         q_bars = Q(x=q_bar_xs, e=q_bar_es, y=q_bar_ys)
+        temporal_embeddings = get_timestep_embedding(np.arange(diffusion_steps), 128)
         return cls(
             y_classes=y_classes,
             diffusion_steps=diffusion_steps,
@@ -93,4 +115,5 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
             alphas=alphas,
             betas=betas,
             alpha_bars=alpha_bars,
+            temporal_embeddings=temporal_embeddings,
         )

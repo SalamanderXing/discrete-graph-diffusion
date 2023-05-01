@@ -19,6 +19,56 @@ YDistType = Float[Array, "b ey"]
 MaskType = Bool[Array, "b n"]
 
 
+def sample(prob_x: XDistType, prob_e: EDistType, mask: MaskType, rng_key: Key):
+    """Sample features from multinomial distribution with given probabilities (probX, probE, proby)
+    :param probX: bs, n, dx_out        node features
+    :param probE: bs, n, n, de_out     edge features
+    :param rng_key: random.PRNGKey     random key for JAX operations
+    """
+    bs, n, ne = prob_x.shape
+    _, _, _, ee = prob_e.shape
+    epsilon = 1e-8
+    # Noise X
+    # The masked rows should define probability distributions as well
+    # probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
+    prob_x = np.where(
+        (~mask)[:, :, None],
+        1 / prob_x.shape[-1],
+        prob_x,
+    )
+    prob_x = np.clip(prob_x, epsilon, 1 - epsilon)
+    # Flatten the probability tensor to sample with categorical distribution
+    prob_x = prob_x.reshape(bs * n, -1)  # (bs * n, dx_out)
+
+    # Sample X
+    rng_key, subkey = random.split(rng_key)
+    x_t = random.categorical(subkey, logit(prob_x), axis=-1)  # (bs * n,)
+    x_t = x_t.reshape(bs, n)  # (bs, n)
+
+    # Noise E
+    # The masked rows should define probability distributions as well
+    inverse_edge_mask = ~(mask[:, None] * mask[:, :, None])
+    diag_mask = np.eye(n)[None].astype(bool).repeat(bs, axis=0)
+    prob_e = np.where(inverse_edge_mask[..., None], 1 / prob_e.shape[-1], prob_e)
+    prob_e = np.where(diag_mask[..., None], 1 / prob_e.shape[-1], prob_e)
+
+    prob_e = prob_e.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
+    prob_e = np.clip(prob_e, epsilon, 1 - epsilon)
+    # Sample E
+    rng_key, subkey = random.split(rng_key)
+    e_t = random.categorical(subkey, logit(prob_e), axis=-1)  # (bs * n * n,)
+    e_t = e_t.reshape(bs, n, n)  # (bs, n, n)
+    e_t = np.triu(e_t, k=1)
+    e_t = e_t + np.transpose(e_t, (0, 2, 1))
+
+    # return Q(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
+    embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
+    embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
+    return GraphDistribution.masked(
+        x=embedded_x, e=embedded_e, y=np.zeros((bs, 0)), mask=mask
+    )
+
+
 def safe_div(a: Array, b: Array):
     mask = b == 0
     return np.where(mask, 0, a / np.where(mask, 1, b))
@@ -90,6 +140,10 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     def batch_size(self) -> int:
         return self.x.shape[0]
 
+    @property
+    def n(self) -> int:
+        return self.x.shape[1]
+
     def __repr__(self):
         return self.__str__()
 
@@ -103,13 +157,19 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
                 y=self.y * other,
                 mask=self.mask,
             )
-        else:
+        elif isinstance(other, GraphDistribution):
             return GraphDistribution.masked(
                 x=self.x * other.x,
                 e=self.e * other.e,
                 y=self.y * other.y,
                 mask=self.mask,
             )
+
+    # overrides the left multiplication
+    def __rmul__(
+        self, other: "GraphDistribution | SFloat | SInt"
+    ) -> "GraphDistribution":
+        return self.__mul__(other)
 
     def __truediv__(
         self, other: "GraphDistribution | SFloat | SInt"
@@ -142,6 +202,14 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         }
         return GraphDistribution(**new_vals)
 
+    def probs_at(self, one_hot: "GraphDistribution") -> SFloat:
+        """Returns the probability of the given one-hot vector."""
+        probs_at_vector = self * one_hot
+        # sums over all the nodes and edges, but not over the batch
+        return probs_at_vector.x.sum(axis=(1, 2)) + probs_at_vector.e.sum(
+            axis=(1, 2, 3)
+        )
+
     @classmethod
     def from_sparse(cls, data_batch: DataBatch):
         x, e, node_mask = to_dense(
@@ -157,17 +225,23 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         )
         return cls(x=x, e=e, y=data_batch.y, mask=node_mask, _created_internally=True)
 
-    @typed
-    def astype(self, x: Array) -> "GraphDistribution":
-        """Changes the device and dtype of X, E, y."""
-        dtype = x.dtype
-        return GraphDistribution(
-            x=self.x.astype(dtype),
-            e=self.e.astype(dtype),
-            y=self.y.astype(dtype),
-            mask=self.mask,
-            _created_internally=True,
-        )
+    @classmethod
+    def sample_from_uniform(
+        cls,
+        batch_size: SInt,
+        n: SInt,
+        node_embedding_size: SInt,
+        edge_embedding_size: SInt,
+        key: Key,
+    ) -> "GraphDistribution":
+        x_prob = np.ones(node_embedding_size) / node_embedding_size
+        e_prob = np.ones(edge_embedding_size) / edge_embedding_size
+        x = np.repeat(x_prob[None, None, :], batch_size, axis=0)
+        e = np.repeat(e_prob[None, None, None, :], batch_size, axis=0)
+        y = np.zeros((batch_size, n))
+        mask = np.ones((batch_size, n), dtype=bool)
+        uniform = cls(x=x, e=e, y=y, mask=mask, _created_internally=True)
+        return uniform.sample_one_hot(key)
 
     @typed
     def sample_one_hot(self, rng_key: Key) -> "GraphDistribution":

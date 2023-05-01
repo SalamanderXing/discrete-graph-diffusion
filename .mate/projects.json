@@ -25,6 +25,10 @@
                         [
                             "jax",
                             "0.4.8"
+                        ],
+                        [
+                            "mate",
+                            "0.2.0"
                         ]
                     ]
                 }
@@ -55,18 +59,14 @@
                         ],
                         [
                             "pandas",
-                            "2.0.0"
+                            "1.5.3"
                         ],
                         [
                             "pytorch_lightning",
-                            "2.0.1.post0"
+                            "2.0.1"
                         ],
                         [
                             "rdkit",
-                            "2022.9.5"
-                        ],
-                        [
-                            "rdkit_pypi",
                             "2022.9.5"
                         ],
                         [
@@ -83,7 +83,7 @@
                         ],
                         [
                             "wandb",
-                            "0.14.2"
+                            "0.14.0"
                         ]
                     ]
                 },
@@ -146,7 +146,7 @@
                     "name": "discrete_denoising_diffusion",
                     "exports": [
                         "install_import_hook",
-                        "train_model",
+                        "run_model",
                         "TrainingConfig"
                     ],
                     "errors": [
@@ -182,16 +182,12 @@
                             "0.2.0"
                         ],
                         [
-                            "matplotlib",
-                            "3.7.1"
-                        ],
-                        [
                             "optax",
                             "0.1.4"
                         ],
                         [
                             "rich",
-                            "13.3.4"
+                            "13.3.5"
                         ],
                         [
                             "tqdm",
@@ -205,6 +201,15 @@
                 }
             },
             "experiments": {
+                "trainer_test_mac": {
+                    "name": "trainer_test_mac",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ]
+                },
                 "trainer_test": {
                     "name": "trainer_test",
                     "errors": [],

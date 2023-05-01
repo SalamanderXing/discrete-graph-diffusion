@@ -2,6 +2,7 @@ from flax import linen as nn
 import jax.numpy as np
 from jax import Array
 from .node_edge_block import NodeEdgeBlock
+from .config import initializers
 
 
 class XEYTransformerLayer(nn.Module):
@@ -20,6 +21,7 @@ class XEYTransformerLayer(nn.Module):
     dy: int
     de: int
     n_head: int
+    initializer: str
     dim_ffx: int = 256
     dim_ffe: int = 64
     dim_ffy: int = 64
@@ -27,7 +29,14 @@ class XEYTransformerLayer(nn.Module):
     layer_norm_eps: float = 1e-6
 
     @nn.compact
-    def __call__(self, x: Array, e: Array, y: Array, node_mask: Array):
+    def __call__(
+        self,
+        x: Array,
+        e: Array,
+        y: Array,
+        node_mask: Array,
+        deterministic: bool,
+    ):
         """Pass the input through the encoder layer.
         X: (bs, n, d)
         E: (bs, n, n, d)
@@ -40,38 +49,45 @@ class XEYTransformerLayer(nn.Module):
             dy=self.dy,
             de=self.de,
             n_head=self.n_head,
+            initializer=self.initializer,
         )(x, e, y, node_mask)
 
         norm_x = nn.LayerNorm(self.layer_norm_eps)(
-            x + nn.Dropout(rate=self.dropout, deterministic=False)(new_x)
+            x + nn.Dropout(rate=self.dropout, deterministic=deterministic)(new_x)
         )
         norm_e = nn.LayerNorm(self.layer_norm_eps)(
-            e + nn.Dropout(rate=self.dropout, deterministic=False)(new_e)
+            e + nn.Dropout(rate=self.dropout, deterministic=deterministic)(new_e)
         )
         norm_y = nn.LayerNorm(self.layer_norm_eps)(
-            y + nn.Dropout(rate=self.dropout, deterministic=False)(new_y)
+            y + nn.Dropout(rate=self.dropout, deterministic=deterministic)(new_y)
         )
         ff_out_x = nn.LayerNorm(self.layer_norm_eps)(
             x
-            + nn.Dropout(self.dropout, deterministic=False)(
-                nn.Dense(self.dim_ffx)(
-                    nn.Dropout(self.dropout, deterministic=False)(nn.relu(norm_x))
+            + nn.Dropout(self.dropout, deterministic=deterministic)(
+                nn.Dense(self.dim_ffx, kernel_init=initializers[self.initializer])(
+                    nn.Dropout(self.dropout, deterministic=deterministic)(
+                        nn.relu(norm_x)
+                    )
                 )
             )
         )
         ff_out_e = nn.LayerNorm(self.layer_norm_eps)(
             e
-            + nn.Dropout(self.dropout, deterministic=False)(
-                nn.Dense(self.dim_ffe)(
-                    nn.Dropout(self.dropout, deterministic=False)(nn.relu(norm_e))
+            + nn.Dropout(self.dropout, deterministic=deterministic)(
+                nn.Dense(self.dim_ffe, kernel_init=initializers[self.initializer])(
+                    nn.Dropout(self.dropout, deterministic=deterministic)(
+                        nn.relu(norm_e)
+                    )
                 )
             )
         )
         ff_out_y = nn.LayerNorm(self.layer_norm_eps)(
             y
-            + nn.Dropout(self.dropout, deterministic=False)(
-                nn.Dense(self.dim_ffy)(
-                    nn.Dropout(self.dropout, deterministic=False)(nn.relu(norm_y))
+            + nn.Dropout(self.dropout, deterministic=deterministic)(
+                nn.Dense(self.dim_ffy, kernel_init=initializers[self.initializer])(
+                    nn.Dropout(self.dropout, deterministic=deterministic)(
+                        nn.relu(norm_y)
+                    )
                 )
             )
         )

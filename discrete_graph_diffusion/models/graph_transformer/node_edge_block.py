@@ -3,6 +3,7 @@ from jax import numpy as np
 from jax import Array
 import ipdb
 from .layers import XToY, EToY, masked_softmax
+from .config import initializers
 
 
 class NodeEdgeBlock(nn.Module):
@@ -12,20 +13,24 @@ class NodeEdgeBlock(nn.Module):
     de: int
     dy: int
     n_head: int
+    initializer: str
 
     def setup(self):
         # Attention
         self.q = nn.Dense(
             self.dx,
             use_bias=False,
+            kernel_init=initializers[self.initializer],
         )
         self.k = nn.Dense(
             self.dx,
             use_bias=False,
+            kernel_init=initializers[self.initializer],
         )
         self.v = nn.Dense(
             self.dx,
             use_bias=False,
+            kernel_init=initializers[self.initializer],
         )
 
         # FiLM E -> X
@@ -33,31 +38,55 @@ class NodeEdgeBlock(nn.Module):
         self.e_add = nn.Dense(
             self.dx,
             use_bias=False,
+            kernel_init=initializers[self.initializer],
         )
         self.e_mul = nn.Dense(
             self.dx,
             use_bias=False,
+            kernel_init=initializers[self.initializer],
         )
 
         # FiLM Y -> E
         # the following matrix must have size (dy, dx)
-        self.y_e_mul = nn.Dense(self.dx, use_bias=False)
-        self.y_e_add = nn.Dense(self.dx, use_bias=False)
+        self.y_e_mul = nn.Dense(
+            self.dx,
+            use_bias=False,
+            kernel_init=initializers[self.initializer],
+        )
+        self.y_e_add = nn.Dense(
+            self.dx, use_bias=False, kernel_init=initializers[self.initializer]
+        )
         # FiLM Y -> X
         # the following matrix must have size (dy, dx)
-        self.y_x_mul = nn.Dense(self.dx, use_bias=False)
-        self.y_x_add = nn.Dense(self.dx, use_bias=False)
+        self.y_x_mul = nn.Dense(
+            self.dx,
+            use_bias=False,
+            kernel_init=initializers[self.initializer],
+        )
+        self.y_x_add = nn.Dense(
+            self.dx, use_bias=False, kernel_init=initializers[self.initializer]
+        )
         # Process y
-        self.y_y = nn.Dense(self.dy, use_bias=False)
-        self.x_y = XToY(dy=self.dy)
-        self.e_y = EToY(dy=self.dy)
-        self.x_out = nn.Dense(self.dx, use_bias=False)
-        self.e_out = nn.Dense(self.de, use_bias=False)
+        self.y_y = nn.Dense(
+            self.dy, use_bias=False, kernel_init=initializers[self.initializer]
+        )
+        self.x_y = XToY(dy=self.dy, initializer=self.initializer)
+        self.e_y = EToY(dy=self.dy, initializer=self.initializer)
+        self.x_out = nn.Dense(
+            self.dx, use_bias=False, kernel_init=initializers[self.initializer]
+        )
+        self.e_out = nn.Dense(
+            self.de, use_bias=False, kernel_init=initializers[self.initializer]
+        )
         self.y_out = nn.Sequential(
             [
-                nn.Dense(self.dy, use_bias=False),
+                nn.Dense(
+                    self.dy, use_bias=False, kernel_init=initializers[self.initializer]
+                ),
                 nn.relu,
-                nn.Dense(self.dy, use_bias=False),
+                nn.Dense(
+                    self.dy, use_bias=False, kernel_init=initializers[self.initializer]
+                ),
             ]
         )
 

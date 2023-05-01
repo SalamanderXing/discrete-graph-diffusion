@@ -3,9 +3,10 @@ from jax import Array
 from flax import linen as nn
 import ipdb
 
+from mate.jax import typed
 from .xey_transformer_layer import XEYTransformerLayer
 from .utils import PlaceHolder  # , assert_correctly_masked
-from .config import GraphTransformerConfig
+from .config import GraphTransformerConfig, initializers
 
 
 class GraphTransformer(nn.Module):
@@ -16,6 +17,7 @@ class GraphTransformer(nn.Module):
 
     config: GraphTransformerConfig
 
+    @typed
     def setup(
         self,
         act_fn_in=nn.relu,
@@ -35,6 +37,7 @@ class GraphTransformer(nn.Module):
                 nn.Dense(
                     dx,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
             ]
         )
@@ -43,11 +46,13 @@ class GraphTransformer(nn.Module):
                 nn.Dense(
                     self.config.hidden_mlp_dims.E,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
                 act_fn_in,
                 nn.Dense(
                     self.config.hidden_dims.de,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
             ]
         )
@@ -56,18 +61,24 @@ class GraphTransformer(nn.Module):
                 nn.Dense(
                     self.config.hidden_mlp_dims.y,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
                 act_fn_in,
                 nn.Dense(
                     dy,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
             ]
         )
 
         self.layers = [
             XEYTransformerLayer(
-                dx=dx, dy=dy, de=de, n_head=self.config.hidden_dims.n_head
+                dx=dx,
+                dy=dy,
+                de=de,
+                n_head=self.config.hidden_dims.n_head,
+                initializer=self.config.initializer,
             )
             for _ in range(self.config.n_layers)
         ]
@@ -77,11 +88,13 @@ class GraphTransformer(nn.Module):
                 nn.Dense(
                     dx,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
                 act_fn_out,
                 nn.Dense(
                     self.config.output_dims.X,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
             ]
         )
@@ -91,11 +104,13 @@ class GraphTransformer(nn.Module):
                 nn.Dense(
                     de,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
                 act_fn_out,
                 nn.Dense(
                     self.config.output_dims.E,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
             ]
         )
@@ -104,16 +119,26 @@ class GraphTransformer(nn.Module):
                 nn.Dense(
                     dy,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
                 act_fn_out,
                 nn.Dense(
                     self.config.output_dims.y,
                     use_bias=False,
+                    kernel_init=initializers[self.config.initializer],
                 ),
             ]
         )
 
-    def __call__(self, x: Array, e: Array, y: Array, node_mask: Array):
+    @typed
+    def __call__(
+        self,
+        x: Array,
+        e: Array,
+        y: Array,
+        node_mask: Array,
+        deterministic: bool = False,
+    ):
         bs, n = x.shape[0], x.shape[1]
 
         diag_mask = np.broadcast_to(
@@ -134,7 +159,7 @@ class GraphTransformer(nn.Module):
         x, e, y = after_in.x, after_in.e, after_in.y
 
         for layer in self.layers:  # TODO: replace with a nn.Sequential
-            x, e, y = layer(x, e, y, node_mask)
+            x, e, y = layer(x, e, y, node_mask, deterministic=deterministic)
 
         x = self.mlp_out_x(x)
         e = self.mlp_out_e(e)

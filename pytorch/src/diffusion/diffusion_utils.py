@@ -337,6 +337,7 @@ def compute_batched_over0_posterior_distribution(X_t, Qt, Qsb, Qtb):
 
 
 def mask_distributions(true_X, true_E, pred_X, pred_E, node_mask):
+    ipdb.set_trace()
     # Add a small value everywhere to avoid nans
     pred_X = pred_X + 1e-7
     pred_X = pred_X / torch.sum(pred_X, dim=-1, keepdim=True)

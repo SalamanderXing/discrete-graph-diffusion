@@ -1,25 +1,33 @@
+from flax.linen import init
 import tensorflow as tf
 from jax import config
 
 tf.config.experimental.set_visible_devices([], "GPU")
 
+import jax
+
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+
+
 from jax.lib import xla_bridge
 
 print(f"Using device: {xla_bridge.get_backend().platform}")
 
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 # config.update("jax_debug_nans", True)
 from mate import mate
 from dataclasses import dataclass, asdict
 from ..data_loaders.qm9_p import QM9DataModule, QM9Infos, get_train_smiles
 import os
 from ..models.graph_transformer import GraphTransformer, GraphTransformerConfig
-from ..trainers.discrete_denoising_diffusion import train_model, TrainingConfig
+from ..trainers.discrete_denoising_diffusion import run_model, TrainingConfig
 import ipdb
 from jax import numpy as np
 from jax import random
 
 remove_h = True
-batch_size = 500
+batch_size = 1000
 data_dir = os.path.join(mate.save_dir, "qm9/qm9_pyg/")
 datamodule = QM9DataModule(
     datadir=data_dir,
@@ -40,7 +48,7 @@ graph_transformer_config = GraphTransformerConfig.from_dict(
         input_dims={
             "X": 4,
             "E": 5,
-            "y": 1,  # 13,
+            "y": 128,  # 13,
         },
         output_dims={
             "X": 4,
@@ -58,6 +66,7 @@ graph_transformer_config = GraphTransformerConfig.from_dict(
             "dim_ffy": 128,
         },
         n_layers=2,
+        initializer="xavier_uniform",
     )
 )
 dataset_dict = dataset_infos.__dict__
@@ -80,21 +89,25 @@ training_config = TrainingConfig.from_dict(
 
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
 key = random.PRNGKey(2)
+
+initializer = jax.nn.initializers.glorot_uniform()
 # X.shape=torch.Size([200, 9, 12]), E.shape=torch.Size([200, 9, 9, 5]), y.shape=torch.Size([200, 13]), node_mask.shape=torch.Size([200, 9])
-x = random.normal(key, (batch_size, 9, graph_transformer_config.input_dims.X))
-e = random.normal(key, (batch_size, 9, 9, graph_transformer_config.input_dims.E))
-y = random.normal(key, (batch_size, graph_transformer_config.input_dims.y))
+x = initializer(key, (batch_size, 9, graph_transformer_config.input_dims.X), np.float32)
+e = initializer(
+    key, (batch_size, 9, 9, graph_transformer_config.input_dims.E), np.float32
+)
+y = initializer(key, (batch_size, graph_transformer_config.input_dims.y), np.float32)
 node_mask = np.ones((batch_size, 9))
 
 graph_transformer = GraphTransformer(graph_transformer_config)
-print(f"Model init shapes: {x.shape}, {e.shape}, {y.shape}, {node_mask.shape}")
+print(f"Model init shapes: {x.shape=}, {e.shape=}, {y.shape=}, {node_mask.shape=}")
 params = graph_transformer.init(rngs, x, e, y, node_mask)
 
 # this is the forward pass
 out = graph_transformer.apply(
     params, x, e, y, node_mask, rngs={"dropout": rngs["dropout"]}
 )
-train_model(
+run_model(
     config=training_config,
     model=graph_transformer,
     params=params,
@@ -103,5 +116,7 @@ train_model(
     train_loader=datamodule.train_dataloader(),
     val_loader=datamodule.val_dataloader(),
     output_dims=graph_transformer_config.output_dims.__dict__,
-    nodes_dist_torch=dataset_infos.nodes_dist,
+    # nodes_dist_torch=dataset_infos.nodes_dist,
+    num_epochs=10,
+    action=mate.command if mate.command else "train",
 )
