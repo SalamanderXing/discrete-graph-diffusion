@@ -6,7 +6,6 @@ with install_import_hook("diffusion_types", "typeguard.typechecked"):
         GraphDistribution,
         XDistType,
         EDistType,
-        YDistType,
         MaskType,
     )
     from .q import Q

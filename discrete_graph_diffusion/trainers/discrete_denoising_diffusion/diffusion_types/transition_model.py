@@ -61,7 +61,6 @@ def get_timestep_embedding(
 @jdc.pytree_dataclass
 class TransitionModel(jdc.EnforcedAnnotationsMixin):
     prior: Distribution
-    y_classes: SInt
     diffusion_steps: SInt
     qs: Q
     q_bars: Q
@@ -76,16 +75,18 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
         cls,
         x_priors: Float[Array, "n"],
         e_priors: Float[Array, "m"],
-        y_classes: SInt,
-        diffusion_steps: SInt,
+        diffusion_steps: int,
+        temporal_embedding_dim: int,
     ) -> "TransitionModel":
         # TODO: review this
-        prior = Distribution(x=x_priors, e=e_priors, y=np.ones(y_classes) / y_classes)
+        prior = Distribution(
+            x=x_priors, e=e_priors
+        )  # , y=np.ones(y_classes) / y_classes)
         x_classes = len(x_priors)
         e_classes = len(e_priors)
         u_x = np.broadcast_to(x_priors[None, None], (1, x_classes, x_priors.shape[0]))
         u_e = np.broadcast_to(e_priors[None, None], (1, e_classes, e_priors.shape[0]))
-        u_y = np.ones((1, y_classes, y_classes)) / (y_classes if y_classes > 0 else 1)
+        # u_y = np.ones((1, y_classes, y_classes)) / (y_classes if y_classes > 0 else 1)
         # noise_schedule = NoiseSchedule.create(0, diffusion_steps)  # 0 is cosine
         betas, alphas, alphas_bar = compute_noise_schedule(diffusion_steps)
         betas = betas[:, None, None]
@@ -97,17 +98,16 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
                 e_classes,
             )[None]
         )
-        q_ys = betas * u_y + (1 - betas) * np.eye(y_classes)[None]
-        qs = Q(x=q_xs, e=q_es, y=q_ys)
+        qs = Q(x=q_xs, e=q_es)
 
         alpha_bars = alphas_bar[:, None, None]
         q_bar_xs = alpha_bars * np.eye(x_classes)[None] + (1 - alpha_bars) * u_x
         q_bar_es = alpha_bars * np.eye(e_classes)[None] + (1 - alpha_bars) * u_e
-        q_bar_ys = alpha_bars * np.eye(y_classes)[None] + (1 - alpha_bars) * u_y
-        q_bars = Q(x=q_bar_xs, e=q_bar_es, y=q_bar_ys)
-        temporal_embeddings = get_timestep_embedding(np.arange(diffusion_steps), 128)
+        q_bars = Q(x=q_bar_xs, e=q_bar_es)
+        temporal_embeddings = get_timestep_embedding(
+            np.arange(diffusion_steps), temporal_embedding_dim
+        )
         return cls(
-            y_classes=y_classes,
             diffusion_steps=diffusion_steps,
             qs=qs,
             q_bars=q_bars,

@@ -15,7 +15,6 @@ class DataBatch:
     edge_index: Array
     edge_attr: Array
     x: Array
-    y: Array
     batch: Array
 
     @classmethod
@@ -24,6 +23,5 @@ class DataBatch:
             edge_index=np.array(data.edge_index),
             edge_attr=np.array(data.edge_attr),
             x=np.array(data.x),
-            y=np.array(data.y),
             batch=np.array(data.batch),
         )

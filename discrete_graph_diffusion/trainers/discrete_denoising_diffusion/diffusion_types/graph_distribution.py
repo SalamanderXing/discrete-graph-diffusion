@@ -15,7 +15,6 @@ check = lambda x, y: None  # to be replaced with JAX's checkify.check function
 
 XDistType = Float[Array, "b n en"]
 EDistType = Float[Array, "b n n ee"]
-YDistType = Float[Array, "b ey"]
 MaskType = Bool[Array, "b n"]
 
 
@@ -64,9 +63,7 @@ def sample(prob_x: XDistType, prob_e: EDistType, mask: MaskType, rng_key: Key):
     # return Q(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
     embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
     embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
-    return GraphDistribution.masked(
-        x=embedded_x, e=embedded_e, y=np.zeros((bs, 0)), mask=mask
-    )
+    return GraphDistribution.masked(x=embedded_x, e=embedded_e, mask=mask)
 
 
 def safe_div(a: Array, b: Array):
@@ -78,7 +75,6 @@ def safe_div(a: Array, b: Array):
 class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     x: XDistType
     e: EDistType
-    y: YDistType
     mask: MaskType
     _created_internally: SBool  # trick to prevent users from creating this class directly
 
@@ -88,12 +84,10 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         cls,
         x: XDistType,
         e: EDistType,
-        y: YDistType,
     ) -> "GraphDistribution":
         return cls(
             x=x,
             e=e,
-            y=y,
             mask=np.ones(x.shape[:2], dtype=bool),
             _created_internally=True,
         )
@@ -104,7 +98,6 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         cls,
         x: XDistType,
         e: EDistType,
-        y: YDistType,
         mask: MaskType,
     ) -> "GraphDistribution":
         x_mask = mask[..., None]  # bs, n, 1
@@ -113,7 +106,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         x = x * x_mask
         e = e * e_mask1 * e_mask2
         check(np.allclose(e, np.transpose(e, (0, 2, 1, 3))), "whoops")
-        return cls(x=x, e=e, y=y, mask=mask, _created_internally=True)
+        return cls(x=x, e=e, mask=mask, _created_internally=True)
 
     def __str__(self):
         def arr_str(arr: Array):
@@ -132,9 +125,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
     @property
     def shape(self) -> dict[str, tuple[int, ...]]:
-        return dict(
-            x=self.x.shape, e=self.e.shape, y=self.y.shape, mask=self.mask.shape
-        )
+        return dict(x=self.x.shape, e=self.e.shape, mask=self.mask.shape)
 
     @property
     def batch_size(self) -> int:
@@ -154,14 +145,12 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             return GraphDistribution.masked(
                 x=self.x * other,
                 e=self.e * other,
-                y=self.y * other,
                 mask=self.mask,
             )
         elif isinstance(other, GraphDistribution):
             return GraphDistribution.masked(
                 x=self.x * other.x,
                 e=self.e * other.e,
-                y=self.y * other.y,
                 mask=self.mask,
             )
 
@@ -178,21 +167,19 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             return GraphDistribution.masked(
                 x=self.x / other,
                 e=self.e / other,
-                y=self.y / other,
                 mask=self.mask,
             )
         else:
             return GraphDistribution.masked(
                 x=safe_div(self.x, other.x),
                 e=safe_div(self.e, other.e),
-                y=safe_div(self.y, other.y),
                 mask=self.mask,
             )
 
     def set(
         self,
         key: str,
-        value: XDistType | EDistType | YDistType | MaskType,
+        value: XDistType | EDistType | MaskType,
     ) -> "GraphDistribution":
         """Sets the values of X, E, y."""
         new_vals = {
@@ -223,7 +210,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         x, e, node_mask = to_dense(
             data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
         )
-        return cls(x=x, e=e, y=data_batch.y, mask=node_mask, _created_internally=True)
+        return cls(x=x, e=e, mask=node_mask, _created_internally=True)
 
     @classmethod
     def sample_from_uniform(
@@ -240,7 +227,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         e = np.repeat(e_prob[None, None, None, :], batch_size, axis=0)
         y = np.zeros((batch_size, n))
         mask = np.ones((batch_size, n), dtype=bool)
-        uniform = cls(x=x, e=e, y=y, mask=mask, _created_internally=True)
+        uniform = cls(x=x, e=e, mask=mask, _created_internally=True)
         return uniform.sample_one_hot(key)
 
     @typed
@@ -292,9 +279,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         # return Q(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
         embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
         embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
-        return GraphDistribution.masked(
-            x=embedded_x, e=embedded_e, y=np.zeros((bs, 0)), mask=self.mask
-        )
+        return GraphDistribution.masked(x=embedded_x, e=embedded_e, mask=self.mask)
 
     # overrides the pipe operator, that takes another EmbeddedGraph as input. This concatenates the two graphs.
     # def __or__(self, other: "GraphDistribution") -> "GraphDistribution":
@@ -306,7 +291,4 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     def __matmul__(self, q: Q) -> "GraphDistribution":
         x = self.x @ q.x
         e = self.e @ q.e[:, None]
-        # TODO: why isn't y applied? It seems like it's like this in the original code.
-        return GraphDistribution(
-            x=x, e=e, y=self.y, mask=self.mask, _created_internally=True
-        )
+        return GraphDistribution(x=x, e=e, mask=self.mask, _created_internally=True)

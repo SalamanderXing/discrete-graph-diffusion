@@ -12,4 +12,3 @@ from .data_batch import DataBatch
 class Distribution(jdc.EnforcedAnnotationsMixin):
     x: Float[Array, "x"]
     e: Float[Array, "e"]
-    y: Float[Array, "y"]

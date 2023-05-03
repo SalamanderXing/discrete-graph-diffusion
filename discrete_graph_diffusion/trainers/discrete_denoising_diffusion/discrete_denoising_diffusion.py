@@ -2,11 +2,16 @@
 Entrypoint of the discrete denoising diffusion model.
 The function `train_model` is the main entrypoint.
 """
+import os
 from typing import Callable
 from jax import numpy as np, Array
 from flax.training import train_state
+
+# import orbax.checkpoint
 import flax.linen as nn
-from jax.debug import print as jprint
+
+# from flax.training import orbax_utils
+from jax.debug import print as jprint  # type: ignore
 from jaxtyping import Float, Int, Bool
 from jax.experimental.checkify import checkify
 from time import time
@@ -43,20 +48,18 @@ class GetProbabilityFromState(jdc.EnforcedAnnotationsMixin):
     def __call__(
         self, g: GraphDistribution, t: Int[Array, "batch_size"]
     ) -> GraphDistribution:
-        y = self.transition_model.temporal_embeddings[t]
-        raw_pred = self.state.apply_fn(
+        temporal_embeddings = self.transition_model.temporal_embeddings[t][:, None]
+        pred_x, pred_e = self.state.apply_fn(
             self.state.params,
-            g.x,
+            g.x + temporal_embeddings,
             g.e,
-            y,
-            g.mask.astype(float),
+            g.mask,  # .astype(float),
             rngs={"dropout": self.dropout_rng},
-            deterministic=True,
+            # deterministic=True,
         )
         pred = GraphDistribution.masked(
-            x=jax.nn.softmax(raw_pred.x, -1),
-            e=jax.nn.softmax(raw_pred.e, -1),
-            y=jax.nn.softmax(raw_pred.y, -1),
+            x=jax.nn.softmax(pred_x, -1),
+            e=jax.nn.softmax(pred_e, -1),
             mask=g.mask,
         )
         return pred
@@ -82,7 +85,7 @@ def compute_train_loss(
     loss_e = np.where(mask_e, loss_fn(pred_e, true_e).mean(-1), 0).sum() / mask_e.sum()
 
     # return loss_x + lambda_train_e * loss_e  # + lambda_train_y * loss_y
-    return loss_e
+    return loss_x + loss_e
 
 
 @typed
@@ -141,11 +144,16 @@ def print_gradient_analysis(grads: FrozenDict):
     min_value = np.min(
         np.array([np.min(v) for v in jax.tree_util.tree_flatten(grads)[0]])
     )
-    jprint("{max_value} {min_value}", max_value=max_value, min_value=min_value)
+    jprint("gradient analysis")
+    jprint(
+        "max_val={max_value} min_val={min_value}",
+        max_value=max_value,
+        min_value=min_value,
+    )
     jprint("there are nans: {there_are_nan}", there_are_nan=there_are_nan)
 
 
-@typed
+@jit
 def train_step(
     *,
     g: GraphDistribution,
@@ -163,23 +171,22 @@ def train_step(
         diffusion_steps=diffusion_steps,
         transition_model=transition_model,
     )
-    z_t = z_t.set("y", transition_model.temporal_embeddings[t])
+    temporal_embeddings = transition_model.temporal_embeddings[t][:, None]
+    z_t = z_t.set("x", z_t.x + temporal_embeddings)
     q_s = transition_model.q_bars[t - 1]
     q_g_s = g @ q_s
 
     def loss_fn(params: FrozenDict):
-        raw_pred = state.apply_fn(  # TODO: suffix dist for distributions
+        pred_x, pred_e = state.apply_fn(  # TODO: suffix dist for distributions
             params,
             z_t.x,
             z_t.e,
-            z_t.y,
-            z_t.mask.astype(float),
+            z_t.mask,
             rngs={"dropout": dropout_train_key},
         )
         pred = GraphDistribution.masked(
-            x=raw_pred.x,
-            e=raw_pred.e,
-            y=raw_pred.y,
+            x=pred_x,
+            e=pred_e,
             mask=z_t.mask,
         )  # consider changing the name of this class to something that suggests ditribution
 
@@ -192,7 +199,7 @@ def train_step(
 
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
-    print_gradient_analysis(grads)
+    # print_gradient_analysis(grads)
     grads = jax.tree_map(
         lambda x: np.where(np.isnan(x), 0.0, x), grads
     )  # remove the nans :(
@@ -211,14 +218,13 @@ def run_model(
     rngs: dict[str, Key],
     lr: float,
     config: TrainingConfig,
-    output_dims: dict[str, int],
     action: str,  # 'train' or 'test'
+    save_path: str,
 ):
     state, transition_model = setup(
         model=model,
         params=params,
         lr=lr,
-        output_dims=output_dims,
         config=config,
         rngs=rngs,
     )
@@ -232,25 +238,16 @@ def run_model(
         )
         print(f"Validation loss: {val_loss:.4f} time: {val_time:.4f}")
     elif action == "train":
-        for epoch_idx in range(1, num_epochs + 1):
-            rng, _ = jax.random.split(rngs["params"])
-            state, train_loss, train_time = train_epoch(
-                rng=rng,
-                state=state,
-                train_loader=train_loader,
-                epoch=epoch_idx,
-                diffusion_steps=np.array(config.diffusion_steps),
-                transition_model=transition_model,
-            )
-            print(f"Train loss: {train_loss:.4f} time: {train_time:.4f}")
-            val_loss, val_time = val_epoch(
-                rng=rng,
-                state=state,
-                val_loader=val_loader,
-                config=config,
-                transition_model=transition_model,
-            )
-            print(f"Validation loss: {val_loss:.4f} time: {val_time:.4f}")
+        train_all_epochs(
+            num_epochs=num_epochs,
+            rngs=rngs,
+            state=state,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            config=config,
+            transition_model=transition_model,
+            save_path=save_path,
+        )
     elif action == "sample":
         get_probability = GetProbabilityFromState(
             state=state, dropout_rng=rngs["dropout"], transition_model=transition_model
@@ -268,13 +265,62 @@ def run_model(
         raise ValueError(f"Unknown action {action}")
 
 
+def train_all_epochs(
+    num_epochs: int,
+    rngs: dict[str, Key],
+    state: TrainState,
+    train_loader,
+    val_loader,
+    config: TrainingConfig,
+    transition_model: TransitionModel,
+    save_path: str,
+):
+    val_losses = []
+    train_losses = []
+    for epoch_idx in range(1, num_epochs + 1):
+        rng, _ = jax.random.split(rngs["params"])
+        print(f"Epoch {epoch_idx}")
+        state, train_loss, train_time = train_epoch(
+            rng=rng,
+            state=state,
+            train_loader=train_loader,
+            epoch=epoch_idx,
+            diffusion_steps=np.array(config.diffusion_steps),
+            transition_model=transition_model,
+        )
+        print(f"Train loss: {train_loss:.4f} time: {train_time:.4f}")
+        val_loss, val_time = val_epoch(
+            rng=rng,
+            state=state,
+            val_loader=val_loader,
+            config=config,
+            transition_model=transition_model,
+        )
+        print(f"Validation loss: {val_loss:.4f} time: {val_time:.4f}")
+        train_losses.append(train_loss.tolist())
+        val_losses.append(val_loss.tolist())
+        import json
+
+        with open(os.path.join(save_path, "val_losses.json"), "w") as f:
+            json.dump(val_losses, f)
+
+        with open(os.path.join(save_path, "train_losses.json"), "w") as f:
+            json.dump(train_losses, f)
+        if val_loss == min(val_losses):
+            print("Saving model")
+            import pickle
+
+            pickle.dump(
+                state.params, open(os.path.join(save_path, "checkpoint.pickle"), "wb")
+            )
+
+
 def setup(
     model: nn.Module,
     params: FrozenDict,
     rngs: dict[str, Key],
     lr: float,
     config: TrainingConfig,
-    output_dims: dict[str, int],
 ):
     state = TrainState.create(
         apply_fn=model.apply,
@@ -306,13 +352,11 @@ def setup(
                 0.0,
             ]
         ),
-        y_classes=output_dims["y"],
         diffusion_steps=config.diffusion_steps,
+        temporal_embedding_dim=4,  # FIXME: same as the node embedding. Should improve this parametrization
     )
     return state, transition_model
 
-
-@jit
 def val_step(
     *,
     dense_data: GraphDistribution,

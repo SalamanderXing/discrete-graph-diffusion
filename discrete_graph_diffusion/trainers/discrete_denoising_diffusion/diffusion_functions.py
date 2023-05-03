@@ -4,7 +4,6 @@ A lot of functions related to diffusion models. But which do not depend on the o
 from typing import Callable
 import jax
 import ipdb
-from rich import print as rprint
 from jax import Array, random
 import jax
 from jax import numpy as np
@@ -21,14 +20,11 @@ from .diffusion_types import (
     GraphDistribution,
     XDistType,
     EDistType,
-    YDistType,
     MaskType,
     # Forward,
 )
 from .diffusion_types import TransitionModel
 from .utils import softmax_kl_div
-
-# from .extra_features import extra_features
 
 GetProbabilityType = Callable[
     [GraphDistribution, Int[Array, "batch_size"]], GraphDistribution
@@ -114,14 +110,67 @@ def kl_div(p: Array, q: Array, eps: SFloat = 2**-17) -> Array:
     return np.sum(p * np.log(p / q), axis=-1)
 
 
+def softmax_kl_div(tensor1, tensor2, reduction="batchsum"):
+    # Subtract maximum value for numerical stability
+    tensor1_max, tensor2_max = (
+        tensor1.max(axis=-1, keepdims=True),
+        tensor2.max(axis=-1, keepdims=True),
+    )
+    tensor1_stable, tensor2_stable = tensor1 - tensor1_max, tensor2 - tensor2_max
+
+    # Compute log-sum-exp for both tensors
+    log_sum_exp1 = jax.scipy.special.logsumexp(tensor1_stable, axis=-1, keepdims=True)
+    log_sum_exp2 = jax.scipy.special.logsumexp(tensor2_stable, axis=-1, keepdims=True)
+
+    # Compute the difference between input tensors and their log-sum-exp values
+    tensor1_diff = tensor1_stable - log_sum_exp1
+    tensor2_diff = tensor2_stable - log_sum_exp2
+
+    # Calculate the proportional softmax values for tensor1
+    proportional_softmax1 = np.exp(tensor1_diff)
+
+    # Normalize the softmax values by dividing by the sum along the last dimension
+    normalized_softmax1 = proportional_softmax1 / proportional_softmax1.sum(
+        axis=-1, keepdims=True
+    )
+
+    # Calculate the KL divergence without explicitly computing the softmax values
+    kl_div = normalized_softmax1 * (tensor1_diff - tensor2_diff)
+
+    if reduction == "batchmean":
+        kl_div = kl_div.sum(axis=-1).mean()
+    elif reduction == "batchsum":
+        kl_div = kl_div.sum(axis=-1)
+    elif reduction == "none":
+        pass  # Keep the element-wise KL divergence values as is
+    elif reduction == "mean":
+        kl_div = kl_div.mean()
+    else:
+        raise ValueError(
+            f"Invalid reduction mode. Got {reduction}. Choose from ['batchmean', 'batchsum', 'none']"
+        )
+    return kl_div
+
+
 @typed
-def graph_dist_kl_div(
-    p: GraphDistribution, q: GraphDistribution
-) -> Float[Array, "batch_size"]:
+def graph_dist_kl_div(p: GraphDistribution, q: GraphDistribution) -> Float[Array, "b"]:
     """Calculates the Kullback-Leibler divergence between graph distributions p and q."""
-    return kl_div(p.x, q.x).mean(1) + kl_div(p.e, q.e).mean(
-        (1, 2)
-    )  # + kl_div(p.y, q.y)
+    mxp, mep, mxq, meq = mask_distributions(p.x, p.e, q.x, q.e, p.mask)
+    mxp_reshaped = mxp.reshape((mxp.shape[0] * mxp.shape[1], -1))
+    mxq_reshaped = mxq.reshape((mxq.shape[0] * mxq.shape[1], -1))
+    mep_reshaped = mep.reshape((mep.shape[0] * mep.shape[1] * mep.shape[2], -1))
+    meq_reshaped = meq.reshape((meq.shape[0] * meq.shape[1] * meq.shape[2], -1))
+    a = (
+        kl_div(jax.nn.softmax(mxp_reshaped), jax.nn.softmax(mxq_reshaped))
+        .reshape((mxp.shape[0], mxp.shape[1]))
+        .mean(axis=-1)
+    )
+    b = (
+        kl_div(jax.nn.softmax(mep_reshaped), jax.nn.softmax(meq_reshaped))
+        .reshape((mep.shape[0], mep.shape[1] * meq.shape[2]))
+        .mean(axis=-1)
+    )
+    return a + b
 
 
 @typed

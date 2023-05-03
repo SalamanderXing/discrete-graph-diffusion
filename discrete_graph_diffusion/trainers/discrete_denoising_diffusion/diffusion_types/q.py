@@ -11,12 +11,11 @@ from typeguard import typechecked
 class Q(jdc.EnforcedAnnotationsMixin):
     x: Float[Array, "b n"]
     e: Float[Array, "b n n"]
-    y: Float[Array, "b ey"]
 
     # overrides the square bracket indexing
     def __getitem__(self, key: int | Array) -> "Q":
-        return Q(x=self.x[key], e=self.e[key], y=self.y[key])
+        return Q(x=self.x[key], e=self.e[key])
 
     @property
     def shape(self) -> dict[str, tuple[int, ...]]:
-        return dict(x=self.x.shape, e=self.e.shape, y=self.y.shape)
+        return dict(x=self.x.shape, e=self.e.shape)

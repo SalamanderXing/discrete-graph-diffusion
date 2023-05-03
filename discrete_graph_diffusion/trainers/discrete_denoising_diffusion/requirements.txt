@@ -14,8 +14,6 @@ mate==0.2.0
 
 optax==0.1.4
 
-rich==13.3.5
-
 tqdm==4.65.0
 
 typeguard==3.0.2
