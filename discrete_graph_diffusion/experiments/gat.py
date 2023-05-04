@@ -1,6 +1,9 @@
-import tensorflow as tf
+import platform
 
-tf.config.experimental.set_visible_devices([], "GPU")
+if not platform.system() == "Darwin":
+    import tensorflow as tf
+
+    tf.config.experimental.set_visible_devices([], "GPU")
 import jax
 from flax.linen import init
 from jax import config
