@@ -1,8 +1,6 @@
-from ..data_loaders.tu import TUDataset
+from ..data_loaders.tu import load_data
 from mate import mate
 import ipdb
 
-tu = TUDataset(
-    root=mate.save_dir, name="ENZYMES", use_node_attr=True, use_edge_attr=True
-)
+train_loader, test_loader = load_data(save_path=mate.save_dir)
 ipdb.set_trace()

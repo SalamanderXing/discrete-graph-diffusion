@@ -9,13 +9,6 @@ from dacite import from_dict
 
 
 @dataclass(frozen=True)
-class Dimensions:
-    X: int
-    E: int
-    y: int
-
-
-@dataclass(frozen=True)
 class DatasetInfos:
     remove_h: bool
     need_to_strip: bool
@@ -41,7 +34,10 @@ class TrainingConfig:
     transition: str
     number_chain_steps: int
     log_every_steps: int
-    dataset: DatasetInfos
+    max_num_nodes: int
+    num_edge_features: int
+    num_node_features: int
+    dataset: DatasetInfos | None = None
 
     @classmethod
     def from_dict(cls, config_dict):

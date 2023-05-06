@@ -6,6 +6,7 @@ import jax
 import ipdb
 from jax import Array, random
 import jax
+from jax.debug import print as jprint  # type: ignore
 from jax import numpy as np
 from jax.experimental.checkify import check
 from flax import linen as nn
@@ -79,35 +80,33 @@ def compute_lt(
     get_probability: GetProbabilityType,
     g: GraphDistribution,
     n_t_samples: SInt,
-    n_g_samples: SInt,
     diffusion_steps: SInt,
     transition_model: TransitionModel,
     rng: Key,
 ) -> Float[Array, "batch_size"]:
     t_acc: Float[Array, "batch_size"] = np.zeros(g.batch_size)
     for _ in range(n_t_samples):
-        g_acc: Float[Array, "batch_size"] = np.zeros(g.batch_size)
         t = random.randint(  # sample t_int from U[lowest_t, T]
             rng, (g.batch_size,), 1, diffusion_steps + 1
         )
-        for _ in range(n_g_samples):
-            q_t = transition_model.qs[t]
-            q_s_bar = transition_model.q_bars[t - 1]
-            g_q_t_bar = g @ transition_model.q_bars[t]
-            g_t = g_q_t_bar.sample_one_hot(rng)
-            g_s_probs = get_probability(g_t, t)
-            left_term = ((g @ q_t) * (g @ q_s_bar)) / (g_q_t_bar)
-            g_acc += graph_dist_kl_div(left_term, g_s_probs)
-        t_acc += g_acc / n_g_samples
-    return diffusion_steps * (t_acc / n_t_samples)
+        q_t = transition_model.qs[t]
+        q_s_bar = transition_model.q_bars[t - 1]
+        g_q_t_bar = g @ transition_model.q_bars[t]
+        g_t = g_q_t_bar.sample_one_hot(rng)
+        g_s_probs = get_probability(g_t, t)
+        left_term = ((g @ q_t) * (g @ q_s_bar)) / (g_q_t_bar)
+        t_acc += graph_dist_kl_div(left_term, g_s_probs)
+    n_edges = (g.e.sum(axis=-1) == 1).sum((1, 2))
+    return (diffusion_steps * (t_acc / n_t_samples)) / n_edges
 
 
 @typed
-def kl_div(p: Array, q: Array, eps: SFloat = 2**-17) -> Array:
+def kl_div(p: Array, q: Array, eps: SFloat = 2**-17, base=2) -> Array:
     """Calculates the Kullback-Leibler divergence between arrays p and q."""
     p += eps
     q += eps
-    return np.sum(p * np.log(p / q), axis=-1)
+    # return np.sum(p * np.log(p / q), axis=-1)
+    return np.sum(p * np.log(p / q) / np.log(base), axis=-1)
 
 
 def softmax_kl_div(tensor1, tensor2, reduction="batchsum"):
@@ -163,12 +162,12 @@ def graph_dist_kl_div(p: GraphDistribution, q: GraphDistribution) -> Float[Array
     a = (
         kl_div(jax.nn.softmax(mxp_reshaped), jax.nn.softmax(mxq_reshaped))
         .reshape((mxp.shape[0], mxp.shape[1]))
-        .mean(axis=-1)
+        .sum(axis=-1)
     )
     b = (
         kl_div(jax.nn.softmax(mep_reshaped), jax.nn.softmax(meq_reshaped))
         .reshape((mep.shape[0], mep.shape[1] * meq.shape[2]))
-        .mean(axis=-1)
+        .sum(axis=-1)
     )
     return a + b
 
