@@ -58,7 +58,7 @@ def load_data(
     name: str = "PTC_MR",
     verbose: bool = True,
     attribute: bool = True,
-    cache: bool = True,
+    cache: bool = False,
 ):
     cache_location = os.path.join(save_path, "processed.pt")
     if not (cache and os.path.exists(cache_location)):
@@ -97,7 +97,7 @@ def load_data(
 
             # Fill in the node_masks
             node_masks[idx, :num_nodes] = 1
-        
+        ipdb.set_trace()
         if cache:
             pickle.dump(
                 (nodes, edges, node_masks),

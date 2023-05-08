@@ -141,7 +141,7 @@ def compute_val_loss(
     loss_all_t = df.compute_lt(
         rng=rng_key,
         g=target,
-        n_t_samples=0,
+        n_t_samples=1,
         diffusion_steps=diffusion_steps,
         transition_model=transition_model,
         get_probability=get_probability,
@@ -266,7 +266,6 @@ def run_model(
     action: str,  # 'train' or 'test'
     save_path: str,
     ds_name: str,
-    writer: SummaryWriter,
 ) -> float:
     state, transition_model = setup(
         model=model,
@@ -304,7 +303,6 @@ def run_model(
             transition_model=transition_model,
             save_path=save_path,
             ds_name=ds_name,
-            writer=writer,
         )
     elif action == "sample":
         get_probability = GetProbabilityFromState(
@@ -335,7 +333,6 @@ def train_all_epochs(
     transition_model: TransitionModel,
     save_path: str,
     ds_name: str,
-    writer: SummaryWriter,
 ):
     val_losses = []
     train_losses = []
@@ -366,9 +363,8 @@ def train_all_epochs(
         #         "epoch": epoch_idx,
         #     }
         # )
-        writer.add_scalar("train_loss", train_loss, epoch_idx)
-        writer.add_scalar("val_loss", val_loss, epoch_idx)
-        writer.flush()
+        wandb.log("train_loss", train_loss, epoch_idx)
+        wandb.log("val_loss", val_loss, epoch_idx)
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         print(
