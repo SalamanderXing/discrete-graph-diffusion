@@ -1,7 +1,9 @@
 from torch_geometric.datasets import TUDataset, QM9
 import jax_dataloader as jdl
 from torch_geometric.utils import to_dense_batch, to_dense_adj, remove_self_loops
+import pickle
 import torch
+import os
 import ipdb
 from dataclasses import dataclass
 from jax import numpy as jnp
@@ -55,42 +57,61 @@ def load_data(
     batch_size: int,
     name: str = "PTC_MR",
     verbose: bool = True,
+    attribute: bool = True,
+    cache: bool = True,
 ):
-    dataset = TUDataset(
-        root=save_path,
-        name=name,  # "PTC_MR",  # "MUTAG"
-        use_node_attr=True,
-        use_edge_attr=True,
-    )
+    cache_location = os.path.join(save_path, "processed.pt")
+    if not (cache and os.path.exists(cache_location)):
+        print('Processing dataset...')
+        dataset = TUDataset(
+            root=save_path,
+            name=name,  # "PTC_MR",  # "MUTAG"
+            use_node_attr=True,
+            use_edge_attr=True,
+        )
+        items = len(dataset)
+        # Get the maximum number of nodes (atoms) in the dataset
+        max_n = max([data.num_nodes for data in dataset])
 
-    items = len(dataset)
-    # Get the maximum number of nodes (atoms) in the dataset
-    max_n = max([data.num_nodes for data in dataset])
+        # Get unique atom types
+        max_n_atom = dataset[0].x.shape[1]
 
-    # Get unique atom types
-    max_n_atom = dataset[0].x.shape[1]
+        num_edge_features = dataset.num_edge_features
 
-    num_edge_features = dataset.num_edge_features
+        nodes = np.zeros((items, max_n, max_n_atom))
+        edges = np.zeros((items, max_n, max_n, num_edge_features))
+        node_masks = np.zeros((items, max_n))
+        for idx, data in enumerate(dataset):
+            num_nodes = data.num_nodes
+            # Fill in the node features as one-hot encoded atomic numbers
+            atom_one_hot = data.x.numpy()
+            nodes[idx, :num_nodes, :] = atom_one_hot
 
-    nodes = np.zeros((items, max_n, max_n_atom))
-    edges = np.zeros((items, max_n, max_n, num_edge_features))
-    node_masks = np.zeros((items, max_n))
-    for idx, data in enumerate(dataset):
-        num_nodes = data.num_nodes
-        # Fill in the node features as one-hot encoded atomic numbers
-        atom_one_hot = data.x.numpy()
-        nodes[idx, :num_nodes, :] = atom_one_hot
+            # Fill in the edge features
+            edge_indices = data.edge_index.numpy()
+            for j, (src, dst) in enumerate(edge_indices.T):
+                edges[idx, src, dst, :] = data.edge_attr[j].numpy()
+                edges[idx, dst, src, :] = data.edge_attr[
+                    j
+                ].numpy()  # Assuming undirected graph
 
-        # Fill in the edge features
-        edge_indices = data.edge_index.numpy()
-        for j, (src, dst) in enumerate(edge_indices.T):
-            edges[idx, src, dst, :] = data.edge_attr[j].numpy()
-            edges[idx, dst, src, :] = data.edge_attr[
-                j
-            ].numpy()  # Assuming undirected graph
-
-        # Fill in the node_masks
-        node_masks[idx, :num_nodes] = 1
+            # Fill in the node_masks
+            node_masks[idx, :num_nodes] = 1
+        
+        if cache:
+            pickle.dump(
+                (nodes, edges, node_masks),
+                open(cache_location, "wb"),
+            )
+        print('Processed dataset.')
+    else:
+        print('Loading cached dataset...')
+        nodes, edges, node_masks = pickle.load(open(cache_location, "rb"))
+        items = len(nodes)
+        max_n = nodes.shape[1]
+        max_n_atom = nodes.shape[2]
+        num_edge_features = edges.shape[-1]
+        print('Loaded cached dataset.')
     shuffling_indices = random.permutation(x=items, key=seed)
     nodes = nodes[shuffling_indices]
     edges = edges[shuffling_indices]
