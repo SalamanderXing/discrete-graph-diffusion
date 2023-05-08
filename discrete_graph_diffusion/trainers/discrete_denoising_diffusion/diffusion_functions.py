@@ -75,6 +75,15 @@ def reconstruction_logp(
     return np.log(prob_acc / n_samples)
 
 
+@jit
+def compute_lt_meat(g, q_t, q_s_bar, g_q_t_bar, t, get_probability, rng):
+    g_t = g_q_t_bar.sample_one_hot(rng)
+    g_s_probs = get_probability(g_t, t)
+    left_term = ((g @ q_t) * (g @ q_s_bar)) / (g_q_t_bar)
+    ciao = graph_dist_kl_div(left_term, g_s_probs)
+    return ciao
+
+
 @typed
 def compute_lt(
     get_probability: GetProbabilityType,
@@ -85,19 +94,42 @@ def compute_lt(
     rng: Key,
 ) -> Float[Array, "batch_size"]:
     t_acc: Float[Array, "batch_size"] = np.zeros(g.batch_size)
-    for _ in range(n_t_samples):
-        t = random.randint(  # sample t_int from U[lowest_t, T]
-            rng, (g.batch_size,), 1, diffusion_steps + 1
+    expanded_steps = np.arange(1, (diffusion_steps + 1))[:, None].repeat(
+        g.batch_size, axis=1
+    )
+    ts = (
+        random.randint(  # sample t_int from U[lowest_t, T]
+            rng,
+            (
+                n_t_samples,
+                g.batch_size,
+            ),
+            1,
+            diffusion_steps + 1,  # type: ignore
         )
+        if n_t_samples > 0
+        else expanded_steps
+    )
+    for i in range(n_t_samples if n_t_samples > 0 else diffusion_steps):
+        t = ts[i]
         q_t = transition_model.qs[t]
         q_s_bar = transition_model.q_bars[t - 1]
         g_q_t_bar = g @ transition_model.q_bars[t]
-        g_t = g_q_t_bar.sample_one_hot(rng)
-        g_s_probs = get_probability(g_t, t)
-        left_term = ((g @ q_t) * (g @ q_s_bar)) / (g_q_t_bar)
-        t_acc += graph_dist_kl_div(left_term, g_s_probs)
+
+        # g_t = g_q_t_bar.sample_one_hot(rng)
+        # g_s_probs = get_probability(g_t, t)
+        # left_term = ((g @ q_t) * (g @ q_s_bar)) / (g_q_t_bar)
+        # t_acc += graph_dist_kl_div(left_term, g_s_probs)
+        t_cur = compute_lt_meat(g, q_t, q_s_bar, g_q_t_bar, t, get_probability, rng)
+        t_acc += t_cur
+    # if (t_acc != 0).any():
+    #     ipdb.set_trace()
     n_edges = (g.e.sum(axis=-1) == 1).sum((1, 2))
-    return (diffusion_steps * (t_acc / n_t_samples)) / n_edges
+    return jax.lax.select(
+        n_t_samples > 0,
+        (diffusion_steps * (t_acc / n_t_samples)) / n_edges,
+        t_acc / n_edges,
+    )
 
 
 @typed

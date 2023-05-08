@@ -257,6 +257,7 @@ def to_dense(x, edge_index, edge_attr, batch):
         edge_attr=edge_attr,
         max_num_nodes=max_num_nodes,
     )
+    ipdb.set_trace()
     E = encode_no_edge(E)
 
     return PlaceHolder(X=X, E=E, y=None), node_mask

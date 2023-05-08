@@ -17,7 +17,6 @@ print(f"Using device: {xla_bridge.get_backend().platform}")
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 # config.update("jax_debug_nans", True)
 from mate import mate
-from dataclasses import dataclass, asdict
 from ..data_loaders.qm9_p import QM9DataModule, QM9Infos, get_train_smiles
 import os
 from ..models.graph_transformer import GraphTransformer, GraphTransformerConfig
@@ -115,8 +114,9 @@ run_model(
     lr=training_config.learning_rate,
     train_loader=datamodule.train_dataloader(),
     val_loader=datamodule.val_dataloader(),
-    output_dims=graph_transformer_config.output_dims.__dict__,
-    # nodes_dist_torch=dataset_infos.nodes_dist,
     num_epochs=10,
     action=mate.command if mate.command else "train",
+    save_path=mate.save_dir,
+    writer=mate.tensorboard(),
+    ds_name='qm9_digress'
 )

@@ -31,6 +31,35 @@
                             "0.2.0"
                         ]
                     ]
+                },
+                "gat": {
+                    "name": "gat",
+                    "exports": [
+                        "GAT"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.8"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.8"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "mate",
+                            "0.2.0"
+                        ]
+                    ]
                 }
             },
             "data_loaders": {
@@ -139,6 +168,76 @@
                             "0.14.0"
                         ]
                     ]
+                },
+                "tu": {
+                    "name": "tu",
+                    "exports": [
+                        "load_data"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.8"
+                        ],
+                        [
+                            "jax_dataloader",
+                            "0.0.3"
+                        ],
+                        [
+                            "mate",
+                            "0.2.0"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "torch",
+                            "2.0.0"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.0"
+                        ]
+                    ]
+                },
+                "qm9_simple": {
+                    "name": "qm9_simple",
+                    "exports": [
+                        "load_data"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.8"
+                        ],
+                        [
+                            "jax_dataloader",
+                            "0.0.3"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "torch",
+                            "2.0.0"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.0"
+                        ]
+                    ]
                 }
             },
             "trainers": {
@@ -182,12 +281,16 @@
                             "0.2.0"
                         ],
                         [
+                            "matplotlib",
+                            "3.7.1"
+                        ],
+                        [
                             "optax",
                             "0.1.4"
                         ],
                         [
-                            "rich",
-                            "13.3.5"
+                            "torch",
+                            "2.0.0"
                         ],
                         [
                             "tqdm",
@@ -196,11 +299,22 @@
                         [
                             "typeguard",
                             "3.0.2"
+                        ],
+                        [
+                            "wandb",
+                            "0.14.2"
                         ]
                     ]
                 }
             },
             "experiments": {
+                "tu": {
+                    "name": "tu",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders"
+                    ]
+                },
                 "trainer_test_mac": {
                     "name": "trainer_test_mac",
                     "errors": [],
@@ -210,8 +324,35 @@
                         "trainers"
                     ]
                 },
+                "gat_qm9_simple": {
+                    "name": "gat_qm9_simple",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ]
+                },
                 "trainer_test": {
                     "name": "trainer_test",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ]
+                },
+                "gat": {
+                    "name": "gat",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ]
+                },
+                "gat_tu_PTC_MR": {
+                    "name": "gat_tu_PTC_MR",
                     "errors": [],
                     "imports": [
                         "data_loaders",
@@ -231,6 +372,15 @@
                     "errors": [],
                     "imports": [
                         "data_loaders"
+                    ]
+                },
+                "gat_tu_MUTAG": {
+                    "name": "gat_tu_MUTAG",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
                     ]
                 }
             }

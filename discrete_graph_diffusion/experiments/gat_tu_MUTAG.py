@@ -1,15 +1,14 @@
 import platform
 
-if not platform.system() == "Darwin":
-    import tensorflow as tf
-
-    tf.config.experimental.set_visible_devices([], "GPU")
+# if not platform.system() == "Darwin":
+#     import tensorflow as tf
+#
+#     tf.config.experimental.set_visible_devices([], "GPU")
 import jax
-from flax.linen import init
 from jax import config
 from jax.lib import xla_bridge
 
-jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+# jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 from mate import mate
 from ..data_loaders.tu import load_data
@@ -23,7 +22,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 print(f"Using device: {xla_bridge.get_backend().platform}")
-batch_size = 8
+batch_size = 4
 
 data_key = random.PRNGKey(0)
 ds_name = "MUTAG"

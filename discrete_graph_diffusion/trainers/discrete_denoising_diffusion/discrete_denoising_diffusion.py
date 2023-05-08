@@ -3,7 +3,7 @@ Entrypoint of the discrete denoising diffusion model.
 The function `train_model` is the main entrypoint.
 """
 import os
-from typing import Callable
+from typing import Callable, cast
 from jax import numpy as np, Array
 from flax.training import train_state
 import matplotlib.pyplot as plt
@@ -141,7 +141,7 @@ def compute_val_loss(
     loss_all_t = df.compute_lt(
         rng=rng_key,
         g=target,
-        n_t_samples=2,
+        n_t_samples=0,
         diffusion_steps=diffusion_steps,
         transition_model=transition_model,
         get_probability=get_probability,
@@ -183,7 +183,7 @@ def print_gradient_analysis(grads: FrozenDict):
     jprint("there are nans: {there_are_nan}", there_are_nan=there_are_nan)
 
 
-@jit
+@typed
 def train_step(
     *,
     g: GraphDistribution,
@@ -238,15 +238,16 @@ def train_step(
             transition_model=transition_model,
             get_probability=get_probability,
         )
+
         # jprint("loss {loss}", loss=loss)
         return loss.mean(), None
 
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
     # print_gradient_analysis(grads)
-    grads = jax.tree_map(
-        lambda x: np.where(np.isnan(x), 0.0, x), grads
-    )  # remove the nans :(
+    # grads = jax.tree_map(
+    #     lambda x: np.where(np.isnan(x), 0.0, x), grads
+    # )  # remove the nans :(
     state = state.apply_gradients(grads=grads)
     return state, loss
 
@@ -283,7 +284,7 @@ def run_model(
             config=config,
             transition_model=transition_model,
         )
-        print(f"Validation loss: {val_loss:.4f} time: {val_time:.4f}")
+        print(f"Validation loss: {best_val_loss:.4f} time: {val_time:.4f}")
     elif action == "train":
         val_loss, val_time = val_epoch(
             rng=rngs["params"],
@@ -346,7 +347,7 @@ def train_all_epochs(
             state=state,
             train_loader=train_loader,
             epoch=epoch_idx,
-            diffusion_steps=np.array(config.diffusion_steps),
+            diffusion_steps=config.diffusion_steps,
             transition_model=transition_model,
         )
         print(f"Train loss: {train_loss:.4f} time: {train_time:.4f}")
@@ -365,11 +366,11 @@ def train_all_epochs(
         #         "epoch": epoch_idx,
         #     }
         # )
-        writer.add_scalar("train_loss", train_loss.tolist(), epoch_idx)
-        writer.add_scalar("val_loss", val_loss.tolist(), epoch_idx)
+        writer.add_scalar("train_loss", train_loss, epoch_idx)
+        writer.add_scalar("val_loss", val_loss, epoch_idx)
         writer.flush()
-        train_losses.append(train_loss.tolist())
-        val_losses.append(val_loss.tolist())
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
         print(
             f"Validation loss: current={val_loss:.4f} best={min(val_losses):.5f} time: {val_time:.4f}"
         )
@@ -456,7 +457,8 @@ def setup(
     return state, transition_model
 
 
-@jit
+# @jit
+@typed
 def val_step(
     *,
     dense_data: GraphDistribution,
@@ -487,7 +489,7 @@ def val_epoch(
     config: TrainingConfig,
     rng: Key,
     transition_model: TransitionModel,
-) -> tuple[SFloat, float]:
+) -> tuple[float, float]:
     run_loss = []
     t0 = time()
     for i, (x, e, mask) in enumerate(tqdm(val_loader)):
@@ -501,7 +503,7 @@ def val_epoch(
         run_loss.extend(loss.reshape(-1).tolist())
     t1 = time()
     total_time = t1 - t0
-    avg_loss = np.mean(np.array(run_loss))
+    avg_loss = np.mean(np.array(run_loss)).tolist()
     return avg_loss, total_time
 
 
@@ -515,7 +517,7 @@ def train_epoch(
     rng: Key,
     transition_model: TransitionModel,
 ):
-    run_loss = 0.0
+    run_losses = []
     tot_len: int = 0
     t0 = time()
     for batch_index, (x, e, mask) in enumerate(tqdm(train_loader)):
@@ -529,9 +531,8 @@ def train_epoch(
             rng=rng,
             transition_model=transition_model,
         )
-        run_loss += loss
-        tot_len += dense_data.x.shape[0]
+        run_losses.append(loss)
     t1 = time()
     tot_time = t1 - t0
-    avg_loss = run_loss / tot_len
+    avg_loss = np.mean(np.array(run_losses)).tolist()
     return state, avg_loss, tot_time

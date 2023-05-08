@@ -1,0 +1,32 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.14.0
+    framework: torch
+    is_jupyter_run: false
+    is_kaggle_kernel: true
+    python_version: 3.10.10
+    start_time: 1683294961.130881
+    t:
+      1:
+      - 1
+      - 2
+      - 3
+      - 12
+      - 45
+      - 49
+      - 55
+      - 77
+      3:
+      - 16
+      - 23
+      4: 3.10.10
+      5: 0.14.0
+      8:
+      - 2
+      - 5
+mate command:
+  desc: null
+  value: ''
