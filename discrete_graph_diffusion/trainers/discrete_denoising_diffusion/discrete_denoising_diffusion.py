@@ -7,7 +7,8 @@ from typing import Callable, cast
 from jax import numpy as np, Array
 from flax.training import train_state
 import matplotlib.pyplot as plt
-from torch.utils.tensorboard import SummaryWriter
+
+# from torch.utils.tensorboard import SummaryWriter
 
 # import orbax.checkpoint
 import flax.linen as nn
@@ -23,7 +24,7 @@ import optax
 import wandb
 import ipdb
 
-# from rich import print as rprint
+from rich import print as print
 from tqdm import tqdm
 from dataclasses import dataclass
 from flax.core.frozen_dict import FrozenDict
@@ -48,6 +49,7 @@ class GetProbabilityFromState(jdc.EnforcedAnnotationsMixin):
     dropout_rng: Key
     transition_model: TransitionModel
 
+    @jit
     def __call__(
         self, g: GraphDistribution, t: Int[Array, "batch_size"]
     ) -> GraphDistribution:
@@ -76,6 +78,7 @@ class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
     transition_model: TransitionModel
     deterministic: SBool = False
 
+    @jit
     def __call__(
         self, g: GraphDistribution, t: Int[Array, "batch_size"]
     ) -> GraphDistribution:
@@ -285,14 +288,6 @@ def run_model(
         )
         print(f"Validation loss: {best_val_loss:.4f} time: {val_time:.4f}")
     elif action == "train":
-        val_loss, val_time = val_epoch(
-            rng=rngs["params"],
-            state=state,
-            val_loader=val_loader,
-            config=config,
-            transition_model=transition_model,
-        )
-        print(f"Validation loss: {val_loss:.4f} time: {val_time:.4f}")
         best_val_loss = train_all_epochs(
             num_epochs=num_epochs,
             rngs=rngs,
@@ -323,6 +318,7 @@ def run_model(
     return best_val_loss
 
 
+@typed
 def train_all_epochs(
     num_epochs: int,
     rngs: dict[str, Key],
@@ -338,7 +334,18 @@ def train_all_epochs(
     train_losses = []
     for epoch_idx in range(1, num_epochs + 1):
         rng, _ = jax.random.split(rngs["params"])
-        print(f"Epoch {epoch_idx}")
+        print(f"[green bold]Epoch[/green bold]: {epoch_idx} \n\n[underline]Validating[/underline]")
+        val_loss, val_time = val_epoch(
+            rng=rng,
+            state=state,
+            val_loader=val_loader,
+            config=config,
+            transition_model=transition_model,
+        )
+        val_losses.append(val_loss)
+        print(
+            f"Validation loss: current={val_loss:.5f} best={min(val_losses):.5f} time: {val_time:.4f}"
+        )
         state, train_loss, train_time = train_epoch(
             rng=rng,
             state=state,
@@ -347,29 +354,10 @@ def train_all_epochs(
             diffusion_steps=config.diffusion_steps,
             transition_model=transition_model,
         )
-        print(f"Train loss: {train_loss:.4f} time: {train_time:.4f}")
-        val_loss, val_time = val_epoch(
-            rng=rng,
-            state=state,
-            val_loader=val_loader,
-            config=config,
-            transition_model=transition_model,
-        )
-
-        # wandb.log(
-        #     {
-        #         "train_loss": train_loss,
-        #         "val_loss": val_loss,
-        #         "epoch": epoch_idx,
-        #     }
-        # )
-        wandb.log("train_loss", train_loss, epoch_idx)
-        wandb.log("val_loss", val_loss, epoch_idx)
+        print(f"Train loss: {train_loss:.5f} best={min(train_losses):.5f} time: {train_time:.4f}")
+        wandb.log({"train_loss": train_loss, "val_loss": val_loss}, epoch_idx)
         train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        print(
-            f"Validation loss: current={val_loss:.4f} best={min(val_losses):.5f} time: {val_time:.4f}"
-        )
+
         import json
 
         with open(os.path.join(save_path, "val_losses.json"), "w") as f:
@@ -377,20 +365,7 @@ def train_all_epochs(
 
         with open(os.path.join(save_path, "train_losses.json"), "w") as f:
             json.dump(train_losses, f)
-
-        # makes a plot separated horizontally into two subplots
-        # the first plot is the train loss
-        # the second plot is the val loss
-        # the x axis is the epoch
-
-        _, axs = plt.subplots(2, 1)
-        axs[0].plot(train_losses)
-        axs[0].set_title("Train loss")
-        axs[1].plot(val_losses)
-        axs[1].set_title("Val loss")
-        plt.savefig(os.path.join(save_path, "losses.png"))
-        plt.close()
-
+        
         if val_loss == min(val_losses):
             print("Saving model")
             import pickle
@@ -399,6 +374,17 @@ def train_all_epochs(
                 state.params, open(os.path.join(save_path, "checkpoint.pickle"), "wb")
             )
 
+    rng, _ = jax.random.split(rngs["params"])
+    val_loss, val_time = val_epoch(
+        rng=rng,
+        state=state,
+        val_loader=val_loader,
+        config=config,
+        transition_model=transition_model,
+    )
+    print(
+        f"Final loss: {val_loss:.4f} best={min(val_losses):.5f} time: {val_time:.4f}"
+    )
 
 def setup(
     model: nn.Module,
@@ -453,7 +439,6 @@ def setup(
     return state, transition_model
 
 
-# @jit
 @typed
 def val_step(
     *,

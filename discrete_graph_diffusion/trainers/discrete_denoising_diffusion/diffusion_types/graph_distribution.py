@@ -225,7 +225,6 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         e_prob = np.ones(edge_embedding_size) / edge_embedding_size
         x = np.repeat(x_prob[None, None, :], batch_size, axis=0)
         e = np.repeat(e_prob[None, None, None, :], batch_size, axis=0)
-        y = np.zeros((batch_size, n))
         mask = np.ones((batch_size, n), dtype=bool)
         uniform = cls(x=x, e=e, mask=mask, _created_internally=True)
         return uniform.sample_one_hot(key)

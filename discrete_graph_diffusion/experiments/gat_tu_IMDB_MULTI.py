@@ -1,7 +1,11 @@
 import platform
+import jax
 
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+jax.config.update("jax_debug_nans", True)
 if not platform.system() == "Darwin":
     import tensorflow as tf
+
     tf.config.experimental.set_visible_devices([], "GPU")
 import jax
 from jax import config
@@ -17,14 +21,14 @@ from ..trainers.discrete_denoising_diffusion import run_model, TrainingConfig
 import ipdb
 from jax import numpy as np
 from jax import random
-from torch.utils.tensorboard import SummaryWriter
-
+from rich import print
 
 print(f"Using device: {xla_bridge.get_backend().platform}")
 batch_size = 4
-
+print(f"Batch size: {batch_size}")
 data_key = random.PRNGKey(0)
-ds_name = "PROTEINS"
+ds_name = "IMDB-MULTI"
+print(f"\nRunning on dataset: {ds_name}\n")
 train_loader, test_loader, dataset_infos = load_data(
     save_path=mate.save_dir, seed=data_key, batch_size=batch_size, name=ds_name
 )
@@ -43,6 +47,7 @@ training_config = TrainingConfig.from_dict(
     )
 )
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
+print("Initializing model")
 model, params = GAT.initialize(
     key=rngs["params"],
     batch_size=batch_size,
@@ -51,6 +56,7 @@ model, params = GAT.initialize(
     n=dataset_infos.max_num_nodes,
     num_layers=2,
 )
+print("Model initialized")
 mate.wandb()
 
 best_val_loss = run_model(

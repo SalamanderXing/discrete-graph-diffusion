@@ -1,23 +1,23 @@
 import platform
 
-if not platform.system() == "Darwin":
-    import tensorflow as tf
-    tf.config.experimental.set_visible_devices([], "GPU")
+# if not platform.system() == "Darwin":
+#     import tensorflow as tf
+#     tf.config.experimental.set_visible_devices([], "GPU")
 import jax
 from jax import config
 from jax.lib import xla_bridge
 
-# jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 from mate import mate
-from ..data_loaders.tu import load_data
+from ..data_loaders.tu import load_data_no_attributes as load_data
 import os
 from ..models.gat import GAT
 from ..trainers.discrete_denoising_diffusion import run_model, TrainingConfig
 import ipdb
 from jax import numpy as np
 from jax import random
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 
 print(f"Using device: {xla_bridge.get_backend().platform}")
