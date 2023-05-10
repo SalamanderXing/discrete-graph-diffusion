@@ -3,10 +3,12 @@ import jax
 
 # jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 jax.config.update("jax_debug_nans", True)
-if not platform.system() == "Darwin":
+try:
     import tensorflow as tf
 
     tf.config.experimental.set_visible_devices([], "GPU")
+except:
+    pass
 import jax
 from jax import config
 from jax.lib import xla_bridge
@@ -19,12 +21,11 @@ import os
 from ..models.gat import GAT
 from ..trainers.discrete_denoising_diffusion import run_model, TrainingConfig
 import ipdb
-from jax import numpy as np
 from jax import random
 from rich import print
 
 print(f"Using device: {xla_bridge.get_backend().platform}")
-batch_size = 8
+batch_size = 20
 print(f"Batch size: {batch_size}")
 data_key = random.PRNGKey(0)
 ds_name = "IMDB-BINARY"
@@ -58,7 +59,6 @@ model, params = GAT.initialize(
 )
 print("Model initialized")
 mate.wandb()
-
 best_val_loss = run_model(
     config=training_config,
     model=model,
@@ -67,9 +67,10 @@ best_val_loss = run_model(
     lr=training_config.learning_rate,
     train_loader=train_loader,
     val_loader=test_loader,
-    num_epochs=200,
+    num_epochs=2,
     action=mate.command if mate.command else "train",
     save_path=mate.save_dir,
     ds_name=ds_name,
+    nodes_dist=dataset_infos.nodes_dist,
 )
 mate.result({f"{ds_name} best_val_loss": best_val_loss})

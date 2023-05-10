@@ -107,6 +107,11 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
         temporal_embeddings = get_timestep_embedding(
             np.arange(diffusion_steps), temporal_embedding_dim
         )
+        # + 1 because we dont want to touch the last embedding value, as that
+        # corresponds to a null node
+        temporal_embeddings = np.concatenate(
+            (temporal_embeddings, np.zeros((temporal_embeddings.shape[0], 1))), axis=1
+        )
         return cls(
             diffusion_steps=diffusion_steps,
             qs=qs,

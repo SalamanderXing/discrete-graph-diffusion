@@ -1,14 +1,16 @@
 import platform
+import jax
 
-# if not platform.system() == "Darwin":
-#     import tensorflow as tf
-#
-#     tf.config.experimental.set_visible_devices([], "GPU")
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+
+if not platform.system() == "Darwin":
+    import tensorflow as tf
+
+    tf.config.experimental.set_visible_devices([], "GPU")
 import jax
 from jax import config
 from jax.lib import xla_bridge
 
-jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 from mate import mate
 from ..data_loaders.tu import load_data
@@ -18,9 +20,10 @@ from ..trainers.discrete_denoising_diffusion import run_model, TrainingConfig
 import ipdb
 from jax import numpy as np
 from jax import random
+from rich import print
 
 
-print(f"Using device: {xla_bridge.get_backend().platform}")
+print(f"Using device: [yellow]{xla_bridge.get_backend().platform} [/yellow]")
 batch_size = 4
 
 data_key = random.PRNGKey(0)
@@ -51,7 +54,7 @@ model, params = GAT.initialize(
     n=dataset_infos.max_num_nodes,
     num_layers=2,
 )
-
+mate.wandb()
 best_val_loss = run_model(
     config=training_config,
     model=model,
@@ -64,5 +67,6 @@ best_val_loss = run_model(
     action=mate.command if mate.command else "train",
     save_path=mate.save_dir,
     ds_name=ds_name,
+    nodes_dist=dataset_infos.nodes_dist,
 )
 mate.result({f"{ds_name} best_val_loss": best_val_loss})

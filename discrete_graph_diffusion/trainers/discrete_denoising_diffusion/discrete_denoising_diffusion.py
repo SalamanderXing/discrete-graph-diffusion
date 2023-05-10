@@ -58,14 +58,14 @@ class GetProbabilityFromState(jdc.EnforcedAnnotationsMixin):
             self.state.params,
             g.x + temporal_embeddings,
             g.e,
-            g.mask,  # .astype(float),
+            # g.mask,  # .astype(float),
             rngs={"dropout": self.dropout_rng},
             # deterministic=True,
         )
         pred = GraphDistribution.masked(
             x=jax.nn.softmax(pred_x, -1),
             e=jax.nn.softmax(pred_e, -1),
-            mask=g.mask,
+            # mask=g.mask,
         )
         return pred
 
@@ -87,14 +87,14 @@ class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
             self.params,
             g.x + temporal_embeddings,
             g.e,
-            g.mask,  # .astype(float),
+            # g.mask,  # .astype(float),
             rngs={"dropout": self.dropout_rng},
             # deterministic=False,
         )
         pred = GraphDistribution.masked(
             x=jax.nn.softmax(pred_x, -1),
             e=jax.nn.softmax(pred_e, -1),
-            mask=g.mask,
+            # mask=g.mask,
         )
         return pred
 
@@ -131,7 +131,9 @@ def compute_val_loss(
     get_probability: Callable[
         [GraphDistribution, Int[Array, "batch_size"]], GraphDistribution
     ],
+    nodes_dist: Array,
     rng_key: Key,
+    full: SBool = False,
 ):
     # TODO: ask jamie, can you guess why there were other terms in this loss in the original code?
     # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
@@ -144,7 +146,7 @@ def compute_val_loss(
     loss_all_t = df.compute_lt(
         rng=rng_key,
         g=target,
-        n_t_samples=1,
+        n_t_samples=1 if not full else 0,
         diffusion_steps=diffusion_steps,
         transition_model=transition_model,
         get_probability=get_probability,
@@ -164,7 +166,14 @@ def compute_val_loss(
     #     loss_all_t=loss_all_t,
     #     reconstruction_logp=reconstruction_logp,
     # )
-    return kl_prior + loss_all_t - reconstruction_logp
+    # print(f"{kl_prior=} {loss_all_t=} {reconstruction_logp=}")
+    # log_n = np.log()
+    base = 2
+    current_node_sizes = (target.x[:, :, -1] == 0).sum(-1)
+    assert (current_node_sizes <= target.x.shape[1]).all()
+    log_probs = np.log(nodes_dist[current_node_sizes]) / np.log(base)
+    n_edges = (target.e[..., -1] == 0).sum((1, 2))
+    return (-log_probs + kl_prior + loss_all_t - reconstruction_logp) / n_edges
 
 
 def print_gradient_analysis(grads: FrozenDict):
@@ -269,6 +278,7 @@ def run_model(
     action: str,  # 'train' or 'test'
     save_path: str,
     ds_name: str,
+    nodes_dist: Array,
 ) -> float:
     state, transition_model = setup(
         model=model,
@@ -285,6 +295,7 @@ def run_model(
             val_loader=val_loader,
             config=config,
             transition_model=transition_model,
+            nodes_dist=nodes_dist,
         )
         print(f"Validation loss: {best_val_loss:.4f} time: {val_time:.4f}")
     elif action == "train":
@@ -298,6 +309,7 @@ def run_model(
             transition_model=transition_model,
             save_path=save_path,
             ds_name=ds_name,
+            nodes_dist=nodes_dist,
         )
     elif action == "sample":
         get_probability = GetProbabilityFromState(
@@ -329,18 +341,22 @@ def train_all_epochs(
     transition_model: TransitionModel,
     save_path: str,
     ds_name: str,
+    nodes_dist: Array,
 ):
     val_losses = []
     train_losses = []
     for epoch_idx in range(1, num_epochs + 1):
         rng, _ = jax.random.split(rngs["params"])
-        print(f"[green bold]Epoch[/green bold]: {epoch_idx} \n\n[underline]Validating[/underline]")
+        print(
+            f"[green bold]Epoch[/green bold]: {epoch_idx} \n\n[underline]Validating[/underline]"
+        )
         val_loss, val_time = val_epoch(
             rng=rng,
             state=state,
             val_loader=val_loader,
             config=config,
             transition_model=transition_model,
+            nodes_dist=nodes_dist,
         )
         val_losses.append(val_loss)
         print(
@@ -354,9 +370,11 @@ def train_all_epochs(
             diffusion_steps=config.diffusion_steps,
             transition_model=transition_model,
         )
-        print(f"Train loss: {train_loss:.5f} best={min(train_losses):.5f} time: {train_time:.4f}")
-        wandb.log({"train_loss": train_loss, "val_loss": val_loss}, epoch_idx)
         train_losses.append(train_loss)
+        print(
+            f"Train loss: {train_loss:.5f} best={min(train_losses):.5f} time: {train_time:.4f}"
+        )
+        wandb.log({"train_loss": train_loss, "val_loss": val_loss}, epoch_idx)
 
         import json
 
@@ -365,7 +383,7 @@ def train_all_epochs(
 
         with open(os.path.join(save_path, "train_losses.json"), "w") as f:
             json.dump(train_losses, f)
-        
+
         if val_loss == min(val_losses):
             print("Saving model")
             import pickle
@@ -381,10 +399,11 @@ def train_all_epochs(
         val_loader=val_loader,
         config=config,
         transition_model=transition_model,
+        full=True,
+        nodes_dist=nodes_dist,
     )
-    print(
-        f"Final loss: {val_loss:.4f} best={min(val_losses):.5f} time: {val_time:.4f}"
-    )
+    print(f"Final loss: {val_loss:.4f} best={min(val_losses):.5f} time: {val_time:.4f}")
+
 
 def setup(
     model: nn.Module,
@@ -434,7 +453,7 @@ def setup(
         x_priors=np.ones(config.num_node_features) / config.num_node_features,
         e_priors=np.ones(config.num_edge_features) / config.num_edge_features,
         diffusion_steps=config.diffusion_steps,
-        temporal_embedding_dim=config.num_node_features,  # FIXME: same as the node embedding. Should improve this parametrization
+        temporal_embedding_dim=config.num_node_features - 1,  # FIXME: same as the node embedding. Should improve this parametrization
     )
     return state, transition_model
 
@@ -447,6 +466,8 @@ def val_step(
     diffusion_steps: SInt,
     rng: Key,
     transition_model: TransitionModel,
+    nodes_dist: Array,
+    full=False,
 ) -> Float[Array, "batch_size"]:
     dropout_test_key = jax.random.fold_in(key=rng, data=state.step)
 
@@ -459,6 +480,8 @@ def val_step(
         transition_model=transition_model,
         rng_key=rng,
         get_probability=get_probability,
+        nodes_dist=nodes_dist,
+        full=full,
     )
 
 
@@ -470,16 +493,20 @@ def val_epoch(
     config: TrainingConfig,
     rng: Key,
     transition_model: TransitionModel,
+    nodes_dist: Array,
+    full=False,
 ) -> tuple[float, float]:
     run_loss = []
     t0 = time()
     for i, (x, e, mask) in enumerate(tqdm(val_loader)):
         loss = val_step(
-            dense_data=GraphDistribution.masked(x, e, mask.astype(bool)),
+            dense_data=GraphDistribution.masked(x, e),  # , mask.astype(bool)),
             state=state,
             diffusion_steps=config.diffusion_steps,
             rng=rng,
             transition_model=transition_model,
+            nodes_dist=nodes_dist,
+            full=full,
         )
         run_loss.extend(loss.reshape(-1).tolist())
     t1 = time()
@@ -503,7 +530,7 @@ def train_epoch(
     t0 = time()
     for batch_index, (x, e, mask) in enumerate(tqdm(train_loader)):
         # dense_data = GraphDistribution.from_sparse_torch(batch)
-        dense_data = GraphDistribution.masked(x, e, mask.astype(bool))
+        dense_data = GraphDistribution.masked(x, e)  # , mask.astype(bool))
         state, loss = train_step(
             g=dense_data,
             i=np.array(epoch),

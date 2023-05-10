@@ -64,6 +64,7 @@ def reconstruction_logp(
     g: GraphDistribution,
     transition_model: TransitionModel,
     n_samples: SInt,
+    base: SFloat = 2,
 ):
     t = np.ones(g.batch_size, dtype=int)
     q_t = transition_model.qs[t]
@@ -72,14 +73,16 @@ def reconstruction_logp(
         g_t = (g @ q_t).sample_one_hot(rng_key)
         g_t_probs = get_probability(g_t, t)
         prob_acc += g_t_probs.probs_at(g)
-    return np.log(prob_acc / n_samples)
+    return np.log(prob_acc / n_samples) / np.log(base)
 
 
-@jit
+@typed
 def compute_lt_meat(g, q_t, q_s_bar, g_q_t_bar, t, get_probability, rng):
     g_t = g_q_t_bar.sample_one_hot(rng)
     g_s_probs = get_probability(g_t, t)
-    left_term = ((g @ q_t) * (g @ q_s_bar)) / (g_q_t_bar)
+    left_num = g @ q_t
+    right_num = g @ q_s_bar
+    left_term = ((left_num) * (right_num)) / (g_q_t_bar)
     ciao = graph_dist_kl_div(left_term, g_s_probs)
     return ciao
 
@@ -123,12 +126,10 @@ def compute_lt(
         t_cur = compute_lt_meat(g, q_t, q_s_bar, g_q_t_bar, t, get_probability, rng)
         t_acc += t_cur
     # if (t_acc != 0).any():
-    #     ipdb.set_trace()
-    n_edges = (g.e.sum(axis=-1) == 1).sum((1, 2))
     return jax.lax.select(
         n_t_samples > 0,
-        (diffusion_steps * (t_acc / n_t_samples)) / n_edges,
-        t_acc / n_edges,
+        (diffusion_steps * (t_acc / n_t_samples)),
+        t_acc,
     )
 
 
@@ -183,21 +184,70 @@ def softmax_kl_div(tensor1, tensor2, reduction="batchsum"):
     return kl_div
 
 
+def mask_x(x, mask) -> Array:
+    arbitrary_x = np.zeros_like(x[0, 0])
+    arbitrary_x = arbitrary_x.at[0].set(1)
+    x = x.at[~mask, :].set(arbitrary_x)
+    return x
+
+
+def mask_e(e, mask) -> Array:
+    arbitrary_e = np.zeros_like(e[0, 0, 0])
+    arbitrary_e = arbitrary_e.at[0].set(1)
+    e = e.at[~mask, :, :].set(arbitrary_e)
+    e = np.swapaxes(np.swapaxes(e, 1, 2).at[~mask, :, :].set(arbitrary_e), 1, 2)
+    return e
+
+
+def check_is_dist(p):
+    assert (
+        np.allclose(p.sum(axis=-1), 1)
+        and (0 <= p.min(axis=-1)).all()
+        and (p.max(axis=-1) <= 1).all()
+    )
+
+
 @typed
 def graph_dist_kl_div(p: GraphDistribution, q: GraphDistribution) -> Float[Array, "b"]:
     """Calculates the Kullback-Leibler divergence between graph distributions p and q."""
-    mxp, mep, mxq, meq = mask_distributions(p.x, p.e, q.x, q.e, p.mask)
+    # mxp, mep, mxq, meq = mask_distributions(p.x, p.e, q.x, q.e, p.mask)
+    mxp, mep, mxq, meq = p.x, p.e, q.x, q.e
+    # arbitrary_e = np.zeros_like(mxp[0])
+    # arbitrary_e = arbitrary_e.at[0].set(1)
+    # mxp = np.where(
+    #     p.mask,
+    #     mxp,
+    # )
+    # mxp = mask_x(mxp, p.mask)
+    # mep = mask_e(mep, p.mask)
+    # mxq = mask_x(mxq, p.mask)
+    # meq = mask_e(meq, p.mask)
     mxp_reshaped = mxp.reshape((mxp.shape[0] * mxp.shape[1], -1))
     mxq_reshaped = mxq.reshape((mxq.shape[0] * mxq.shape[1], -1))
     mep_reshaped = mep.reshape((mep.shape[0] * mep.shape[1] * mep.shape[2], -1))
     meq_reshaped = meq.reshape((meq.shape[0] * meq.shape[1] * meq.shape[2], -1))
+
+    mxp_reshaped /= mxp_reshaped.sum(axis=-1, keepdims=True)
+    mxq_reshaped /= mxq_reshaped.sum(axis=-1, keepdims=True)
+    mep_reshaped /= mep_reshaped.sum(axis=-1, keepdims=True)
+    meq_reshaped /= meq_reshaped.sum(axis=-1, keepdims=True)
+
+    check_is_dist(mxp_reshaped)
+    check_is_dist(mxq_reshaped)
+    check_is_dist(mep_reshaped)
+    check_is_dist(meq_reshaped)
+    # assert ((mxp_reshaped.sum(axis=-1) == 0) == (mxq_reshaped.sum(axis=-1) == 0)).all()
+    # uba = np.where((mep_reshaped.sum(axis=-1) == 0) == (meq_reshaped.sum(axis=-1) == 0))
+    # assert ((mep_reshaped.sum(axis=-1) == 0) == (meq_reshaped.sum(axis=-1) == 0)).all()
+
+    # checks that all of the above are distributions
     a = (
-        kl_div(jax.nn.softmax(mxp_reshaped), jax.nn.softmax(mxq_reshaped))
+        kl_div(mxp_reshaped, mxq_reshaped)
         .reshape((mxp.shape[0], mxp.shape[1]))
         .sum(axis=-1)
     )
     b = (
-        kl_div(jax.nn.softmax(mep_reshaped), jax.nn.softmax(meq_reshaped))
+        kl_div(mep_reshaped, meq_reshaped)
         .reshape((mep.shape[0], mep.shape[1] * meq.shape[2]))
         .sum(axis=-1)
     )
@@ -299,6 +349,7 @@ def kl_prior(
 
     # Compute transition probabilities
     transition_probs = target @ qt_bar
+
     bs, n, _ = transition_probs.x.shape
     limit_X = np.broadcast_to(
         np.expand_dims(prior.x, (0, 1)), (bs, n, prior.x.shape[-1])
@@ -306,14 +357,14 @@ def kl_prior(
     limit_E = np.broadcast_to(
         np.expand_dims(prior.e, (0, 1, 2)), (bs, n, n, prior.e.shape[-1])
     )
-    # Make sure that masked rows do not contribute to the loss
-    limit_dist_X, limit_dist_E, probX, probE = mask_distributions(
-        true_X=limit_X,
-        true_e=limit_E,
-        pred_x=transition_probs.x,
-        pred_e=transition_probs.e,
-        node_mask=target.mask,
-    )
-    kl_distance_X = kl_div(probX, limit_dist_X).mean(1)
-    kl_distance_E = kl_div(probE, limit_dist_E).mean((1, 2))
+    # # Make sure that masked rows do not contribute to the loss
+    # limit_dist_X, limit_dist_E, probX, probE = mask_distributions(
+    #     true_X=limit_X,
+    #     true_e=limit_E,
+    #     pred_x=transition_probs.x,
+    #     pred_e=transition_probs.e,
+    #     node_mask=target.mask,
+    # )
+    kl_distance_X = kl_div(transition_probs.x, limit_X).sum(1)
+    kl_distance_E = kl_div(transition_probs.e, limit_E).sum((1, 2))
     return kl_distance_X + kl_distance_E

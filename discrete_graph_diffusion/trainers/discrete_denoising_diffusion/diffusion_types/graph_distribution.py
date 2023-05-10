@@ -75,7 +75,7 @@ def safe_div(a: Array, b: Array):
 class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     x: XDistType
     e: EDistType
-    mask: MaskType
+    # mask: MaskType
     _created_internally: SBool  # trick to prevent users from creating this class directly
 
     @classmethod
@@ -88,7 +88,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         return cls(
             x=x,
             e=e,
-            mask=np.ones(x.shape[:2], dtype=bool),
+            # mask=np.ones(x.shape[:2], dtype=bool),
             _created_internally=True,
         )
 
@@ -98,15 +98,15 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         cls,
         x: XDistType,
         e: EDistType,
-        mask: MaskType,
+        # mask: MaskType,
     ) -> "GraphDistribution":
-        x_mask = mask[..., None]  # bs, n, 1
-        e_mask1 = x_mask[:, :, None]  # bs, n, 1, 1
-        e_mask2 = x_mask[:, None]  # bs, 1, n, e_mask1
-        x = x * x_mask
-        e = e * e_mask1 * e_mask2
+        # x_mask = mask[..., None]  # bs, n, 1
+        # e_mask1 = x_mask[:, :, None]  # bs, n, 1, 1
+        # e_mask2 = x_mask[:, None]  # bs, 1, n, e_mask1
+        # x = x * x_mask
+        # e = e * e_mask1 * e_mask2
         check(np.allclose(e, np.transpose(e, (0, 2, 1, 3))), "whoops")
-        return cls(x=x, e=e, mask=mask, _created_internally=True)
+        return cls(x=x, e=e, _created_internally=True)
 
     def __str__(self):
         def arr_str(arr: Array):
@@ -125,7 +125,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
     @property
     def shape(self) -> dict[str, tuple[int, ...]]:
-        return dict(x=self.x.shape, e=self.e.shape, mask=self.mask.shape)
+        return dict(x=self.x.shape, e=self.e.shape)  # , mask=self.mask.shape)
 
     @property
     def batch_size(self) -> int:
@@ -145,13 +145,13 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             return GraphDistribution.masked(
                 x=self.x * other,
                 e=self.e * other,
-                mask=self.mask,
+                # mask=self.mask,
             )
         elif isinstance(other, GraphDistribution):
             return GraphDistribution.masked(
                 x=self.x * other.x,
                 e=self.e * other.e,
-                mask=self.mask,
+                # mask=self.mask,
             )
 
     # overrides the left multiplication
@@ -167,13 +167,13 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             return GraphDistribution.masked(
                 x=self.x / other,
                 e=self.e / other,
-                mask=self.mask,
+                # mask=self.mask,
             )
         else:
             return GraphDistribution.masked(
                 x=safe_div(self.x, other.x),
                 e=safe_div(self.e, other.e),
-                mask=self.mask,
+                # mask=self.mask,
             )
 
     def set(
@@ -197,20 +197,31 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             axis=(1, 2, 3)
         )
 
-    @classmethod
-    def from_sparse(cls, data_batch: DataBatch):
-        x, e, node_mask = to_dense(
-            data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
-        )
-        return cls(x=x, e=e, y=data_batch.y, mask=node_mask, _created_internally=True)
+    # @classmethod
+    # def from_sparse(cls, data_batch: DataBatch):
+    #     x, e, _ = to_dense(
+    #         data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
+    #     )
+    #     return cls(
+    #         x=x,
+    #         e=e,
+    #         y=data_batch.y,
+    #         # mask=node_mask,
+    #         _created_internally=True,
+    #     )
 
-    @classmethod
-    def from_sparse_torch(cls, data_batch_torch):
-        data_batch = DataBatch.from_torch(data_batch_torch)
-        x, e, node_mask = to_dense(
-            data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
-        )
-        return cls(x=x, e=e, mask=node_mask, _created_internally=True)
+    # @classmethod
+    # def from_sparse_torch(cls, data_batch_torch):
+    #     data_batch = DataBatch.from_torch(data_batch_torch)
+    #     x, e, node_mask = to_dense(
+    #         data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
+    #     )
+    #     return cls(
+    #         x=x,
+    #         e=e,
+    #         # mask=node_mask,
+    #         _created_internally=True,
+    #     )
 
     @classmethod
     def sample_from_uniform(
@@ -226,7 +237,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         x = np.repeat(x_prob[None, None, :], batch_size, axis=0)
         e = np.repeat(e_prob[None, None, None, :], batch_size, axis=0)
         mask = np.ones((batch_size, n), dtype=bool)
-        uniform = cls(x=x, e=e, mask=mask, _created_internally=True)
+        uniform = cls(x=x, e=e, _created_internally=True)  # mask=mask,
         return uniform.sample_one_hot(key)
 
     @typed
@@ -239,20 +250,16 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         bs, n, ne = self.x.shape
         _, _, _, ee = self.e.shape
         epsilon = 1e-8
-        mask = self.mask
+        # mask = self.mask
         prob_x = self.x
         prob_e = self.e
+
         # Noise X
         # The masked rows should define probability distributions as well
         # probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
-        prob_x = np.where(
-            (~mask)[:, :, None],
-            1 / prob_x.shape[-1],
-            prob_x,
-        )
         prob_x = np.clip(prob_x, epsilon, 1 - epsilon)
         # Flatten the probability tensor to sample with categorical distribution
-        prob_x = prob_x.reshape(bs * n, -1)  # (bs * n, dx_out)
+        prob_x = prob_x.reshape(bs * n, ne)  # (bs * n, dx_out)
 
         # Sample X
         rng_key, subkey = random.split(rng_key)
@@ -261,14 +268,15 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
         # Noise E
         # The masked rows should define probability distributions as well
-        inverse_edge_mask = ~(mask[:, None] * mask[:, :, None])
-        diag_mask = np.eye(n)[None].astype(bool).repeat(bs, axis=0)
-        prob_e = np.where(inverse_edge_mask[..., None], 1 / prob_e.shape[-1], prob_e)
-        prob_e = np.where(diag_mask[..., None], 1 / prob_e.shape[-1], prob_e)
-
-        prob_e = prob_e.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
-        prob_e = np.clip(prob_e, epsilon, 1 - epsilon)
-        # Sample E
+        # inverse_edge_mask = ~(mask[:, None] * mask[:, :, None])
+        # diag_mask = np.eye(n)[None].astype(bool).repeat(bs, axis=0)
+        # prob_e = np.where(inverse_edge_mask[..., None], 1 / prob_e.shape[-1], prob_e)
+        # prob_e = np.where(diag_mask[..., None], 1 / prob_e.shape[-1], prob_e)
+        #
+        # prob_e = prob_e.reshape(bs * n * n, -1)  # (bs * n * n, de_out)
+        # prob_e = np.clip(prob_e, epsilon, 1 - epsilon)
+        prob_e = prob_e.reshape(bs * n * n, ee)  # (bs * n * n, de_out)
+        # # Sample E
         rng_key, subkey = random.split(rng_key)
         e_t = random.categorical(subkey, logit(prob_e), axis=-1)  # (bs * n * n,)
         e_t = e_t.reshape(bs, n, n)  # (bs, n, n)
@@ -278,7 +286,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         # return Q(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
         embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
         embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
-        return GraphDistribution.masked(x=embedded_x, e=embedded_e, mask=self.mask)
+        return GraphDistribution.masked(x=embedded_x, e=embedded_e)  # , mask=self.mask)
 
     # overrides the pipe operator, that takes another EmbeddedGraph as input. This concatenates the two graphs.
     # def __or__(self, other: "GraphDistribution") -> "GraphDistribution":
@@ -290,4 +298,4 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     def __matmul__(self, q: Q) -> "GraphDistribution":
         x = self.x @ q.x
         e = self.e @ q.e[:, None]
-        return GraphDistribution(x=x, e=e, mask=self.mask, _created_internally=True)
+        return GraphDistribution(x=x, e=e, _created_internally=True)  # mask=self.mask,

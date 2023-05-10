@@ -126,8 +126,9 @@ class GAT(nn.Module):
         self,
         nodes: Float[Array, "b n en"],
         edges: Float[Array, "b n n ee"],
-        node_mask: Bool[Array, "b n"],
+        # node_mask: Bool[Array, "b n"],
     ) -> tuple[Float[Array, "b n en"], Float[Array, "b n n ee"]]:
+        node_mask = nodes[:, :, -1] == 0
         for att_layer in self.att_layers:
             nodes, edges = att_layer(nodes, edges, node_mask=node_mask)
 
@@ -179,7 +180,6 @@ class GAT(nn.Module):
             key,
             nodes,
             edges,
-            node_mask,
+            # node_mask,
         )
         return model, params
-        return model, params, nodes, edges, diffusion_steps

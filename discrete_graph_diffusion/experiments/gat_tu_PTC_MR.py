@@ -1,3 +1,6 @@
+import jax
+
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 import platform
 
 if not platform.system() == "Darwin":
@@ -9,7 +12,6 @@ from flax.linen import init
 from jax import config
 from jax.lib import xla_bridge
 
-# jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 from mate import mate
 from ..data_loaders.tu import load_data
@@ -25,7 +27,7 @@ batch_size = 64
 
 data_key = random.PRNGKey(0)
 ds_name = "PTC_MR"
-train_loader, test_loader, dataset_infos = load_data(
+train_loader, test_loader, dataset_infos, nodes_dist = load_data(
     save_path=mate.save_dir, seed=data_key, batch_size=batch_size, name=ds_name
 )
 
@@ -52,7 +54,7 @@ model, params = GAT.initialize(
     n=dataset_infos.max_num_nodes,
     num_layers=2,
 )
-
+mate.wandb()
 best_val_loss = run_model(
     config=training_config,
     model=model,
@@ -65,5 +67,6 @@ best_val_loss = run_model(
     action=mate.command if mate.command else "train",
     save_path=mate.save_dir,
     ds_name=ds_name,
+    nodes_dist=jax.numpy.array(nodes_dist),
 )
 mate.result({f"{ds_name} best_val_loss": best_val_loss})
