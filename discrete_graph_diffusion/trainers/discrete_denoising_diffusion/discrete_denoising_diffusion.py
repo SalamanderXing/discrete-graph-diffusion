@@ -279,6 +279,8 @@ def run_model(
     save_path: str,
     ds_name: str,
     nodes_dist: Array,
+    nodes_prior: Array,
+    edges_prior: Array,
 ) -> float:
     state, transition_model = setup(
         model=model,
@@ -287,6 +289,8 @@ def run_model(
         config=config,
         rngs=rngs,
         epochs=num_epochs,
+        nodes_prior=nodes_prior,
+        edges_prior=edges_prior,
     )
     if action == "test":
         best_val_loss, val_time = val_epoch(
@@ -412,6 +416,8 @@ def setup(
     lr: float,
     config: TrainingConfig,
     epochs: int,
+    nodes_prior: Array,
+    edges_prior: Array,
 ):
     cosine_decay_scheduler = optax.cosine_decay_schedule(
         0.0001, decay_steps=epochs, alpha=0.95
@@ -450,10 +456,11 @@ def setup(
     #     temporal_embedding_dim=4,  # FIXME: same as the node embedding. Should improve this parametrization
     # )
     transition_model = TransitionModel.create(
-        x_priors=np.ones(config.num_node_features) / config.num_node_features,
-        e_priors=np.ones(config.num_edge_features) / config.num_edge_features,
+        x_priors=nodes_prior,
+        e_priors=edges_prior,
         diffusion_steps=config.diffusion_steps,
-        temporal_embedding_dim=config.num_node_features - 1,  # FIXME: same as the node embedding. Should improve this parametrization
+        temporal_embedding_dim=config.num_node_features
+        - 1,  # FIXME: same as the node embedding. Should improve this parametrization
     )
     return state, transition_model
 

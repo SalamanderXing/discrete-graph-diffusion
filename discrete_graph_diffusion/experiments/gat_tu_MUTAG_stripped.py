@@ -26,7 +26,7 @@ batch_size = 4
 
 data_key = random.PRNGKey(0)
 ds_name = "MUTAG"
-train_loader, test_loader, dataset_infos, nodes_dist = load_data(
+train_loader, test_loader, dataset_infos = load_data(
     save_path=mate.save_dir, seed=data_key, batch_size=batch_size, name=ds_name
 )
 training_config = TrainingConfig.from_dict(
@@ -66,6 +66,8 @@ best_val_loss = run_model(
     action=mate.command if mate.command else "train",
     save_path=mate.save_dir,
     ds_name=ds_name,
-    nodes_dist=jax.numpy.array(nodes_dist),
+    nodes_dist=dataset_infos.nodes_dist,
+    nodes_prior=dataset_infos.nodes_prior,
+    edges_prior=dataset_infos.edges_prior,
 )
 mate.result({f"{ds_name} best_val_loss": best_val_loss})

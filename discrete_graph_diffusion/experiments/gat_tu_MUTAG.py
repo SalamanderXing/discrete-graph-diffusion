@@ -1,7 +1,7 @@
 import platform
 import jax
 
-jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+#jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 if not platform.system() == "Darwin":
     import tensorflow as tf
@@ -24,7 +24,7 @@ from rich import print
 
 
 print(f"Using device: [yellow]{xla_bridge.get_backend().platform} [/yellow]")
-batch_size = 4
+batch_size = 20
 
 data_key = random.PRNGKey(0)
 ds_name = "MUTAG"
@@ -68,5 +68,7 @@ best_val_loss = run_model(
     save_path=mate.save_dir,
     ds_name=ds_name,
     nodes_dist=dataset_infos.nodes_dist,
+    nodes_prior=dataset_infos.nodes_prior,
+    edges_prior=dataset_infos.edges_prior,
 )
 mate.result({f"{ds_name} best_val_loss": best_val_loss})

@@ -23,8 +23,8 @@ class DatasetInfo:
     num_edge_features: int
     max_num_nodes: int
     nodes_dist: Float[Array, "size"]
-    # edges_prior: Float[Array, "ee"]
-    # nodes_prior: Float[Array, "en"]
+    edges_prior: Float[Array, "ee"]
+    nodes_prior: Float[Array, "en"]
 
 
 def __to_dense(x, edge_index, edge_attr, batch):
@@ -114,17 +114,23 @@ def create_dataloders(
     max_n = train_nodes.shape[1]
     num_edge_features = train_edges.shape[-1]
     max_n_atom = train_nodes.shape[-1]
+    train_nodes = jnp.array(train_nodes)
+    train_edges = jnp.array(train_edges)
+    train_node_masks = jnp.array(train_node_masks)
 
+    test_nodes = jnp.array(test_nodes)
+    test_edes = jnp.array(test_edges)
+    test_node_masks = jnp.array(test_node_masks)
     freqs = compute_distribution(train_node_masks, margin=10)
     train_dataset = jdl.ArrayDataset(
-        jnp.array(train_nodes),
-        jnp.array(train_edges),
-        jnp.array(train_node_masks),
+        train_nodes,
+        train_edges,
+        train_node_masks,
     )
     test_dataset = jdl.ArrayDataset(
-        jnp.array(test_nodes),
-        jnp.array(test_edges),
-        jnp.array(test_node_masks),
+        test_nodes,
+        test_edges,
+        test_node_masks,
     )
     # return train_dataset, test_dataset
     train_loader = jdl.DataLoader(
@@ -141,6 +147,8 @@ def create_dataloders(
         num_edge_features=num_edge_features,
         max_num_nodes=max_n,
         nodes_dist=jnp.array(freqs),
+        nodes_prior=train_nodes.reshape(-1, train_nodes.shape[-1]).mean(axis=0),
+        edges_prior=train_edges.reshape(-1, train_edges.shape[-1]).mean(axis=0),
     )
     return train_loader, test_loader, dataset_info
 

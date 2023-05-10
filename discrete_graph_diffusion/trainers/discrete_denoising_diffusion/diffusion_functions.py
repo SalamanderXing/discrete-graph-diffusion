@@ -83,7 +83,7 @@ def compute_lt_meat(g, q_t, q_s_bar, g_q_t_bar, t, get_probability, rng):
     left_num = g @ q_t
     right_num = g @ q_s_bar
     left_term = ((left_num) * (right_num)) / (g_q_t_bar)
-    ciao = graph_dist_kl_div(left_term, g_s_probs)
+    ciao = graph_dist_kl_div(left_term, g_s_probs, g)
     return ciao
 
 
@@ -126,11 +126,12 @@ def compute_lt(
         t_cur = compute_lt_meat(g, q_t, q_s_bar, g_q_t_bar, t, get_probability, rng)
         t_acc += t_cur
     # if (t_acc != 0).any():
-    return jax.lax.select(
+    value = jax.lax.select(
         n_t_samples > 0,
         (diffusion_steps * (t_acc / n_t_samples)),
         t_acc,
     )
+    return value
 
 
 @typed
@@ -208,10 +209,18 @@ def check_is_dist(p):
 
 
 @typed
-def graph_dist_kl_div(p: GraphDistribution, q: GraphDistribution) -> Float[Array, "b"]:
+def graph_dist_kl_div(
+    p: GraphDistribution, q: GraphDistribution, g: GraphDistribution
+) -> Float[Array, "b"]:
     """Calculates the Kullback-Leibler divergence between graph distributions p and q."""
+
+    mask = g.x[..., -1] != 1
     # mxp, mep, mxq, meq = mask_distributions(p.x, p.e, q.x, q.e, p.mask)
     mxp, mep, mxq, meq = p.x, p.e, q.x, q.e
+    mxp = mask_x(mxp, mask)
+    mep = mask_e(mep, mask)
+    mxq = mask_x(mxq, mask)
+    meq = mask_e(meq, mask)
     # arbitrary_e = np.zeros_like(mxp[0])
     # arbitrary_e = arbitrary_e.at[0].set(1)
     # mxp = np.where(
@@ -239,7 +248,6 @@ def graph_dist_kl_div(p: GraphDistribution, q: GraphDistribution) -> Float[Array
     # assert ((mxp_reshaped.sum(axis=-1) == 0) == (mxq_reshaped.sum(axis=-1) == 0)).all()
     # uba = np.where((mep_reshaped.sum(axis=-1) == 0) == (meq_reshaped.sum(axis=-1) == 0))
     # assert ((mep_reshaped.sum(axis=-1) == 0) == (meq_reshaped.sum(axis=-1) == 0)).all()
-
     # checks that all of the above are distributions
     a = (
         kl_div(mxp_reshaped, mxq_reshaped)
