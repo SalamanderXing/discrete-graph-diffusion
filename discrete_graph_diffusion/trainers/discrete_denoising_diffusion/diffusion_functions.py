@@ -236,10 +236,12 @@ def graph_dist_kl_div(
     mep_reshaped = mep.reshape((mep.shape[0] * mep.shape[1] * mep.shape[2], -1))
     meq_reshaped = meq.reshape((meq.shape[0] * meq.shape[1] * meq.shape[2], -1))
 
-    mxp_reshaped /= mxp_reshaped.sum(axis=-1, keepdims=True)
-    mxq_reshaped /= mxq_reshaped.sum(axis=-1, keepdims=True)
-    mep_reshaped /= mep_reshaped.sum(axis=-1, keepdims=True)
-    meq_reshaped /= meq_reshaped.sum(axis=-1, keepdims=True)
+    # mxp_reshaped /= mxp_reshaped.sum(axis=-1, keepdims=True)
+    # mxq_reshaped /= mxq_reshaped.sum(axis=-1, keepdims=True)
+    # mep_reshaped /= mep_reshaped.sum(axis=-1, keepdims=True)
+    # meq_reshaped /= meq_reshaped.sum(axis=-1, keepdims=True)
+    mxp_reshaped = jax.nn.softmax(mxq_reshaped, axis=-1)
+    mep_reshaped = jax.nn.softmax(mep_reshaped, axis=-1)
 
     check_is_dist(mxp_reshaped)
     check_is_dist(mxq_reshaped)

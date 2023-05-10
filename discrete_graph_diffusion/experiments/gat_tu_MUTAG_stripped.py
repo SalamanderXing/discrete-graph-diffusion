@@ -31,7 +31,7 @@ train_loader, test_loader, dataset_infos = load_data(
 )
 training_config = TrainingConfig.from_dict(
     dict(
-        diffusion_steps=500,
+        diffusion_steps=1000,
         diffusion_noise_schedule="cosine",
         learning_rate=1e-3,
         lambda_train=(5, 0),
@@ -43,6 +43,7 @@ training_config = TrainingConfig.from_dict(
         num_edge_features=dataset_infos.num_edge_features,
     )
 )
+print(training_config)
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
 model, params = GAT.initialize(
     key=rngs["params"],

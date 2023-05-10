@@ -24,7 +24,7 @@ from rich import print
 
 
 print(f"Using device: [yellow]{xla_bridge.get_backend().platform} [/yellow]")
-batch_size = 20
+batch_size = 5
 
 data_key = random.PRNGKey(0)
 ds_name = "MUTAG"
@@ -52,7 +52,7 @@ model, params = GAT.initialize(
     in_node_features=dataset_infos.num_node_features,
     in_edge_features=dataset_infos.num_edge_features,
     n=dataset_infos.max_num_nodes,
-    num_layers=2,
+    num_layers=1,
 )
 mate.wandb()
 best_val_loss = run_model(
