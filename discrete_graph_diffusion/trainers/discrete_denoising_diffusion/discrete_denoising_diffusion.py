@@ -172,7 +172,9 @@ def compute_val_loss(
     current_node_sizes = (target.x[:, :, -1] == 0).sum(-1)
     assert (current_node_sizes <= target.x.shape[1]).all()
     log_probs = np.log(nodes_dist[current_node_sizes]) / np.log(base)
-    n_edges = (target.e[..., -1] == 0).sum((1, 2))
+    # n_edges = (target.e[..., -1] == 0).sum((1, 2))
+    # print(f"{n_edges=}")
+    n_edges = target.e.shape[1] * (target.e.shape[1] - 1)
     return (-log_probs + kl_prior + loss_all_t - reconstruction_logp) / n_edges
 
 

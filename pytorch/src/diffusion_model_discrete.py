@@ -112,7 +112,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             print(
                 f"Marginal distribution of the classes: {x_marginals} for nodes, {e_marginals} for edges"
             )
-            ipdb.set_trace()
             self.transition_model = MarginalUniformTransition(
                 x_marginals=x_marginals,
                 e_marginals=e_marginals,
@@ -635,7 +634,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # 1.
         N = node_mask.sum(1).long()
         log_pN = self.node_dist.log_prob(N)
-
         # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
         kl_prior = self.kl_prior(X, E, node_mask)
         # 3. Diffusion loss

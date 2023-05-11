@@ -1,7 +1,7 @@
 import platform
 import jax
 
-#jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 if not platform.system() == "Darwin":
     import tensorflow as tf
@@ -24,7 +24,7 @@ from rich import print
 
 
 print(f"Using device: [yellow]{xla_bridge.get_backend().platform} [/yellow]")
-batch_size = 5
+batch_size = 20
 
 data_key = random.PRNGKey(0)
 ds_name = "MUTAG"

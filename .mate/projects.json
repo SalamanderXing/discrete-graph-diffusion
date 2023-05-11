@@ -41,7 +41,7 @@
                     "dependencies": [
                         [
                             "flax",
-                            "0.6.8"
+                            "0.6.9"
                         ],
                         [
                             "ipdb",
@@ -54,10 +54,6 @@
                         [
                             "jaxtyping",
                             "0.2.15"
-                        ],
-                        [
-                            "mate",
-                            "0.2.0"
                         ]
                     ]
                 }
@@ -177,6 +173,10 @@
                     "errors": [],
                     "dependencies": [
                         [
+                            "h5py",
+                            "3.8.0"
+                        ],
+                        [
                             "ipdb",
                             "0.13.9"
                         ],
@@ -189,20 +189,32 @@
                             "0.0.3"
                         ],
                         [
-                            "mate",
-                            "0.2.0"
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
                         ],
                         [
                             "numpy",
                             "1.24.3"
                         ],
                         [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "scipy",
+                            "1.10.1"
+                        ],
+                        [
                             "torch",
-                            "2.0.0"
+                            "2.0.1+cu118"
                         ],
                         [
                             "torch_geometric",
-                            "2.3.0"
+                            "2.3.1"
                         ]
                     ]
                 },
@@ -258,7 +270,7 @@
                         ],
                         [
                             "flax",
-                            "0.6.8"
+                            "0.6.9"
                         ],
                         [
                             "ipdb",
@@ -277,20 +289,16 @@
                             "0.2.15"
                         ],
                         [
-                            "mate",
-                            "0.2.0"
-                        ],
-                        [
                             "matplotlib",
                             "3.7.1"
                         ],
                         [
                             "optax",
-                            "0.1.4"
+                            "0.1.5"
                         ],
                         [
-                            "torch",
-                            "2.0.0"
+                            "rich",
+                            "13.3.5"
                         ],
                         [
                             "tqdm",
@@ -302,7 +310,7 @@
                         ],
                         [
                             "wandb",
-                            "0.14.2"
+                            "0.15.2"
                         ]
                     ]
                 }
@@ -313,6 +321,26 @@
                     "errors": [],
                     "imports": [
                         "data_loaders"
+                    ]
+                },
+                "gat_tu_IMDB_BINARY": {
+                    "name": "gat_tu_IMDB_BINARY",
+                    "errors": [
+                        "The experiment should only contain assignments, function calls and imports"
+                    ],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ]
+                },
+                "gat_tu_IMDB_MULTI": {
+                    "name": "gat_tu_IMDB_MULTI",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
                     ]
                 },
                 "trainer_test_mac": {
@@ -342,8 +370,17 @@
                         "trainers"
                     ]
                 },
-                "gat": {
-                    "name": "gat",
+                "gat_tu_PROTEINS": {
+                    "name": "gat_tu_PROTEINS",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ]
+                },
+                "gat_tu_MUTAG_stripped": {
+                    "name": "gat_tu_MUTAG_stripped",
                     "errors": [],
                     "imports": [
                         "data_loaders",
@@ -358,20 +395,6 @@
                         "data_loaders",
                         "models",
                         "trainers"
-                    ]
-                },
-                "graph_transformer_test": {
-                    "name": "graph_transformer_test",
-                    "errors": [],
-                    "imports": [
-                        "models"
-                    ]
-                },
-                "dataloader_test": {
-                    "name": "dataloader_test",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders"
                     ]
                 },
                 "gat_tu_MUTAG": {

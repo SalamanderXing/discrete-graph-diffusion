@@ -211,7 +211,9 @@ def load_data(
     edges = np.zeros((items, max_n, max_n, num_edge_features))
     node_masks = np.zeros((items, max_n))
     num_nodes_list = []
+    edges_counts = []
     for idx, data in enumerate(dataset):
+        tot_edges = set()
         num_nodes = data.num_nodes
         # Fill in the node features as one-hot encoded atomic numbers
         atom_one_hot = data.x.numpy()
@@ -225,9 +227,13 @@ def load_data(
             edges[idx, dst, src, :] = data.edge_attr[j].tolist() + [
                 0
             ]  # Assuming undirected graph
+            tot_edges.add((src.item(), dst.item()))
+            tot_edges.add((dst.item(), src.item()))
 
         # Fill in the node_masks
         node_masks[idx, :num_nodes] = 1
+        edges_counts.append(len(tot_edges))
+    print(edges_counts)
 
     edges[np.where(edges.sum(axis=-1) == 0)] = np.eye(num_edge_features)[-1]
     nodes[np.where(nodes.sum(axis=-1) == 0)] = np.eye(max_n_atom)[-1]
