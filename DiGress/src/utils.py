@@ -1,6 +1,7 @@
 import os
 from copy import deepcopy
 from typing import Optional, Union, Dict
+import ipdb
 import torch_geometric.utils
 from omegaconf import OmegaConf, open_dict
 import pytorch_lightning as pl
@@ -204,8 +205,8 @@ def unnormalize(X, E, y, norm_values, norm_biases, node_mask, collapse=False):
 
     return PlaceHolder(X=X, E=E, y=y).mask(node_mask, collapse)
 
-
-def to_dense(x, edge_index, edge_attr, batch):
+from torch import Tensor
+def to_dense(x, edge_index, edge_attr, batch: Tensor):
     X, node_mask = to_dense_batch(x=x, batch=batch)
     # node_mask = node_mask.float()
     edge_index, edge_attr = torch_geometric.utils.remove_self_loops(

@@ -1,5 +1,6 @@
 # These imports are tricky because they use c++, do not move them
 from rdkit import Chem
+import ipdb
 
 try:
     import graph_tool
@@ -20,7 +21,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.utilities.warnings import PossibleUserWarning
 
 from src import utils
-from .datasets import guacamol_dataset, qm9_dataset, moses_dataset
+from .datasets import guacamol_dataset, qm9_dataset, tu_dataset  # , moses_dataset
 from .datasets.spectre_dataset import (
     SBMDataModule,
     Comm20DataModule,
@@ -111,7 +112,39 @@ def setup_wandb(cfg):
 def main(cfg: DictConfig):
     dataset_config = cfg["dataset"]
 
-    if dataset_config["name"] in ["sbm", "comm-20", "planar"]:
+    if dataset_config["name"] == "tu":
+        datamodule = tu_dataset.TUDataModule(cfg)
+        dataset_infos = tu_dataset.TUInfos(datamodule, cfg)
+
+        if cfg.model.type == "discrete":
+            train_metrics = TrainMolecularMetricsDiscrete(dataset_infos)
+        else:
+            train_metrics = TrainMolecularMetrics(dataset_infos)
+
+        if cfg.model.type == "discrete" and cfg.model.extra_features is not None:
+            extra_features = ExtraFeatures(
+                cfg.model.extra_features, dataset_info=dataset_infos
+            )
+            domain_features = ExtraMolecularFeatures(dataset_infos=dataset_infos)
+        else:
+            extra_features = DummyExtraFeatures()
+            domain_features = DummyExtraFeatures()
+
+        # We do not evaluate novelty during training
+        # sampling_metrics = SamplingMolecularMetrics(dataset_infos, train_smiles)
+        visualization_tools = MolecularVisualization(
+            cfg.dataset.remove_h, dataset_infos=dataset_infos
+        )
+
+        model_kwargs = {
+            "dataset_infos": dataset_infos,
+            "train_metrics": train_metrics,
+            "sampling_metrics": None,  # sampling_metrics,
+            "visualization_tools": visualization_tools,
+            "extra_features": extra_features,
+            "domain_features": domain_features,
+        }
+    elif dataset_config["name"] in ["sbm", "comm-20", "planar"]:
         if dataset_config["name"] == "sbm":
             datamodule = SBMDataModule(cfg)
             sampling_metrics = SBMSamplingMetrics(datamodule.dataloaders)
@@ -164,6 +197,7 @@ def main(cfg: DictConfig):
                 dataset_infos=dataset_infos,
                 evaluate_dataset=False,
             )
+            ipdb.set_trace()
         elif dataset_config["name"] == "guacamol":
             datamodule = guacamol_dataset.GuacamolDataModule(cfg)
             dataset_infos = guacamol_dataset.Guacamolinfos(datamodule, cfg)
@@ -171,10 +205,11 @@ def main(cfg: DictConfig):
             train_smiles = None
 
         elif dataset_config.name == "moses":
-            datamodule = moses_dataset.MOSESDataModule(cfg)
-            dataset_infos = moses_dataset.MOSESinfos(datamodule, cfg)
-            datamodule.prepare_data()
-            train_smiles = None
+            # datamodule = moses_dataset.MOSESDataModule(cfg)
+            # dataset_infos = moses_dataset.MOSESinfos(datamodule, cfg)
+            # datamodule.prepare_data()
+            # train_smiles = None
+            assert False
         else:
             raise ValueError("Dataset not implemented")
 
@@ -260,13 +295,8 @@ def main(cfg: DictConfig):
     elif name == "debug":
         print("[WARNING]: Run is called 'debug' -- it will run with fast_dev_run. ")
     trainer = Trainer(
+        accelerator="cpu",
         gradient_clip_val=cfg.train.clip_grad,
-        accelerator="gpu"
-        if torch.cuda.is_available() and cfg.general.gpus > 0
-        else "cpu",
-        devices=cfg.general.gpus
-        if torch.cuda.is_available() and cfg.general.gpus > 0
-        else None,
         limit_train_batches=20 if name == "test" else None,
         limit_val_batches=20 if name == "test" else None,
         limit_test_batches=20 if name == "test" else None,
