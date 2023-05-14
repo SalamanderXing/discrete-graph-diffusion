@@ -1,0 +1,13 @@
+clu==0.0.9
+
+flax==0.6.9
+
+jax==0.4.10
+
+tensorflow==2.12.0
+
+tensorflow_datasets==4.9.2
+
+torch==2.0.1+cu118
+
+torchvision==0.15.2+cu118

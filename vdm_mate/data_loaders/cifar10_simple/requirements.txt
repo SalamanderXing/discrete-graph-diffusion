@@ -1,0 +1,3 @@
+ipdb==0.13.9
+
+tensorflow==2.12.0
