@@ -125,6 +125,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.val_counter = 0
 
     def training_step(self, data, i):
+        data.y = torch.zeros(data.y.shape[0], 0)
+        # data.y if len(data.y.shape) > 1 else data.y.unsqueeze(-1)
         if data.edge_index.numel() == 0:
             print("Found a batch with no edges. Skipping.")
             return
@@ -187,6 +189,9 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.sampling_metrics.reset()
 
     def validation_step(self, data, i):
+        # data.y = data.y if len(data.y.shape) > 1 else data.y.unsqueeze(-1)
+
+        data.y = torch.zeros(data.y.shape[0], 0)
         dense_data, node_mask = utils.to_dense(
             data.x, data.edge_index, data.edge_attr, data.batch
         )
@@ -277,6 +282,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.test_E_logp.reset()
 
     def test_step(self, data, i):
+        # data.y = data.y if len(data.y.shape) > 1 else data.y.unsqueeze(-1)
+        data.y = torch.zeros(data.y.shape[0], 0)
         dense_data, node_mask = utils.to_dense(
             data.x, data.edge_index, data.edge_attr, data.batch
         )
@@ -633,6 +640,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         X = torch.cat((noisy_data["X_t"], extra_data.X), dim=2).float()
         E = torch.cat((noisy_data["E_t"], extra_data.E), dim=3).float()
         y = torch.hstack((noisy_data["y_t"], extra_data.y)).float()
+        # print(f"{noisy_data['y_t'].shape=}, {extra_data.y.shape=}, {y.shape=}")
         return self.model(X, E, y, node_mask)
 
     @torch.no_grad()

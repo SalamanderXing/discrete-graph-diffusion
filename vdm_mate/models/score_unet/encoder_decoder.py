@@ -4,6 +4,8 @@ from mate.jax import typed
 import chex
 import flax
 from flax import linen as nn
+from flax.core.frozen_dict import FrozenDict
+
 import jax
 from jax import numpy as jnp
 import numpy as np
@@ -32,11 +34,10 @@ class EncoderDecoder(nn.Module):
     def decode(self, z, g_0):
         # Logits are exact if there are no dependencies between dimensions of x
         x_vals = jnp.arange(0, self.vocab_size)[:, None]
-        x_vals = jnp.repeat(x_vals, 3, 1)
-        x_vals = self.encode(x_vals).transpose([1, 0])[None, None, None, :, :]
+        x_vals = jnp.repeat(x_vals, 3, 1).transpose((1, 0))
+        x_vals = self.encode(x_vals)[None, None, None, :, :]
         inv_stdev = jnp.exp(-0.5 * g_0[..., None])
         logits = -0.5 * jnp.square((z[..., None] - x_vals) * inv_stdev)
-
         logprobs = jax.nn.log_softmax(logits)
         return logprobs
 
@@ -46,3 +47,19 @@ class EncoderDecoder(nn.Module):
         logprobs = self.decode(z, g_0)
         logprob = jnp.sum(x_onehot * logprobs, axis=(1, 2, 3, 4))
         return logprob
+
+    @classmethod
+    def create(cls, vocab_size) -> tuple["EncoderDecoder", FrozenDict]:
+        model = cls(vocab_size=vocab_size)
+        example_input = jnp.zeros((2, 32, 32, 3), dtype=int)
+        g_0 = jnp.array([2])
+        params = model.init(jax.random.PRNGKey(0), example_input, g_0)
+        return model, params
+
+
+def __test():
+    model, params = EncoderDecoder.create(10)
+
+
+if __name__ == "__main__":
+    __test()

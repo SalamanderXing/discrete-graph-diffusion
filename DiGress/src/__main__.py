@@ -1,6 +1,8 @@
 # These imports are tricky because they use c++, do not move them
+from IPython.core.interactiveshell import DummyMod
 from rdkit import Chem
 import ipdb
+from torch_geometric.data import data
 
 try:
     import graph_tool
@@ -108,6 +110,27 @@ def setup_wandb(cfg):
     return cfg
 
 
+class DummyMetric:
+    def __init__(self):
+        self.train = None
+        self.sampling = None
+
+    def reset(self):
+        pass
+
+    def update(self, *args, **kwargs):
+        return 0
+
+    def __call__(self, *args, **kwargs):
+        return 0
+
+    def compute(self, *args, **kwargs):
+        return 0
+
+    def log_epoch_metrics(self, *args, **kwargs):
+        return 0
+
+
 @hydra.main(version_base="1.1", config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
     dataset_config = cfg["dataset"]
@@ -115,9 +138,15 @@ def main(cfg: DictConfig):
     if dataset_config["name"] == "tu":
         datamodule = tu_dataset.TUDataModule(cfg)
         dataset_infos = tu_dataset.TUInfos(datamodule, cfg)
-
+        dataset_infos.compute_input_output_dims(
+            datamodule,
+            ExtraFeatures(cfg.model.extra_features, dataset_info=dataset_infos),
+            DummyExtraFeatures(),
+        )
         if cfg.model.type == "discrete":
-            train_metrics = TrainMolecularMetricsDiscrete(dataset_infos)
+            train_metrics = (
+                DummyMetric()
+            )  # TrainMolecularMetricsDiscrete(dataset_infos)
         else:
             train_metrics = TrainMolecularMetrics(dataset_infos)
 
@@ -125,7 +154,8 @@ def main(cfg: DictConfig):
             extra_features = ExtraFeatures(
                 cfg.model.extra_features, dataset_info=dataset_infos
             )
-            domain_features = ExtraMolecularFeatures(dataset_infos=dataset_infos)
+            domain_features = DummyExtraFeatures()
+            # ExtraMolecularFeatures(dataset_infos=dataset_infos)
         else:
             extra_features = DummyExtraFeatures()
             domain_features = DummyExtraFeatures()
@@ -139,7 +169,7 @@ def main(cfg: DictConfig):
         model_kwargs = {
             "dataset_infos": dataset_infos,
             "train_metrics": train_metrics,
-            "sampling_metrics": None,  # sampling_metrics,
+            "sampling_metrics": DummyMetric(),
             "visualization_tools": visualization_tools,
             "extra_features": extra_features,
             "domain_features": domain_features,
@@ -295,7 +325,7 @@ def main(cfg: DictConfig):
     elif name == "debug":
         print("[WARNING]: Run is called 'debug' -- it will run with fast_dev_run. ")
     trainer = Trainer(
-        accelerator="cpu",
+        accelerator="gpu" if torch.cuda.is_available() else "cpu",
         gradient_clip_val=cfg.train.clip_grad,
         limit_train_batches=20 if name == "test" else None,
         limit_val_batches=20 if name == "test" else None,

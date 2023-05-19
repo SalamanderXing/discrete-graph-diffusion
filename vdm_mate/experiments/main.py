@@ -3,6 +3,7 @@ import tensorflow as tf
 tf.config.experimental.set_visible_devices([], "GPU")
 
 import jax
+
 # jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 import os  # nopep8

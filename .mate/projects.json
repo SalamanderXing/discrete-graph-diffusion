@@ -182,7 +182,7 @@
                         ],
                         [
                             "jax",
-                            "0.4.8"
+                            "0.4.10"
                         ],
                         [
                             "jax_dataloader",
@@ -250,6 +250,63 @@
                             "2.3.0"
                         ]
                     ]
+                },
+                "tu2": {
+                    "name": "tu2",
+                    "exports": [
+                        "load_data"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "h5py",
+                            "3.8.0"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "scipy",
+                            "1.10.1"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ],
+                        [
+                            "tensorflow",
+                            "2.12.0"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.1"
+                        ]
+                    ]
                 }
             },
             "trainers": {
@@ -278,7 +335,7 @@
                         ],
                         [
                             "jax",
-                            "0.4.8"
+                            "0.4.10"
                         ],
                         [
                             "jax_dataclasses",
@@ -406,8 +463,1265 @@
                         "trainers"
                     ]
                 }
+            },
+            "shared": {
+                "graph": {
+                    "name": "graph",
+                    "exports": [
+                        "Graph"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "geometric",
+                            "1.0"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jax_dataclasses",
+                            "1.5.1"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "q",
+                            "2.7"
+                        ]
+                    ]
+                },
+                "encoder_decoder": {
+                    "name": "encoder_decoder",
+                    "exports": [
+                        "EncoderDecoder"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ]
+                    ]
+                }
             }
         },
         "root": "/discrete_graph_diffusion"
+    },
+    "vdm_mate": {
+        "name": "vdm_mate",
+        "project": {
+            "models": {
+                "score_unet": {
+                    "name": "score_unet",
+                    "exports": [
+                        "ScoreUNet",
+                        "EncoderDecoder"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "gat2": {
+                    "name": "gat2",
+                    "exports": [
+                        "GAT"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "gat": {
+                    "name": "gat",
+                    "exports": [
+                        "GAT"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "vdm": {
+                    "name": "vdm",
+                    "exports": [
+                        "VDM"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ]
+                    ],
+                    "tags": []
+                }
+            },
+            "data_loaders": {
+                "cifar10": {
+                    "name": "cifar10",
+                    "exports": [
+                        "create_dataset"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "clu",
+                            "0.0.9"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "tensorflow",
+                            "2.12.0"
+                        ],
+                        [
+                            "tensorflow_datasets",
+                            "4.9.2"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
+                        ],
+                        [
+                            "torchvision",
+                            "0.15.2+cu118"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "cifar10_simple": {
+                    "name": "cifar10_simple",
+                    "exports": [
+                        "get_data_loaders"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "tensorflow",
+                            "2.12.0"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "tu": {
+                    "name": "tu",
+                    "exports": [
+                        "load_data"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "h5py",
+                            "3.8.0"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "scipy",
+                            "1.10.1"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ],
+                        [
+                            "tensorflow",
+                            "2.12.0"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.1"
+                        ]
+                    ],
+                    "tags": []
+                }
+            },
+            "trainers": {
+                "vdm": {
+                    "name": "vdm",
+                    "exports": [
+                        "Trainer"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
+                        [
+                            "clu",
+                            "0.0.9"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jax_tqdm",
+                            "0.1.1"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "optax",
+                            "0.1.5"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ],
+                        [
+                            "wandb",
+                            "0.15.2"
+                        ]
+                    ],
+                    "tags": []
+                }
+            },
+            "experiments": {
+                "tu_gat3": {
+                    "name": "tu_gat3.py",
+                    "errors": [
+                        "The experiment should only use relative imports from the following modules: ('_MateProject__root_dir', '_python', 'models', 'data_loaders', 'trainers', 'analyses')",
+                        "The experiment should only use relative imports from the following modules: ('_MateProject__root_dir', '_python', 'models', 'data_loaders', 'trainers', 'analyses')"
+                    ],
+                    "imports": [
+                        "data_loaders",
+                        "trainers",
+                        "models",
+                        "shared"
+                    ],
+                    "tags": []
+                },
+                "tu": {
+                    "name": "tu.py",
+                    "errors": [
+                        "The experiment should only use relative imports from the following modules: ('_MateProject__root_dir', '_python', 'models', 'data_loaders', 'trainers', 'analyses')",
+                        "The experiment should only use relative imports from the following modules: ('_MateProject__root_dir', '_python', 'models', 'data_loaders', 'trainers', 'analyses')"
+                    ],
+                    "imports": [
+                        "data_loaders",
+                        "trainers",
+                        "models",
+                        "shared"
+                    ],
+                    "tags": []
+                },
+                "tu_gat2": {
+                    "name": "tu_gat2.py",
+                    "errors": [
+                        "The experiment should only use relative imports from the following modules: ('_MateProject__root_dir', '_python', 'models', 'data_loaders', 'trainers', 'analyses')",
+                        "The experiment should only use relative imports from the following modules: ('_MateProject__root_dir', '_python', 'models', 'data_loaders', 'trainers', 'analyses')"
+                    ],
+                    "imports": [
+                        "data_loaders",
+                        "trainers",
+                        "models",
+                        "shared"
+                    ],
+                    "tags": []
+                },
+                "main": {
+                    "name": "main.py",
+                    "errors": [],
+                    "imports": [
+                        "trainers",
+                        "models",
+                        "data_loaders"
+                    ],
+                    "tags": []
+                }
+            },
+            "shared": {
+                "graph": {
+                    "name": "graph",
+                    "exports": [
+                        "Graph"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "encoder_decoder": {
+                    "name": "encoder_decoder",
+                    "exports": [
+                        "EncoderDecoder"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ]
+                    ],
+                    "tags": []
+                }
+            }
+        },
+        "root": "/vdm_mate"
+    },
+    "graph_diffusion": {
+        "name": "graph_diffusion",
+        "project": {
+            "models": {
+                "graph_transformer": {
+                    "name": "graph_transformer",
+                    "exports": [
+                        "GraphTransformer"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "dacite",
+                            "1.8.0"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "gat_custom": {
+                    "name": "gat_custom",
+                    "exports": [
+                        "GAT"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "vdm": {
+                    "name": "vdm",
+                    "exports": [
+                        "VDM"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "gat_simple": {
+                    "name": "gat_simple",
+                    "exports": [
+                        "GAT"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ]
+                    ],
+                    "tags": []
+                }
+            },
+            "data_loaders": {
+                "qm9": {
+                    "name": "qm9",
+                    "exports": [],
+                    "errors": [
+                        "No exports found in data_loaders.qm9. Consider exporting with 'mate export <module>'"
+                    ],
+                    "dependencies": [
+                        [
+                            "auto_mix_prep",
+                            "0.2.0"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "pandas",
+                            "2.0.1"
+                        ],
+                        [
+                            "pytorch_lightning",
+                            "2.0.2"
+                        ],
+                        [
+                            "rdkit",
+                            "2023.3.1"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.1"
+                        ],
+                        [
+                            "tqdm",
+                            "4.65.0"
+                        ],
+                        [
+                            "wandb",
+                            "0.15.2"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "qm9_p": {
+                    "name": "qm9_p",
+                    "exports": [
+                        "QM9DataModule"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.2"
+                        ],
+                        [
+                            "omegaconf",
+                            "2.3.0"
+                        ],
+                        [
+                            "overrides",
+                            "7.3.1"
+                        ],
+                        [
+                            "pandas",
+                            "1.5.3"
+                        ],
+                        [
+                            "pytorch_lightning",
+                            "2.0.1"
+                        ],
+                        [
+                            "rdkit",
+                            "2022.9.5"
+                        ],
+                        [
+                            "torch",
+                            "2.0.0"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.0"
+                        ],
+                        [
+                            "tqdm",
+                            "4.65.0"
+                        ],
+                        [
+                            "wandb",
+                            "0.14.0"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "tu_old": {
+                    "name": "tu_old",
+                    "exports": [
+                        "load_data"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "h5py",
+                            "3.8.0"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jax_dataloader",
+                            "0.0.3"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "scipy",
+                            "1.10.1"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.1"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "tu": {
+                    "name": "tu",
+                    "exports": [
+                        "load_data"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "h5py",
+                            "3.8.0"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "scipy",
+                            "1.10.1"
+                        ],
+                        [
+                            "shared",
+                            "0.0.26"
+                        ],
+                        [
+                            "tensorflow",
+                            "2.12.0"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.1"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "qm9_simple": {
+                    "name": "qm9_simple",
+                    "exports": [
+                        "load_data"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jax_dataloader",
+                            "0.0.3"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.1"
+                        ]
+                    ],
+                    "tags": []
+                }
+            },
+            "trainers": {
+                "vdm_trainer": {
+                    "name": "vdm_trainer",
+                    "exports": [
+                        "Trainer"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
+                        [
+                            "clu",
+                            "0.0.9"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jax_tqdm",
+                            "0.1.1"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "optax",
+                            "0.1.5"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ],
+                        [
+                            "wandb",
+                            "0.15.2"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "ddd_trainer": {
+                    "name": "ddd_trainer",
+                    "exports": [
+                        "run_model",
+                        "TrainingConfig"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "dacite",
+                            "1.8.0"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jax_dataclasses",
+                            "1.5.1"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "matplotlib",
+                            "3.7.1"
+                        ],
+                        [
+                            "optax",
+                            "0.1.5"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "shared",
+                            "0.0.26"
+                        ],
+                        [
+                            "tqdm",
+                            "4.65.0"
+                        ],
+                        [
+                            "typeguard",
+                            "3.0.2"
+                        ],
+                        [
+                            "wandb",
+                            "0.15.2"
+                        ]
+                    ],
+                    "tags": []
+                }
+            },
+            "shared": {
+                "graph": {
+                    "name": "graph",
+                    "exports": [
+                        "Graph"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "encoder_decoder": {
+                    "name": "encoder_decoder",
+                    "exports": [
+                        "EncoderDecoder"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "shared",
+                            "0.0.25"
+                        ]
+                    ],
+                    "tags": []
+                }
+            },
+            "experiments": {
+                "ddd_gat_tu_PROTEINS": {
+                    "name": "ddd_gat_tu_PROTEINS.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "vdm_tu_gat3": {
+                    "name": "vdm_tu_gat3.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "trainers",
+                        "models",
+                        "shared"
+                    ],
+                    "tags": []
+                },
+                "ddd_gat_tu_MUTAG": {
+                    "name": "ddd_gat_tu_MUTAG.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "vdm_tu_gat2": {
+                    "name": "vdm_tu_gat2.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "trainers",
+                        "models",
+                        "shared"
+                    ],
+                    "tags": []
+                },
+                "ddd_gat_tu_PTC_MR": {
+                    "name": "ddd_gat_tu_PTC_MR.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "ddd_gat_tu_MUTAG_stripped": {
+                    "name": "ddd_gat_tu_MUTAG_stripped.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "ddd_gat_tu_IMDB_MULTY": {
+                    "name": "ddd_gat_tu_IMDB_MULTY.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "ddd_gat_tu_IMDB_BINARY": {
+                    "name": "ddd_gat_tu_IMDB_BINARY.py",
+                    "errors": [
+                        "The experiment should only contain assignments, function calls and imports"
+                    ],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "ddd_gat_qm9_simle": {
+                    "name": "ddd_gat_qm9_simle.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "vdm_tu_gat": {
+                    "name": "vdm_tu_gat.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "trainers",
+                        "models",
+                        "shared"
+                    ],
+                    "tags": []
+                },
+                "ddd_tu": {
+                    "name": "ddd_tu.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders"
+                    ],
+                    "tags": []
+                }
+            }
+        },
+        "root": "/graph_diffusion"
     }
 }

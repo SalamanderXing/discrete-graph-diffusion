@@ -1,5 +1,5 @@
 import torch
-from src import utils
+from .. import utils
 
 
 class ExtraMolecularFeatures:
@@ -35,6 +35,7 @@ class ChargeFeature:
         bond_orders = torch.tensor(
             [0, 1, 2, 3, 1.5], device=noisy_data["E_t"].device
         ).reshape(1, 1, 1, -1)
+        import ipdb;ipdb.set_trace()
         weighted_E = noisy_data["E_t"] * bond_orders  # (bs, n, n, de)
         current_valencies = weighted_E.argmax(dim=-1).sum(dim=-1)  # (bs, n)
 

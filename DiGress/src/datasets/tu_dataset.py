@@ -1,6 +1,7 @@
 import os
 import os.path as osp
 import ipdb
+import torch as t
 import pathlib
 from typing import Any, Sequence
 
@@ -51,147 +52,6 @@ class SelectHOMOTransform:
         return data
 
 
-'''
-class TUDataset(InMemoryDataset):
-    raw_url = (
-        "https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/"
-        "molnet_publish/qm9.zip"
-    )
-    raw_url2 = "https://ndownloader.figshare.com/files/3195404"
-    processed_url = "https://data.pyg.org/datasets/qm9_v3.zip"
-
-    def __init__(
-        self,
-        stage,
-        root,
-        remove_h: bool,
-        target_prop=None,
-        transform=None,
-        pre_transform=None,
-        pre_filter=None,
-    ):
-        self.target_prop = target_prop
-        self.stage = stage
-        if self.stage == "train":
-            self.file_idx = 0
-        elif self.stage == "val":
-            self.file_idx = 1
-        else:
-            self.file_idx = 2
-        self.remove_h = remove_h
-        super().__init__(root, transform, pre_transform, pre_filter)
-        self.data, self.slices = torch.load(self.processed_paths[self.file_idx])
-
-    def download(self):
-        """
-        Download raw qm9 files. Taken from PyG QM9 class
-        """
-        try:
-            import rdkit  # noqa
-
-            file_path = download_url(self.raw_url, self.raw_dir)
-            extract_zip(file_path, self.raw_dir)
-            os.unlink(file_path)
-
-            file_path = download_url(self.raw_url2, self.raw_dir)
-            os.rename(
-                osp.join(self.raw_dir, "3195404"),
-                osp.join(self.raw_dir, "uncharacterized.txt"),
-            )
-        except ImportError:
-            path = download_url(self.processed_url, self.raw_dir)
-            extract_zip(path, self.raw_dir)
-            os.unlink(path)
-
-        if files_exist(self.split_paths):
-            return
-
-        dataset = pd.read_csv(self.raw_paths[1])
-
-        n_samples = len(dataset)
-        n_train = 100000
-        n_test = int(0.1 * n_samples)
-        n_val = n_samples - (n_train + n_test)
-
-        # Shuffle dataset with df.sample, then split
-        train, val, test = np.split(
-            dataset.sample(frac=1, random_state=42), [n_train, n_val + n_train]
-        )
-
-        train.to_csv(os.path.join(self.raw_dir, "train.csv"))
-        val.to_csv(os.path.join(self.raw_dir, "val.csv"))
-        test.to_csv(os.path.join(self.raw_dir, "test.csv"))
-
-    def process(self):
-        RDLogger.DisableLog("rdApp.*")
-
-        types = {"H": 0, "C": 1, "N": 2, "O": 3, "F": 4}
-        bonds = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
-
-        target_df = pd.read_csv(self.split_paths[self.file_idx], index_col=0)
-        target_df.drop(columns=["mol_id"], inplace=True)
-
-        with open(self.raw_paths[-1], "r") as f:
-            skip = [int(x.split()[0]) - 1 for x in f.read().split("\n")[9:-2]]
-
-        suppl = Chem.SDMolSupplier(self.raw_paths[0], removeHs=False, sanitize=False)
-
-        data_list = []
-        for i, mol in enumerate(tqdm(suppl)):
-            if i in skip or i not in target_df.index:
-                continue
-
-            N = mol.GetNumAtoms()
-
-            type_idx = []
-            for atom in mol.GetAtoms():
-                type_idx.append(types[atom.GetSymbol()])
-
-            row, col, edge_type = [], [], []
-            for bond in mol.GetBonds():
-                start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
-                row += [start, end]
-                col += [end, start]
-                edge_type += 2 * [bonds[bond.GetBondType()] + 1]
-
-            edge_index = torch.tensor([row, col], dtype=torch.long)
-            edge_type = torch.tensor(edge_type, dtype=torch.long)
-            edge_attr = F.one_hot(edge_type, num_classes=len(bonds) + 1).to(torch.float)
-
-            perm = (edge_index[0] * N + edge_index[1]).argsort()
-            edge_index = edge_index[:, perm]
-            edge_attr = edge_attr[perm]
-
-            x = F.one_hot(torch.tensor(type_idx), num_classes=len(types)).float()
-            y = torch.zeros((1, 0), dtype=torch.float)
-
-            if self.remove_h:
-                type_idx = torch.tensor(type_idx).long()
-                to_keep = type_idx > 0
-                edge_index, edge_attr = subgraph(
-                    to_keep,
-                    edge_index,
-                    edge_attr,
-                    relabel_nodes=True,
-                    num_nodes=len(to_keep),
-                )
-                x = x[to_keep]
-                # Shift onehot encoding to match atom decoder
-                x = x[:, 1:]
-
-            data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y, idx=i)
-
-            if self.pre_filter is not None and not self.pre_filter(data):
-                continue
-            if self.pre_transform is not None:
-                data = self.pre_transform(data)
-
-            data_list.append(data)
-
-        torch.save(self.collate(data_list), self.processed_paths[self.file_idx])
-'''
-
-
 class TUDataModule(MolecularDataModule):
     def __init__(self, cfg):
         self.datadir = cfg.dataset.datadir
@@ -237,6 +97,23 @@ class TUDataModule(MolecularDataModule):
         raw_dataset = TUDataset(
             root=self.datadir, name="MUTAG", use_node_attr=True, use_edge_attr=True
         )
+        n_nodes = {}
+        node_features = []
+        edge_features = []
+        for el in raw_dataset:
+            n_nodes[el.num_nodes] = n_nodes.get(el.num_nodes, 0) + 1
+            node_features.extend(el.x)
+            edge_features.extend(el.edge_attr)
+        n_nodes_tensor = t.tensor(list(n_nodes.items()))
+        n_nodes_dist = t.zeros(n_nodes_tensor[:, 0].max() + 1)
+        n_nodes_dist[n_nodes_tensor[:, 0]] = n_nodes_tensor[:, 1].float()
+        self.n_nodes_dist = n_nodes_dist / n_nodes_dist.sum()
+        assert self.n_nodes_dist.sum() == 1 and self.n_nodes_dist.min() >= 0
+        self.node_features_dist = t.stack(node_features).mean(dim=0)
+        self.edge_features_dist = t.stack(edge_features).mean(dim=0)
+        assert self.node_features_dist.sum() == 1 and self.node_features_dist.min() >= 0
+        assert self.edge_features_dist.sum() == 1 and self.edge_features_dist.min() >= 0
+
         train_size = int(len(raw_dataset) * 0.8)
         train_data = raw_dataset[:train_size]
         val_data = raw_dataset[train_size:]
@@ -244,117 +121,133 @@ class TUDataModule(MolecularDataModule):
         super().prepare_data({"train": train_data, "val": val_data, "test": test_data})
 
 
+    def prepare_data(self):
+        pass
+
 class TUInfos(AbstractDatasetInfos):
     def __init__(self, datamodule, cfg, recompute_statistics=False):
         self.remove_h = cfg.dataset.remove_h
         self.need_to_strip = (
             False  # to indicate whether we need to ignore one output from the model
         )
-        self.name = "qm9"
-        if self.remove_h:
-            self.atom_encoder = {"C": 0, "N": 1, "O": 2, "F": 3}
-            self.atom_decoder = ["C", "N", "O", "F"]
-            self.num_atom_types = 4
-            self.valencies = [4, 3, 2, 1]
-            self.atom_weights = {0: 12, 1: 14, 2: 16, 3: 19}
-            self.max_n_nodes = 9
-            self.max_weight = 150
-            for el in datamodule.train_dataloader():
-                ipdb.set_trace()
-
-            self.n_nodes = torch.tensor(
-                [
-                    0,
-                    2.2930e-05,
-                    3.8217e-05,
-                    6.8791e-05,
-                    2.3695e-04,
-                    9.7072e-04,
-                    0.0046472,
-                    0.023985,
-                    0.13666,
-                    0.83337,
-                ]
-            )
-            self.node_types = torch.tensor([0.7230, 0.1151, 0.1593, 0.0026])
-            self.edge_types = torch.tensor([0.7261, 0.2384, 0.0274, 0.0081, 0.0])
-            super().complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
-            self.valency_distribution = torch.zeros(3 * self.max_n_nodes - 2)
-            self.valency_distribution[0:6] = torch.tensor(
-                [2.6071e-06, 0.163, 0.352, 0.320, 0.16313, 0.00073]
-            )
-        else:
-            self.atom_encoder = {"H": 0, "C": 1, "N": 2, "O": 3, "F": 4}
-            self.atom_decoder = ["H", "C", "N", "O", "F"]
-            self.valencies = [1, 4, 3, 2, 1]
-            self.num_atom_types = 5
-            self.max_n_nodes = 29
-            self.max_weight = 390
-            self.atom_weights = {0: 1, 1: 12, 2: 14, 3: 16, 4: 19}
-            self.n_nodes = torch.tensor(
-                [
-                    0,
-                    0,
-                    0,
-                    1.5287e-05,
-                    3.0574e-05,
-                    3.8217e-05,
-                    9.1721e-05,
-                    1.5287e-04,
-                    4.9682e-04,
-                    1.3147e-03,
-                    3.6918e-03,
-                    8.0486e-03,
-                    1.6732e-02,
-                    3.0780e-02,
-                    5.1654e-02,
-                    7.8085e-02,
-                    1.0566e-01,
-                    1.2970e-01,
-                    1.3332e-01,
-                    1.3870e-01,
-                    9.4802e-02,
-                    1.0063e-01,
-                    3.3845e-02,
-                    4.8628e-02,
-                    5.4421e-03,
-                    1.4698e-02,
-                    4.5096e-04,
-                    2.7211e-03,
-                    0.0000e00,
-                    2.6752e-04,
-                ]
-            )
-
-            self.node_types = torch.tensor([0.5122, 0.3526, 0.0562, 0.0777, 0.0013])
-            self.edge_types = torch.tensor(
-                [0.88162, 0.11062, 5.9875e-03, 1.7758e-03, 0]
-            )
-
-            super().complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
-            self.valency_distribution = torch.zeros(3 * self.max_n_nodes - 2)
-            self.valency_distribution[0:6] = torch.tensor(
-                [0, 0.5136, 0.0840, 0.0554, 0.3456, 0.0012]
-            )
-
-        if recompute_statistics:
-            np.set_printoptions(suppress=True, precision=5)
-            self.n_nodes = datamodule.node_counts()
-            print("Distribution of number of nodes", self.n_nodes)
-            np.savetxt("n_counts.txt", self.n_nodes.numpy())
-            self.node_types = datamodule.node_types()  # There are no node types
-            print("Distribution of node types", self.node_types)
-            np.savetxt("atom_types.txt", self.node_types.numpy())
-
-            self.edge_types = datamodule.edge_counts()
-            print("Distribution of edge types", self.edge_types)
-            np.savetxt("edge_types.txt", self.edge_types.numpy())
-
-            valencies = datamodule.valency_count(self.max_n_nodes)
-            print("Distribution of the valencies", valencies)
-            np.savetxt("valencies.txt", valencies.numpy())
-            self.valency_distribution = valencies
-            assert False
+        self.name = "TU"
+        self.n_nodes = datamodule.n_nodes_dist
+        self.node_types = datamodule.node_features_dist
+        self.edge_types = datamodule.edge_features_dist
+        self.atom_decoder = [str(i) for i in range(len(self.n_nodes))]
+        self.atom_encoder = {str(i): i for i in range(len(self.n_nodes))}
+        self.valencies = [i + 1 for i in reversed(range(len(self.n_nodes)))]
+        self.max_weight = max(self.valencies)
+        self.atom_weights = {i: i + 1 for i in range(len(self.n_nodes))}
+        self.input_dims = {
+            "X": len(self.node_types),
+            "E": len(self.edge_types),
+        }
+        super().complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
+        # super().compute_input_output_dims(datamodule, )
+        # if self.remove_h:
+        #     self.atom_encoder = {"C": 0, "N": 1, "O": 2, "F": 3}
+        #     self.atom_decoder = ["C", "N", "O", "F"]
+        #     self.num_atom_types = 4
+        #     self.valencies = [4, 3, 2, 1]
+        #     self.atom_weights = {0: 12, 1: 14, 2: 16, 3: 19}
+        #     self.max_n_nodes = 9
+        #     self.max_weight = 150
+        #
+        #     self.n_nodes = torch.tensor(
+        #         [
+        #             0,
+        #             2.2930e-05,
+        #             3.8217e-05,
+        #             6.8791e-05,
+        #             2.3695e-04,
+        #             9.7072e-04,
+        #             0.0046472,
+        #             0.023985,
+        #             0.13666,
+        #             0.83337,
+        #         ]
+        #     )
+        #     self.node_types = torch.tensor([0.7230, 0.1151, 0.1593, 0.0026])
+        #     self.edge_types = torch.tensor([0.7261, 0.2384, 0.0274, 0.0081, 0.0])
+        #     super().complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
+        #     self.valency_distribution = torch.zeros(3 * self.max_n_nodes - 2)
+        #     self.valency_distribution[0:6] = torch.tensor(
+        #         [2.6071e-06, 0.163, 0.352, 0.320, 0.16313, 0.00073]
+        #     )
+        # else:
+        #     self.atom_encoder = {"H": 0, "C": 1, "N": 2, "O": 3, "F": 4}
+        #     self.atom_decoder = ["H", "C", "N", "O", "F"]
+        #     self.valencies = [1, 4, 3, 2, 1]
+        #     self.num_atom_types = 5
+        #     self.max_n_nodes = 29
+        #     self.max_weight = 390
+        #     self.atom_weights = {0: 1, 1: 12, 2: 14, 3: 16, 4: 19}
+        #     self.n_nodes = torch.tensor(
+        #         [
+        #             0,
+        #             0,
+        #             0,
+        #             1.5287e-05,
+        #             3.0574e-05,
+        #             3.8217e-05,
+        #             9.1721e-05,
+        #             1.5287e-04,
+        #             4.9682e-04,
+        #             1.3147e-03,
+        #             3.6918e-03,
+        #             8.0486e-03,
+        #             1.6732e-02,
+        #             3.0780e-02,
+        #             5.1654e-02,
+        #             7.8085e-02,
+        #             1.0566e-01,
+        #             1.2970e-01,
+        #             1.3332e-01,
+        #             1.3870e-01,
+        #             9.4802e-02,
+        #             1.0063e-01,
+        #             3.3845e-02,
+        #             4.8628e-02,
+        #             5.4421e-03,
+        #             1.4698e-02,
+        #             4.5096e-04,
+        #             2.7211e-03,
+        #             0.0000e00,
+        #             2.6752e-04,
+        #         ]
+        #     )
+        #
+        #     self.node_types = torch.tensor([0.5122, 0.3526, 0.0562, 0.0777, 0.0013])
+        #     self.edge_types = torch.tensor(
+        #         [0.88162, 0.11062, 5.9875e-03, 1.7758e-03, 0]
+        #     )
+        #
+        #     super().complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
+        #     self.valency_distribution = torch.zeros(3 * self.max_n_nodes - 2)
+        #     self.valency_distribution[0:6] = torch.tensor(
+        #         [0, 0.5136, 0.0840, 0.0554, 0.3456, 0.0012]
+        #     )
+        #
+        # if recompute_statistics:
+        #     np.set_printoptions(suppress=True, precision=5)
+        #     self.n_nodes = datamodule.node_counts()
+        #     print("Distribution of number of nodes", self.n_nodes)
+        #     np.savetxt("n_counts.txt", self.n_nodes.numpy())
+        #     self.node_types = datamodule.node_types()  # There are no node types
+        #     print("Distribution of node types", self.node_types)
+        #     np.savetxt("atom_types.txt", self.node_types.numpy())
+        #
+        #     self.edge_types = datamodule.edge_counts()
+        #     print("Distribution of edge types", self.edge_types)
+        #     np.savetxt("edge_types.txt", self.edge_types.numpy())
+        #
+        #     valencies = datamodule.valency_count(self.max_n_nodes)
+        #     print("Distribution of the valencies", valencies)
+        #     np.savetxt("valencies.txt", valencies.numpy())
+        #     self.valency_distribution = valencies
+        #     assert False
+        #
 
 
 def get_train_smiles(cfg, train_dataloader, dataset_infos, evaluate_dataset=False):
