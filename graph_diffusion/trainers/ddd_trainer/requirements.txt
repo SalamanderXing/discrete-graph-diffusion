@@ -24,7 +24,7 @@ optax==0.1.5
 
 orbax==0.1.7
 
-rich==13.3.5
+rich==13.4.1
 
 shared==0.0.27
 

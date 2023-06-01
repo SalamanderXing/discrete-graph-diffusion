@@ -3,12 +3,12 @@
 ## Project Structure
 
 - `pytorch` $\rightarrow$ Almost identical to the [original code](https://github.com/cvignac/DiGress), adapted for debugging.
-- `discrete_graph_diffusion` $\rightarrow$ new code in JAX
+- `graph_diffusion` $\rightarrow$ new code in JAX
 
-### The `discrete_graph_diffusion` folder
+### The `discrete_denoising_diffusion` folder
 
-All the code regarding diffusion lies in the `trainers/discrete_denoising_diffusion` folder. 
-The entrypoint is the file `trainers/discrete_denoising_diffusion/discrete_denoising_diffusion.py`
+All the code regarding diffusion lies in the `trainers/ddd_trainer` folder. 
+The entrypoint is the file `trainers/ddd_trainer/discrete_denoising_diffusion.py`
 
 ## Status
 
@@ -30,9 +30,9 @@ pip install -e .
 ```
 
 #### Running the code
-Navigate into the `discrete_graph_diffusion` directory and run `mate summary`. If everything worked well you should see a nice representation of the project. 
+Navigate into the `graph_diffusion` directory and run `mate summary`. If everything worked well you should see a nice representation of the project. 
 
-Then you can run `mate run graph_transformer_test` to run a simple test that checks the graph transformer model is working.
+Then you can run `mate run ddd_tr_QM9 train` to run the main experiment.
 
 ---
 

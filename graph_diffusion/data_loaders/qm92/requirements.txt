@@ -34,7 +34,7 @@ rdkit==2023.3.1
 
 scipy==1.10.1
 
-shared==0.0.26
+shared==0.0.27
 
 tensorflow==2.12.0
 
