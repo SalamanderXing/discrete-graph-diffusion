@@ -1,8 +1,4 @@
 """
-```yaml
-tags:
-- book 
-```
 """
 
 import platform
