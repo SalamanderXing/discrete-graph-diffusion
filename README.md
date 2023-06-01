@@ -5,7 +5,7 @@
 - `pytorch` $\rightarrow$ Almost identical to the [original code](https://github.com/cvignac/DiGress), adapted for debugging.
 - `graph_diffusion` $\rightarrow$ new code in JAX
 
-### The `discrete_denoising_diffusion` folder
+### The `graph_diffusion` folder
 
 All the code regarding diffusion lies in the `trainers/ddd_trainer` folder. 
 The entrypoint is the file `trainers/ddd_trainer/discrete_denoising_diffusion.py`
