@@ -64,7 +64,6 @@ class GAT(nn.Module):
         edges: Float[Array, "b n n ee"],
         node_mask: Bool[Array, "b n"],
     ) -> tuple[Float[Array, "b n en"], Float[Array, "b n n ee"]]:
-
         for i, att_layer in enumerate(self.att_layers):
             if i > 0:
                 nodes_with_timestep = jax.nn.elu(nodes)

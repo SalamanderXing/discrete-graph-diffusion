@@ -118,5 +118,5 @@ run_model(
     action=mate.command if mate.command else "train",
     save_path=mate.save_dir,
     writer=mate.tensorboard(),
-    ds_name='qm9_digress'
+    ds_name="qm9_digress",
 )

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.signal import savgol_filter
 from jax import numpy as jnp
+from jaxtyping import Int, Float
 from ...shared.graph import Graph, SimpleGraphDist
 
 # @dataclass(frozen=True)
@@ -53,20 +54,18 @@ def __encode_no_edge(E):
 def compute_distribution(
     node_masks: Float[Array, "bs m"], margin: int
 ) -> Float[Array, "size"]:
-    per_node_n = jnp.sum(node_masks, axis=1).astype(int)
-    max_n = jnp.max(per_node_n) + margin
-    dist = jnp.zeros(max_n, dtype=int)
+    per_node_n = np.sum(node_masks, axis=1).astype(int)
+    max_n = np.max(per_node_n) + margin
+    dist = np.zeros(max_n, dtype=int)
     for n in per_node_n:
-        dist = dist.at[n].add(1)
-    norm_dist = dist / jnp.sum(dist)
+        dist[n] += 1
+    norm_dist = dist / np.sum(dist)
     # performs a smoothing of the distribution
-    norm_dist_smooth = jnp.clip(
-        jnp.array(savgol_filter(np.array(norm_dist), 5, 3)), 0, 1
-    )
+    norm_dist_smooth = np.clip(np.array(savgol_filter(np.array(norm_dist), 5, 3)), 0, 1)
     # applies a moving average to the distribution
-    norm_dist_smooth_2 = jnp.convolve(norm_dist_smooth, jnp.ones(3) / 3, mode="same")
-    norm_dist_smooth_3 = jnp.convolve(norm_dist_smooth_2, jnp.ones(5) / 5, mode="same")
-    norm_dist_smooth_3 = norm_dist_smooth_3 / jnp.sum(norm_dist_smooth_3)
+    norm_dist_smooth_2 = np.convolve(norm_dist_smooth, np.ones(3) / 3, mode="same")
+    norm_dist_smooth_3 = np.convolve(norm_dist_smooth_2, np.ones(5) / 5, mode="same")
+    norm_dist_smooth_3 = norm_dist_smooth_3 / np.sum(norm_dist_smooth_3)
     return norm_dist_smooth_3
 
 
@@ -88,6 +87,54 @@ def load_cache(
 
 
 # def compute_priors(nodes:Float[], edges):
+
+
+def create_graph(nodes, edges, edges_counts, nodes_counts, train=False):
+    nodes = np.asarray(nodes)
+    edges = np.asarray(edges)
+    nodes_counts = np.asarray(nodes_counts)
+    edges_counts = np.asarray(edges_counts)
+    assert nodes_counts.shape == edges_counts.shape and len(nodes_counts.shape) == 1
+    if len(nodes.shape) > 3:
+        nodes = nodes.squeeze(-1)
+    if train:
+        batch_size, n, _ = nodes.shape
+
+        # if np.random.rand() < 0.5:
+        #     # takes a subgraph
+        #     max_n = np.max(nodes_counts)
+        #     new_nodes_counts = np.random.randint(1, max_n, size=batch_size)
+        #     # ipdb.set_trace()
+        #     for i in range(batch_size):
+        #         nodes[i, new_nodes_counts[i] :] = np.eye(nodes.shape[-1])[0]
+        #         edges[i, new_nodes_counts[i] :, new_nodes_counts[i] :] = np.eye(
+        #             edges.shape[-1]
+        #         )[0]
+        # pass
+
+    nodes = jnp.asarray(nodes)
+
+    edges = jnp.asarray(edges)
+    edges_counts = jnp.asarray(edges_counts)
+    # assert len(nodes_counts.shape) == 1
+    nodes_counts = jnp.asarray(nodes_counts)
+    # assert len(nodes_counts.shape) == 1
+    return (
+        Graph.create(
+            nodes=nodes,
+            edges=edges,
+            edges_counts=edges_counts,
+            nodes_counts=nodes_counts,
+        )
+        if len(edges.shape) < 4
+        else SimpleGraphDist.create(
+            nodes=nodes,
+            edges=edges,
+            edges_counts=edges_counts,
+            nodes_counts=nodes_counts,
+            # node_masks=jnp.ones_like(nodes_counts),
+        )
+    )
 
 
 def split_dataset(
@@ -140,82 +187,37 @@ def split_dataset(
         node_prior: Float[Array, "m"]
         edge_prior: Float[Array, "l"]
 
+    indices_train = jnp.arange(len(train_indices))
+    indices_test = jnp.arange(len(test_indices))
     train_dataset = (
         Dataset.zip(
             (
+                # Dataset.from_tensor_slices(indices_train),
                 Dataset.from_tensor_slices(train_nodes),
                 Dataset.from_tensor_slices(train_edges),
-                # Dataset.from_tensor_slices(train_node_masks),
                 Dataset.from_tensor_slices(train_edges_counts),
                 Dataset.from_tensor_slices(train_nodes_counts),
             )
         )
-        .repeat()
         .shuffle(1000)
+        .repeat()
     )
     test_dataset = Dataset.zip(
         (
+            # Dataset.from_tensor_slices(indices_train),
             Dataset.from_tensor_slices(test_nodes),
             Dataset.from_tensor_slices(test_edges),
-            # Dataset.from_tensor_slices(test_node_masks),
             Dataset.from_tensor_slices(test_edges_counts),
             Dataset.from_tensor_slices(test_nodes_counts),
         )
     ).repeat()
 
-    def create_graph(nodes, edges, edges_counts, nodes_counts):
-        nodes = jnp.asarray(nodes)
-        if len(nodes.shape) > 3:
-            nodes = nodes.squeeze(-1)
-        edges = jnp.asarray(edges)
-        edges_counts = jnp.asarray(edges_counts)
-        nodes_counts = jnp.asarray(nodes_counts)
-        return (
-            Graph.create(
-                nodes=nodes,
-                edges=edges,
-                edges_counts=edges_counts,
-                nodes_counts=nodes_counts,
-            )
-            if len(edges.shape) < 4
-            else SimpleGraphDist(
-                nodes=nodes,
-                edges=edges,
-                edges_counts=edges_counts,
-                nodes_counts=nodes_counts,
-                node_masks=jnp.ones_like(nodes_counts),
-            )
-        )
-
     # return train_dataset, test_dataset
     train_loader = train_dataset.batch(batch_size)
-    # .map(
-    #     lambda nodes, edges, edges_counts, nodes_counts: tf.py_function(
-    #         func=create_graph,
-    #         inp=[nodes, edges, edges_counts, nodes_counts],
-    #         Tout=Graph,  # tf.float32,  # replace this with the actual data type of your Graph
-    #     )
-    # )
 
     test_loader = test_dataset.batch(batch_size)
-    # .map(
-    #     lambda nodes, edges, edges_counts, nodes_counts: tf.py_function(
-    #         func=create_graph,
-    #         inp=[nodes, edges, edges_counts, nodes_counts],
-    #         Tout=tf.float32,  # replace this with the actual data type of your Graph
-    #     )
-    # )
-
-    # dataset_info = DatasetInfo(
-    #     num_node_features=max_n_atom,
-    #     num_edge_features=num_edge_features,
-    #     max_num_nodes=max_n,
-    #     nodes_dist=np.array(freqs),
-    #     nodes_prior=train_nodes.reshape(-1, train_nodes.shape[-1]).mean(axis=0),
-    #     edges_prior=train_edges.reshape(-1, train_edges.shape[-1]).mean(axis=0),
-    # )
     train_loader = map(
-        lambda x: create_graph(*x),
+        lambda x: create_graph(*x, train=True),
         train_loader,
     )
     test_loader = map(
@@ -227,7 +229,7 @@ def split_dataset(
     edges_prior = jnp.array(train_edges.mean(axis=(0, 1, 2)).squeeze())
     return TUDataset(
         train_loader=train_loader,
-        test_loader=train_loader,
+        test_loader=test_loader,
         max_node_feature=int(np.max(train_nodes)),
         max_edge_feature=int(np.max(train_edges)),
         n=int(max_n),
@@ -248,9 +250,10 @@ def load_data(
     cache: bool = False,
     one_hot: bool = False,
 ):
-    cache_location = os.path.join(save_path, "processed.pickle")
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    print("Cache not found, creating new one...")
+    # old_visible_devices = os.environ["CUDA_VISIBLE_DEVICES"]
+    # ipdb.set_trace()
+    # os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    # print("Cache not found, creating new one...")
     from torch_geometric.datasets import TUDataset, QM9
     from torch_geometric.utils import (
         to_dense_batch,
@@ -267,9 +270,7 @@ def load_data(
     )
     items = len(dataset)
     # Get the maximum number of nodes (atoms) in the dataset
-    max_n = (
-        max([data.num_nodes for data in dataset]) + 1
-    )  # one for the absence of a node
+    max_n = max([data.num_nodes for data in dataset])  # one for the absence of a node
     print(f"[red]Max number of nodes:[/red] {max_n}")
     # Get unique atom types
     max_n_atom = dataset[0].x.shape[1]
@@ -292,6 +293,7 @@ def load_data(
         # Fill in the edge features
         edge_indices = data.edge_index.numpy()
         for j, (src, dst) in enumerate(edge_indices.T):
+            assert src < num_nodes and dst < num_nodes, ipdb.set_trace()
             edges[idx, src, dst, :] = [0] + data.edge_attr[j].tolist()
             edges[idx, dst, src, :] = [0] + data.edge_attr[j].tolist()
             tot_edges.add((src.item(), dst.item()))
@@ -304,7 +306,6 @@ def load_data(
 
     edges[np.where(edges.sum(axis=-1) == 0)] = np.eye(num_edge_features)[0]
     nodes[np.where(nodes.sum(axis=-1) == 0)] = np.eye(max_n_atom)[0]
-
     if not one_hot:
         nodes = np.argmax(nodes, axis=-1)
         edges = np.argmax(edges, axis=-1)
@@ -318,16 +319,38 @@ def load_data(
     print("Processed dataset.")
     items = len(nodes)
     num_edge_features = edges.shape[-1]
-    import torch
 
-    shuffling_indices = torch.randperm(items)
-    train_size = int(train_size * items)
-    train_indices = shuffling_indices[:train_size]
-    test_indices = shuffling_indices[train_size:]
+    if name.lower() in ("mutag", "ptc_mr"):
+        print(f"Loading split indices from files...")
+        indices_dir = os.path.join(os.path.dirname(__file__), name.lower())
+        train_indices = np.array(
+            [
+                int(el)
+                for el in open(os.path.join(indices_dir, "train_idx.txt"))
+                .read()
+                .split("\n")
+                if el != ""
+            ]
+        )
+        test_indices = np.array(
+            [
+                int(el)
+                for el in open(os.path.join(indices_dir, "test_idx.txt"))
+                .read()
+                .split("\n")
+                if el != ""
+            ]
+        )
+    else:
+        print(f"Loading train from files...")
+        shuffling_indices = np.random.permutation(items)
+        train_size = int(train_size * items)
+        train_indices = shuffling_indices[:train_size]
+        test_indices = shuffling_indices[train_size:]
 
     result = split_dataset(
-        train_indices=train_indices.numpy(),
-        test_indices=test_indices.numpy(),
+        train_indices=train_indices,
+        test_indices=test_indices,
         nodes=nodes,
         edges=edges,
         batch_size=batch_size,
@@ -335,6 +358,9 @@ def load_data(
         nodes_counts=num_nodes_list,
         node_masks=node_masks,
     )
+    # free cuda memory
+    # torch.cuda.empty_cache()
+    # os.environ["CUDA_VISIBLE_DEVICES"] = old_visible_devices
     return result
     # return cache
 

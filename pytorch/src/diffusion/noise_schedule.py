@@ -262,10 +262,10 @@ class AbsorbingStateTransition:
 
         return q_x, q_e, q_y
 
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     noise_schedule = PredefinedNoiseScheduleDiscrete("cosine", 1000)
     plt.plot(noise_schedule.betas)
     plt.show()
-

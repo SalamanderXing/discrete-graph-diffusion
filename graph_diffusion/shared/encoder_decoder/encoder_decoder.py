@@ -10,7 +10,8 @@ import numpy as np
 import ipdb
 from mate.jax import typed, SInt
 from jaxtyping import Array, Float
-from ...shared.graph import Graph, Nodes, Edges
+from ...shared.graph_distribution import GraphDistribution
+from ...shared.graph import Edges, Nodes, Graph
 
 
 class EncoderDecoder(nn.Module):
@@ -19,6 +20,7 @@ class EncoderDecoder(nn.Module):
     edge_vocab_size: int
     node_vocab_size: int
 
+    @typed
     def __call__(self, x: Graph, g_0: Float[Array, "b"]):
         # For initialization purposes
         h = self.encode(x)
@@ -31,8 +33,8 @@ class EncoderDecoder(nn.Module):
 
     @typed
     def encode(self, x: Graph):
-        nodes = x.nodes
-        edges = x.edges
+        nodes = x.x
+        edges = x.e
         # This transforms x from discrete values (0, 1, ...)
         # to the domain (-1,1).
         # Rounding here just a safeguard to ensure the input is discrete
@@ -74,10 +76,10 @@ class EncoderDecoder(nn.Module):
         return logprobs
 
     @typed
-    def decode(self, z: Graph, g_0) -> Graph:
+    def decode(self, z: GraphDistribution, g_0) -> GraphDistribution:
         zn = z.nodes
         ze = z.edges
-        return Graph.create(
+        return GraphDistribution.create(
             nodes=self.__decode_node(zn, g_0),
             edges=self.__decode_edge(ze, g_0),
             nodes_counts=z.nodes_counts,

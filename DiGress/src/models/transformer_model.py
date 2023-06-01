@@ -244,7 +244,7 @@ class GraphTransformer(nn.Module):
     ):
         super().__init__()
         self.input_dims = input_dims
-        #input_dims['y'] = 12
+        # input_dims['y'] = 12
         self.n_layers = n_layers
         self.out_dim_X = output_dims["X"]
         self.out_dim_E = output_dims["E"]
@@ -319,7 +319,9 @@ class GraphTransformer(nn.Module):
                 X=self.mlp_in_X(X), E=new_E, y=self.mlp_in_y(y)
             ).mask(node_mask)
         except:
-            import ipdb; ipdb.set_trace()
+            import ipdb
+
+            ipdb.set_trace()
         X, E, y = after_in.X, after_in.E, after_in.y
 
         for layer in self.tf_layers:

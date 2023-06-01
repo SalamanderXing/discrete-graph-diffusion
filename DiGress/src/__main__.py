@@ -133,6 +133,7 @@ class DummyMetric:
 
 @hydra.main(version_base="1.1", config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
+    #os.environ["CUDA_VISIBLE_DEVICES"] = ""
     dataset_config = cfg["dataset"]
 
     if dataset_config["name"] == "tu":
@@ -227,7 +228,6 @@ def main(cfg: DictConfig):
                 dataset_infos=dataset_infos,
                 evaluate_dataset=False,
             )
-            ipdb.set_trace()
         elif dataset_config["name"] == "guacamol":
             datamodule = guacamol_dataset.GuacamolDataModule(cfg)
             dataset_infos = guacamol_dataset.Guacamolinfos(datamodule, cfg)

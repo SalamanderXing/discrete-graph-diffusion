@@ -25,6 +25,8 @@ class AbstractDataModule(pl.LightningDataModule):
     def prepare_data(self, datasets) -> None:
         batch_size = self.train_batch_size
         num_workers = self.num_workers
+        for split, dataset in datasets.items():
+            dataset.process()
         self.dataloaders = {
             split: DataLoader(
                 dataset,

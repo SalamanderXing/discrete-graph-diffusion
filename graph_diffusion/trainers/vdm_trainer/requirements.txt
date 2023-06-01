@@ -18,6 +18,6 @@ optax==0.1.5
 
 rich==13.3.5
 
-shared==0.0.25
+shared==0.0.27
 
 wandb==0.15.2

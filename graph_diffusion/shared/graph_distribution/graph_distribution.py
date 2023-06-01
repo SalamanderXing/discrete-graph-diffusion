@@ -1,5 +1,6 @@
 from jax import numpy as np, Array
 import jax
+import networkx as nx
 from jax.experimental.checkify import check
 import ipdb
 import jax_dataclasses as jdc
@@ -12,7 +13,7 @@ from jax import random
 
 # from .data_batch import DataBatch
 from .q import Q
-from ....shared.graph import SimpleGraphDist
+from ..graph import SimpleGraphDist
 
 check = lambda x, y: None  # to be replaced with JAX's checkify.check function
 
@@ -67,7 +68,7 @@ def sample(prob_x: XDistType, prob_e: EDistType, mask: MaskType, rng_key: Key):
     # return Q(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
     embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
     embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
-    return GraphDistribution.masked(x=embedded_x, e=embedded_e, mask=mask)
+    return GraphDistribution.create(nodes=embedded_x, edges=embedded_e, mask=mask)
 
 
 def safe_div(a: Array, b: Array):
@@ -77,8 +78,8 @@ def safe_div(a: Array, b: Array):
 
 @jdc.pytree_dataclass
 class GraphDistribution(jdc.EnforcedAnnotationsMixin):
-    x: XDistType
-    e: EDistType
+    nodes: XDistType
+    edges: EDistType
     edges_counts: EdgeCountType
     nodes_counts: EdgeCountType
     # mask: MaskType
@@ -91,48 +92,31 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         simple: SimpleGraphDist,
     ) -> "GraphDistribution":
         return cls(
-            x=simple.nodes,
-            e=simple.edges,
+            nodes=simple.nodes,
+            edges=simple.edges,
             edges_counts=simple.edges_counts,
             nodes_counts=simple.nodes_counts,
             _created_internally=True,
         )
 
-    @classmethod
-    @typed
-    def unmasked(
-        cls,
-        x: XDistType,
-        e: EDistType,
-        edges_counts: EdgeCountType,
-        nodes_counts: EdgeCountType,
-    ) -> "GraphDistribution":
-        return cls(
-            x=x,
-            e=e,
-            edges_counts=edges_counts,
-            nodes_counts=nodes_counts,
-            _created_internally=True,
-        )
+    def node_mask(self):
+        n_range = np.arange(self.n)
+        mask_x = n_range[None].repeat(self.batch_size, 0) < self.nodes_counts[:, None]
+        return mask_x
 
     @classmethod
     @typed
-    def masked(
+    def create(
         cls,
-        x: XDistType,
-        e: EDistType,
+        nodes: XDistType,
+        edges: EDistType,
         edges_counts: EdgeCountType,
         nodes_counts: EdgeCountType,
     ) -> "GraphDistribution":
-        # x_mask = mask[..., None]  # bs, n, 1
-        # e_mask1 = x_mask[:, :, None]  # bs, n, 1, 1
-        # e_mask2 = x_mask[:, None]  # bs, 1, n, e_mask1
-        # x = x * x_mask
-        # e = e * e_mask1 * e_mask2
-        check(np.allclose(e, np.transpose(e, (0, 2, 1, 3))), "whoops")
+        # check(np.allclose(e, np.transpose(e, (0, 2, 1, 3))), "whoops")
         return cls(
-            x=x,
-            e=e,
+            nodes=nodes,
+            edges=edges,
             edges_counts=edges_counts,
             nodes_counts=nodes_counts,
             _created_internally=True,
@@ -155,15 +139,17 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
     @property
     def shape(self) -> dict[str, tuple[int, ...]]:
-        return dict(x=self.x.shape, e=self.e.shape)  # , mask=self.mask.shape)
+        return dict(
+            nodes=self.nodes.shape, edges=self.edges.shape
+        )  # , mask=self.mask.shape)
 
     @property
     def batch_size(self) -> int:
-        return self.x.shape[0]
+        return self.nodes.shape[0]
 
     @property
     def n(self) -> int:
-        return self.x.shape[1]
+        return self.nodes.shape[1]
 
     def __repr__(self):
         return self.__str__()
@@ -172,16 +158,29 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         self, other: "GraphDistribution | SFloat | SInt"
     ) -> "GraphDistribution":
         if isinstance(other, (SFloat, SInt)):
-            return GraphDistribution.masked(
-                x=self.x * other,
-                e=self.e * other,
+            new_e = self.edges * other
+            tmp = np.ones((self.n, self.n), bool)
+            tmp = np.triu(tmp, k=1)
+            new_e = np.where(
+                tmp[None, :, :, None], new_e, np.transpose(new_e, (0, 2, 1, 3))
+            )
+
+            return GraphDistribution.create(
+                nodes=self.nodes * other,
+                edges=new_e,
                 nodes_counts=self.nodes_counts,
                 edges_counts=self.edges_counts,
             )
         elif isinstance(other, GraphDistribution):
-            return GraphDistribution.masked(
-                x=self.x * other.x,
-                e=self.e * other.e,
+            new_e = self.edges * other.edges
+            tmp = np.ones((self.n, self.n), bool)
+            tmp = np.triu(tmp, k=1)
+            new_e = np.where(
+                tmp[None, :, :, None], new_e, np.transpose(new_e, (0, 2, 1, 3))
+            )
+            return GraphDistribution.create(
+                nodes=self.nodes * other.nodes,
+                edges=new_e,
                 nodes_counts=self.nodes_counts,
                 edges_counts=self.edges_counts,
             )
@@ -196,16 +195,16 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         self, other: "GraphDistribution | SFloat | SInt"
     ) -> "GraphDistribution":
         if isinstance(other, (SFloat, SInt)):
-            return GraphDistribution.masked(
-                x=self.x / other,
-                e=self.e / other,
+            return GraphDistribution.create(
+                nodes=self.nodes / other,
+                edges=self.edges / other,
                 nodes_counts=self.nodes_counts,
                 edges_counts=self.edges_counts,
             )
         else:
-            return GraphDistribution.masked(
-                x=safe_div(self.x, other.x),
-                e=safe_div(self.e, other.e),
+            return GraphDistribution.create(
+                nodes=safe_div(self.nodes, other.nodes),
+                edges=safe_div(self.edges, other.edges),
                 nodes_counts=self.nodes_counts,
                 edges_counts=self.edges_counts,
             )
@@ -223,39 +222,21 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         }
         return GraphDistribution(**new_vals)
 
-    def probs_at(self, one_hot: "GraphDistribution") -> SFloat:
+    def masks(self) -> tuple[MaskType, MaskType]:
+        n_range = np.arange(self.n)
+        mask_x = n_range[None].repeat(self.batch_size, 0) < self.nodes_counts[:, None]
+        e_ranges = mask_x[:, :, None].repeat(self.n, -1)
+        mask_e = e_ranges & e_ranges.transpose(0, 2, 1)
+        return mask_x, mask_e
+
+    def logprobs_at(self, one_hot: "GraphDistribution") -> SFloat:
         """Returns the probability of the given one-hot vector."""
         probs_at_vector = self * one_hot
-        # sums over all the nodes and edges, but not over the batch
-        return probs_at_vector.x.sum(axis=(1, 2)) + probs_at_vector.e.sum(
-            axis=(1, 2, 3)
-        )
-
-    # @classmethod
-    # def from_sparse(cls, data_batch: DataBatch):
-    #     x, e, _ = to_dense(
-    #         data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
-    #     )
-    #     return cls(
-    #         x=x,
-    #         e=e,
-    #         y=data_batch.y,
-    #         # mask=node_mask,
-    #         _created_internally=True,
-    #     )
-
-    # @classmethod
-    # def from_sparse_torch(cls, data_batch_torch):
-    #     data_batch = DataBatch.from_torch(data_batch_torch)
-    #     x, e, node_mask = to_dense(
-    #         data_batch.x, data_batch.edge_index, data_batch.edge_attr, data_batch.batch
-    #     )
-    #     return cls(
-    #         x=x,
-    #         e=e,
-    #         # mask=node_mask,
-    #         _created_internally=True,
-    #     )
+        mask_x, mask_e = self.masks()
+        uba = np.log(probs_at_vector.nodes.sum(-1)) * mask_x
+        alla = np.log(probs_at_vector.edges.sum(-1)) * mask_e
+        res = uba.sum(-1) + alla.sum((-1, -2))
+        return res
 
     @classmethod
     def sample_from_uniform(
@@ -268,11 +249,14 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     ) -> "GraphDistribution":
         x_prob = np.ones(node_embedding_size) / node_embedding_size
         e_prob = np.ones(edge_embedding_size) / edge_embedding_size
-        x = np.repeat(x_prob[None, None, :], batch_size, axis=0)
-        e = np.repeat(e_prob[None, None, None, :], batch_size, axis=0)
+        nodes = np.repeat(x_prob[None, None, :], batch_size, axis=0)
+        edges = np.repeat(e_prob[None, None, None, :], batch_size, axis=0)
         mask = np.ones((batch_size, n), dtype=bool)
         uniform = cls(
-            x=x, e=e, edges_counts=self.edges_counts, _created_internally=True
+            nodes=nodes,
+            edges=edges,
+            edges_counts=self.edges_counts,
+            _created_internally=True,
         )  # mask=mask,
         return uniform.sample_one_hot(key)
 
@@ -283,12 +267,12 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         :param probE: bs, n, n, de_out     edge features
         :param rng_key: random.PRNGKey     random key for JAX operations
         """
-        bs, n, ne = self.x.shape
-        _, _, _, ee = self.e.shape
+        bs, n, ne = self.nodes.shape
+        _, _, _, ee = self.edges.shape
         epsilon = 1e-8
         # mask = self.mask
-        prob_x = self.x
-        prob_e = self.e
+        prob_x = self.nodes
+        prob_e = self.edges
 
         # Noise X
         # The masked rows should define probability distributions as well
@@ -318,13 +302,13 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         e_t = e_t.reshape(bs, n, n)  # (bs, n, n)
         e_t = np.triu(e_t, k=1)
         e_t = e_t + np.transpose(e_t, (0, 2, 1))
-
         # return Q(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
         embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
         embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
-        return GraphDistribution.masked(
-            x=embedded_x,
-            e=embedded_e,
+        # symmetrize e (while preseving the fact that they're one hot encoded)
+        return GraphDistribution.create(
+            nodes=embedded_x,
+            edges=embedded_e,
             nodes_counts=self.nodes_counts,
             edges_counts=self.edges_counts,
         )  # , mask=self.mask)
@@ -337,12 +321,94 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     #     return GraphDistribution(x=x, e=e, y=y, mask=self.mask)
 
     def __matmul__(self, q: Q) -> "GraphDistribution":
-        x = self.x @ q.x
-        e = self.e @ q.e[:, None]
+        x = self.nodes @ q.x
+        e = self.edges @ q.e[:, None]
+        x = x / x.sum(-1, keepdims=True)
+        e = e / e.sum(-1, keepdims=True)
+
+        tmp = np.ones((self.n, self.n), bool)
+        tmp = np.triu(tmp, k=1)
+        new_e = np.where(tmp[None, :, :, None], e, np.transpose(e, (0, 2, 1, 3)))
+
+        # assert is_dist(x), ipdb.set_trace()
+        # assert is_dist(e), ipdb.set_trace()
         return GraphDistribution(
-            x=x,
-            e=e,
+            nodes=x,
+            edges=new_e,
             edges_counts=self.edges_counts,
             nodes_counts=self.nodes_counts,
             _created_internally=True,
         )  # mask=self.mask,
+
+    def plot(self):
+        import matplotlib.pyplot as plt
+        import numpy
+        from tqdm import tqdm
+
+        _, axs = plt.subplots(1, self.batch_size, figsize=(100, 10))
+
+        for batch_index in tqdm(range(self.batch_size)):
+            x = self.nodes[batch_index].argmax(-1)
+            e = self.edges[batch_index].argmax(-1)
+            n_nodes = self.nodes_counts[batch_index]
+
+            nodes = x[:n_nodes]
+            edges_features = e[:n_nodes, :n_nodes]
+            # c_values_nodes = np.array([cmap_node[0 if i == 0 else i + 10] for i in nodes])
+
+            indices = np.indices(edges_features.shape).reshape(2, -1).T
+            mask = edges_features.flatten() != 0
+            edges = indices[mask]
+
+            # c_values_edges = np.array([cmap_edge[i] for i in edges[:, -1]])
+
+            G = nx.Graph()
+            # for i in range(n_nodes):
+            #     G.add_node(i)
+            for i in range(edges.shape[0]):
+                G.add_edge(edges[i, 0].tolist(), edges[i, 1].tolist())
+            pos = nx.spring_layout(G)  # positions for all nodes
+
+            cmap_edge = plt.cm.viridis(np.linspace(0, 1, self.edges.shape[-1]))
+            cmap_node = plt.cm.viridis(np.linspace(0, 1, self.nodes.shape[-1]))
+
+            color_nodes = numpy.array([cmap_node[i] for i in nodes])
+            color_edges = numpy.array(
+                [cmap_edge[edges_features[i, j]] for (i, j) in G.edges]
+            )
+            nx.draw(
+                G,
+                pos,
+                edge_color=color_edges,
+                node_color=color_nodes,
+                ax=axs[batch_index],
+            )
+            axs[batch_index].set_title(f"t={batch_index}")
+            axs[batch_index].set_aspect("equal")
+
+        plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
+        plt.show()
+
+    # overrides the square bracket indexing
+    def __getitem__(self, key: Int[Array, "n"]) -> "GraphDistribution":
+        return GraphDistribution.create(
+            nodes=self.nodes[key],
+            edges=self.edges[key],
+            nodes_counts=self.nodes_counts[key],
+            edges_counts=self.edges_counts[key],
+        )  # , mask=self.mask[key])
+
+    def repeat(self, n: int) -> "GraphDistribution":
+        return GraphDistribution.create(
+            nodes=np.repeat(self.nodes, n, axis=0),
+            edges=np.repeat(self.edges, n, axis=0),
+            nodes_counts=np.repeat(self.nodes_counts, n, axis=0),
+            edges_counts=np.repeat(self.edges_counts, n, axis=0),
+        )
+
+    def __len__(self):
+        return self.batch_size
+
+
+def is_dist(x):
+    return np.min(x) >= 0 and np.max(x) <= 1 and np.allclose(np.sum(x, -1), 1)

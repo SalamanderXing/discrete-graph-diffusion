@@ -93,7 +93,6 @@ gat = GAT(
     # in_edge_features=1,
     out_node_features=1,  # example_input.nodes.shape[-1],
     out_edge_features=1,  # example_input.edges.shape[-1],
-
 )
 
 vmd, vmd_params = VDM.create(

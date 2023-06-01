@@ -68,9 +68,9 @@ class ExtraFeatures:
                 E=extra_edge_attr,
                 y=torch.hstack((n, y_cycles, n_components, batched_eigenvalues)),
             )
-            #print("tmp.X.shape", tmp.X.shape)
-            #print("tmp.E.shape", tmp.E.shape)
-            #print("tmp.y.shape", tmp.y.shape)
+            # print("tmp.X.shape", tmp.X.shape)
+            # print("tmp.E.shape", tmp.E.shape)
+            # print("tmp.y.shape", tmp.y.shape)
         else:
             raise ValueError(f"Features type {self.features_type} not implemented")
 

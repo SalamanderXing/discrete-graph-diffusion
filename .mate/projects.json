@@ -1015,13 +1015,14 @@
                 "graph_transformer": {
                     "name": "graph_transformer",
                     "exports": [
-                        "GraphTransformer"
+                        "GraphTransformerProxy",
+                        "GraphTransformerProxy"
                     ],
                     "errors": [],
                     "dependencies": [
                         [
-                            "dacite",
-                            "1.8.0"
+                            "einops",
+                            "0.6.1"
                         ],
                         [
                             "flax",
@@ -1034,6 +1035,26 @@
                         [
                             "jax",
                             "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "rotary_embedding_torch",
+                            "0.2.3"
+                        ],
+                        [
+                            "shared",
+                            "0.0.27"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
                         ]
                     ],
                     "tags": []
@@ -1064,6 +1085,10 @@
                         [
                             "rich",
                             "13.3.5"
+                        ],
+                        [
+                            "shared",
+                            "0.0.27"
                         ]
                     ],
                     "tags": []
@@ -1105,7 +1130,41 @@
                         ],
                         [
                             "shared",
-                            "0.0.25"
+                            "0.0.27"
+                        ]
+                    ],
+                    "tags": []
+                },
+                "graph_transformer_digress": {
+                    "name": "graph_transformer_digress",
+                    "exports": [
+                        "GraphTransformer"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "dacite",
+                            "1.8.0"
+                        ],
+                        [
+                            "flax",
+                            "0.6.9"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "shared",
+                            "0.0.27"
                         ]
                     ],
                     "tags": []
@@ -1135,13 +1194,119 @@
                         ],
                         [
                             "shared",
-                            "0.0.25"
+                            "0.0.26"
                         ]
                     ],
                     "tags": []
                 }
             },
             "data_loaders": {
+                "qm92": {
+                    "name": "qm92",
+                    "exports": [
+                        "load_data"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "auto_mix_prep",
+                            "0.2.0"
+                        ],
+                        [
+                            "graph_tool",
+                            "2.11"
+                        ],
+                        [
+                            "imageio",
+                            "2.28.1"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "matplotlib",
+                            "3.7.1"
+                        ],
+                        [
+                            "networkx",
+                            "3.0"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "omegaconf",
+                            "2.3.0"
+                        ],
+                        [
+                            "overrides",
+                            "7.3.1"
+                        ],
+                        [
+                            "pandas",
+                            "2.0.1"
+                        ],
+                        [
+                            "pyemd",
+                            "1.0.0"
+                        ],
+                        [
+                            "PyGSP",
+                            "0.5.1"
+                        ],
+                        [
+                            "pytorch_lightning",
+                            "2.0.2"
+                        ],
+                        [
+                            "rdkit",
+                            "2023.3.1"
+                        ],
+                        [
+                            "scipy",
+                            "1.10.1"
+                        ],
+                        [
+                            "shared",
+                            "0.0.26"
+                        ],
+                        [
+                            "tensorflow",
+                            "2.12.0"
+                        ],
+                        [
+                            "torch",
+                            "2.0.1+cu118"
+                        ],
+                        [
+                            "torch_geometric",
+                            "2.3.1"
+                        ],
+                        [
+                            "tqdm",
+                            "4.65.0"
+                        ],
+                        [
+                            "wandb",
+                            "0.15.2"
+                        ]
+                    ],
+                    "tags": []
+                },
                 "qm9": {
                     "name": "qm9",
                     "exports": [],
@@ -1203,17 +1368,34 @@
                 "qm9_p": {
                     "name": "qm9_p",
                     "exports": [
-                        "QM9DataModule"
+                        "QM9DataModule",
+                        "load_data"
                     ],
                     "errors": [],
                     "dependencies": [
+                        [
+                            "h5py",
+                            "3.8.0"
+                        ],
                         [
                             "ipdb",
                             "0.13.9"
                         ],
                         [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
                             "numpy",
-                            "1.24.2"
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
                         ],
                         [
                             "omegaconf",
@@ -1225,23 +1407,39 @@
                         ],
                         [
                             "pandas",
-                            "1.5.3"
-                        ],
-                        [
-                            "pytorch_lightning",
                             "2.0.1"
                         ],
                         [
+                            "pytorch_lightning",
+                            "2.0.2"
+                        ],
+                        [
                             "rdkit",
-                            "2022.9.5"
+                            "2023.3.1"
+                        ],
+                        [
+                            "rich",
+                            "13.3.5"
+                        ],
+                        [
+                            "scipy",
+                            "1.10.1"
+                        ],
+                        [
+                            "shared",
+                            "0.0.27"
+                        ],
+                        [
+                            "tensorflow",
+                            "2.12.0"
                         ],
                         [
                             "torch",
-                            "2.0.0"
+                            "2.0.1+cu118"
                         ],
                         [
                             "torch_geometric",
-                            "2.3.0"
+                            "2.3.1"
                         ],
                         [
                             "tqdm",
@@ -1249,7 +1447,7 @@
                         ],
                         [
                             "wandb",
-                            "0.14.0"
+                            "0.15.2"
                         ]
                     ],
                     "tags": []
@@ -1356,10 +1554,6 @@
                             "2.12.0"
                         ],
                         [
-                            "torch",
-                            "2.0.1+cu118"
-                        ],
-                        [
                             "torch_geometric",
                             "2.3.1"
                         ]
@@ -1455,7 +1649,7 @@
                         ],
                         [
                             "shared",
-                            "0.0.25"
+                            "0.0.27"
                         ],
                         [
                             "wandb",
@@ -1472,6 +1666,10 @@
                     ],
                     "errors": [],
                     "dependencies": [
+                        [
+                            "chex",
+                            "0.1.7"
+                        ],
                         [
                             "dacite",
                             "1.8.0"
@@ -1501,8 +1699,24 @@
                             "3.7.1"
                         ],
                         [
+                            "memory_profiler",
+                            "0.61.0"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
                             "optax",
                             "0.1.5"
+                        ],
+                        [
+                            "orbax",
+                            "0.1.7"
                         ],
                         [
                             "rich",
@@ -1510,15 +1724,11 @@
                         ],
                         [
                             "shared",
-                            "0.0.26"
+                            "0.0.27"
                         ],
                         [
                             "tqdm",
                             "4.65.0"
-                        ],
-                        [
-                            "typeguard",
-                            "3.0.2"
                         ],
                         [
                             "wandb",
@@ -1563,6 +1773,57 @@
                     ],
                     "tags": []
                 },
+                "graph_distribution": {
+                    "name": "graph_distribution",
+                    "exports": [
+                        "GraphDistribution",
+                        "Q"
+                    ],
+                    "errors": [],
+                    "dependencies": [
+                        [
+                            "graph",
+                            "0.4"
+                        ],
+                        [
+                            "ipdb",
+                            "0.13.9"
+                        ],
+                        [
+                            "jax",
+                            "0.4.10"
+                        ],
+                        [
+                            "jax_dataclasses",
+                            "1.5.1"
+                        ],
+                        [
+                            "jaxtyping",
+                            "0.2.15"
+                        ],
+                        [
+                            "matplotlib",
+                            "3.7.1"
+                        ],
+                        [
+                            "networkx",
+                            "3.0"
+                        ],
+                        [
+                            "numpy",
+                            "1.23.5"
+                        ],
+                        [
+                            "numpy",
+                            "1.24.3"
+                        ],
+                        [
+                            "tqdm",
+                            "4.65.0"
+                        ]
+                    ],
+                    "tags": []
+                },
                 "encoder_decoder": {
                     "name": "encoder_decoder",
                     "exports": [
@@ -1600,7 +1861,7 @@
                         ],
                         [
                             "shared",
-                            "0.0.25"
+                            "0.0.27"
                         ]
                     ],
                     "tags": []
@@ -1628,8 +1889,42 @@
                     ],
                     "tags": []
                 },
+                "ddd_gat_tu_MUTAG_copy": {
+                    "name": "ddd_gat_tu_MUTAG_copy.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
                 "ddd_gat_tu_MUTAG": {
                     "name": "ddd_gat_tu_MUTAG.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "ddd_gat_tu_QM9": {
+                    "name": "ddd_gat_tu_QM9.py",
+                    "errors": [
+                        "The experiment should have at most one if statement (for the condition on train/test)"
+                    ],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": [
+                        "book"
+                    ]
+                },
+                "ddd_gat_simple_tu_MUTAG": {
+                    "name": "ddd_gat_simple_tu_MUTAG.py",
                     "errors": [],
                     "imports": [
                         "data_loaders",
@@ -1648,6 +1943,19 @@
                         "shared"
                     ],
                     "tags": []
+                },
+                "vdm_tr_QM9": {
+                    "name": "vdm_tr_QM9.py",
+                    "errors": [],
+                    "imports": [
+                        "shared",
+                        "data_loaders",
+                        "trainers",
+                        "models"
+                    ],
+                    "tags": [
+                        "book"
+                    ]
                 },
                 "ddd_gat_tu_PTC_MR": {
                     "name": "ddd_gat_tu_PTC_MR.py",
@@ -1709,6 +2017,26 @@
                         "trainers",
                         "models",
                         "shared"
+                    ],
+                    "tags": []
+                },
+                "ddd_tr_QM9": {
+                    "name": "ddd_tr_QM9.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": [
+                        "research"
+                    ]
+                },
+                "test": {
+                    "name": "test.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders"
                     ],
                     "tags": []
                 },

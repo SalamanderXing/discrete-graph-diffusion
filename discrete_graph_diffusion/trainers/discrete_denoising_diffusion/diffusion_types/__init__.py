@@ -13,4 +13,4 @@ with install_import_hook("diffusion_types", "typeguard.typechecked"):
     from .distribution import Distribution
     from .transition_model import TransitionModel
 
-    #Forward = 
+    # Forward =

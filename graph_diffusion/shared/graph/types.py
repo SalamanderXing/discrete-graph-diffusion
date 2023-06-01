@@ -18,9 +18,32 @@ Masks = Int[Array, "b"]
 class SimpleGraphDist:
     nodes: Float[Array, "bs m n"]
     edges: Float[Array, "bs m m e"]
-    nodes_counts: Float[Array, "bs m"]
-    edges_counts: Float[Array, "bs m m"]
-    node_masks: Float[Array, "bs m"]
+    nodes_counts: Int[Array, "bs"]
+    edges_counts: Int[Array, "bs"]
+    # node_masks: Float[Array, "bs m"]
+    _internal: bool = False
+
+    def __post_init__(self):
+        assert self._internal, "Graph must be created with Graph.create"
+
+    @classmethod
+    @typed
+    def create(
+        cls,
+        nodes: Float[Array, "bs m n"],
+        edges: Float[Array, "bs m m e"],
+        nodes_counts: Int[Array, "bs"],
+        edges_counts: Int[Array, "bs"],
+        # node_masks: Int[Array, "bs"],
+    ) -> "SimpleGraphDist":
+        return cls(
+            nodes,
+            edges,
+            nodes_counts,
+            edges_counts,
+            # node_masks,
+            _internal=True,
+        )
 
 
 @dataclass

@@ -38,5 +38,7 @@ class GraphTransformerConfig:
 
 
 initializers = {
-    "xavier_uniform": jax.nn.initializers.constant(0)# .lecun_normal()# jax.nn.initializers.glorot_normal()
+    "xavier_uniform": jax.nn.initializers.constant(
+        0
+    )  # .lecun_normal()# jax.nn.initializers.glorot_normal()
 }  # nn.initializers.xavier_uniform}

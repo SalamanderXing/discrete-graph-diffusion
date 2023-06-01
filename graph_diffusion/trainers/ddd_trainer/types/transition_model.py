@@ -1,6 +1,4 @@
 import jax.numpy as np
-from .q import Q
-from abc import ABC, abstractmethod
 from jax import Array
 from jaxtyping import Float, Int
 from mate.jax import SFloat, SInt, typed
@@ -9,8 +7,9 @@ import jax
 import ipdb
 
 # from .noise_schedule import NoiseSchedule
-from .q import Q
+from ....shared.graph_distribution import Q
 from .distribution import Distribution
+from .noise_schedules import NoiseSchedule_Scalar
 
 
 @typed
@@ -30,7 +29,9 @@ def cosine_beta_schedule_discrete(diffusion_steps: SInt, s=0.008) -> Float[Array
 def compute_noise_schedule(
     diffusion_steps: SInt,
 ) -> tuple[Float[Array, "n"], Float[Array, "n"], Float[Array, "n"]]:
-    betas = cosine_beta_schedule_discrete(diffusion_steps)
+    betas = cosine_beta_schedule_discrete(diffusion_steps, 10000.0)
+    # betas will be a linear schedule
+    # betas = np.linspace(0.0, 1.0, diffusion_steps)
     alphas = 1 - np.clip(betas, a_min=0, a_max=0.9999)
 
     log_alpha = np.log(alphas)
@@ -58,14 +59,22 @@ def get_timestep_embedding(
     return emb
 
 
+# @typed
+# def cumulative_matmul(qs: Q):
+#     def f(a, b):
+#         result = a @ b
+#         return result, result
+#
+#     return jax.lax.scan(f, qs, qs[0])[0]
+#
+
+
 @jdc.pytree_dataclass
 class TransitionModel(jdc.EnforcedAnnotationsMixin):
     prior: Distribution
     diffusion_steps: SInt
     qs: Q
     q_bars: Q
-    betas: Float[Array, "n"]
-    alphas: Float[Array, "n"]
     alpha_bars: Float[Array, "n"]
     temporal_embeddings: Float[Array, "temporal_embedding_dim"]
 
@@ -78,17 +87,25 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
         diffusion_steps: int,
         temporal_embedding_dim: int,
     ) -> "TransitionModel":
-        # TODO: review this
-        prior = Distribution(
-            x=x_priors, e=e_priors
-        )  # , y=np.ones(y_classes) / y_classes)
+        import matplotlib.pyplot as plt
+
+        # plt.plot(x_priors)
+        # x_priors = jax.nn.softmax((x_priors + 1e-6))
+        # plt.plot(x_priors)
+        # plt.show()
+        # e_priors = jax.nn.softmax(e_priors + 1e-6)
+        prior_type = "custom"
+        if prior_type == "uniform":
+            x_priors = np.ones(x_priors.shape[0]) / x_priors.shape[0]
+            e_priors = np.ones(e_priors.shape[0]) / e_priors.shape[0]
+        prior = Distribution(x=x_priors, e=e_priors)
         x_classes = len(x_priors)
         e_classes = len(e_priors)
         u_x = np.broadcast_to(x_priors[None, None], (1, x_classes, x_priors.shape[0]))
         u_e = np.broadcast_to(e_priors[None, None], (1, e_classes, e_priors.shape[0]))
         # u_y = np.ones((1, y_classes, y_classes)) / (y_classes if y_classes > 0 else 1)
         # noise_schedule = NoiseSchedule.create(0, diffusion_steps)  # 0 is cosine
-        betas, alphas, alphas_bar = compute_noise_schedule(diffusion_steps)
+        betas, _, alphas_bar = compute_noise_schedule(diffusion_steps)
         betas = betas[:, None, None]
         q_xs = betas * u_x + (1 - betas) * np.eye(x_classes)[None]
         q_es = (
@@ -99,15 +116,14 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
             )[None]
         )
         qs = Q(x=q_xs, e=q_es)
-
         alpha_bars = alphas_bar[:, None, None]
         q_bar_xs = alpha_bars * np.eye(x_classes)[None] + (1 - alpha_bars) * u_x
         q_bar_es = alpha_bars * np.eye(e_classes)[None] + (1 - alpha_bars) * u_e
         q_bars = Q(x=q_bar_xs, e=q_bar_es)
+        # q_bars_test = qs.cumulative_matmul()
         temporal_embeddings = get_timestep_embedding(
             np.arange(diffusion_steps), temporal_embedding_dim
         )
-        # + 1 because we dont want to touch the last embedding value, as that
         # corresponds to a null node
         temporal_embeddings = np.concatenate(
             (temporal_embeddings, np.zeros((temporal_embeddings.shape[0], 1))), axis=1
@@ -117,8 +133,6 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
             qs=qs,
             q_bars=q_bars,
             prior=prior,
-            alphas=alphas,
-            betas=betas,
-            alpha_bars=alpha_bars,
+            alpha_bars=alphas_bar,
             temporal_embeddings=temporal_embeddings,
         )

@@ -95,24 +95,36 @@ class TUDataModule(MolecularDataModule):
         # }
         # super().prepare_data(datasets)
         raw_dataset = TUDataset(
-            root=self.datadir, name="MUTAG", use_node_attr=True, use_edge_attr=True
+            root=self.datadir, name="PTC_MR", use_node_attr=True, use_edge_attr=True
         )
         n_nodes = {}
         node_features = []
         edge_features = []
+        node_counts = []
+        edge_counts = []
         for el in raw_dataset:
             n_nodes[el.num_nodes] = n_nodes.get(el.num_nodes, 0) + 1
+            node_counts.append(el.num_nodes)
+            edge_counts.append(el.num_edges)
             node_features.extend(el.x)
             edge_features.extend(el.edge_attr)
         n_nodes_tensor = t.tensor(list(n_nodes.items()))
         n_nodes_dist = t.zeros(n_nodes_tensor[:, 0].max() + 1)
         n_nodes_dist[n_nodes_tensor[:, 0]] = n_nodes_tensor[:, 1].float()
+        self.mean_n_nodes = np.mean(node_counts)
+        self.mean_n_edges = np.mean(edge_counts)
         self.n_nodes_dist = n_nodes_dist / n_nodes_dist.sum()
         assert self.n_nodes_dist.sum() == 1 and self.n_nodes_dist.min() >= 0
         self.node_features_dist = t.stack(node_features).mean(dim=0)
         self.edge_features_dist = t.stack(edge_features).mean(dim=0)
-        assert self.node_features_dist.sum() == 1 and self.node_features_dist.min() >= 0
-        assert self.edge_features_dist.sum() == 1 and self.edge_features_dist.min() >= 0
+        assert (
+            torch.allclose(self.node_features_dist.sum(), torch.tensor(1.0))
+            and self.node_features_dist.min() >= 0
+        )
+        assert (
+            torch.allclose(self.edge_features_dist.sum(), torch.tensor(1.0))
+            and self.edge_features_dist.min() >= 0
+        )
 
         train_size = int(len(raw_dataset) * 0.8)
         train_data = raw_dataset[:train_size]
@@ -120,9 +132,9 @@ class TUDataModule(MolecularDataModule):
         test_data = val_data
         super().prepare_data({"train": train_data, "val": val_data, "test": test_data})
 
-
     def prepare_data(self):
         pass
+
 
 class TUInfos(AbstractDatasetInfos):
     def __init__(self, datamodule, cfg, recompute_statistics=False):
@@ -139,6 +151,9 @@ class TUInfos(AbstractDatasetInfos):
         self.valencies = [i + 1 for i in reversed(range(len(self.n_nodes)))]
         self.max_weight = max(self.valencies)
         self.atom_weights = {i: i + 1 for i in range(len(self.n_nodes))}
+        self.mean_n_nodes = datamodule.mean_n_nodes
+        self.mean_n_edges = datamodule.mean_n_edges
+        self.use_bpe = True 
         self.input_dims = {
             "X": len(self.node_types),
             "E": len(self.edge_types),

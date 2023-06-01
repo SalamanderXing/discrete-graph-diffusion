@@ -19,7 +19,7 @@ from .noise_schedules import (
     NoiseSchedule_FixedLinear,
     NoiseSchedule_Scalar,
 )
-from ...shared.graph import Nodes, Edges, Graph
+from ...shared.graph_distribution import GraphDistribution
 
 
 class EncoderDecoder(nn.Module, metaclass=Interface):
@@ -95,7 +95,9 @@ class Conditioner(nn.Module):
 
     @typed
     @nn.compact
-    def __call__(self, z: Graph, g_t: Float[Array, "batch_size"], deterministic: bool):
+    def __call__(
+        self, z: GraphDistribution, g_t: Float[Array, "batch_size"], deterministic: bool
+    ):
         # Compute conditioning vector based on 'g_t' and 'conditioning'
         n_embd = self.num_time_embedding
 
@@ -120,9 +122,9 @@ class Conditioner(nn.Module):
         #     h = jnp.concatenate([z, z_f], axis=-1)
         # else:
         #     h = z
-        z = Graph.create(
+        z = GraphDistribution.create(
             nodes=jnp.concatenate([z.nodes, cond], axis=-1),
-            edges=z.edges,
+            e=z.edges,
             nodes_counts=z.nodes_counts,
             edges_counts=z.edges_counts,
         )
@@ -152,7 +154,7 @@ class VDM(nn.Module):
     def create(
         cls,
         config: VDMConfig,
-        example_input: Graph,
+        example_input: GraphDistribution,
         probability_model: nn.Module,
         encoder_decoder: EncoderDecoder,
         rng: Key,
@@ -200,7 +202,7 @@ class VDM(nn.Module):
             raise Exception("Unknown self.var_model")
 
     @typed
-    def __call__(self, x: Graph, deterministic: bool = True):
+    def __call__(self, x: GraphDistribution, deterministic: bool = True):
         g_0, g_1 = self.gamma(0.0), self.gamma(1.0)
         var_0, var_1 = nn.sigmoid(g_0), nn.sigmoid(g_1)
         n_batch = x.nodes.shape[0]

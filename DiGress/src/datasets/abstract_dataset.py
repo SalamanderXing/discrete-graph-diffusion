@@ -139,7 +139,7 @@ class AbstractDatasetInfos:
         add_one_for_unknown_reason = True
         if len(example_batch.y.shape) == 1:
             example_batch.y = example_batch.y.unsqueeze(1)
-            #add_one_for_unknown_reason = False
+            # add_one_for_unknown_reason = False
         self.input_dims = {
             "X": example_batch["x"].size(1),
             "E": example_batch["edge_attr"].size(1),

@@ -1,7 +1,17 @@
-dacite==1.8.0
+einops==0.6.1
 
 flax==0.6.9
 
 ipdb==0.13.9
 
 jax==0.4.10
+
+jaxtyping==0.2.15
+
+rich==13.3.5
+
+rotary_embedding_torch==0.2.3
+
+shared==0.0.27
+
+torch==2.0.1+cu118

@@ -72,7 +72,9 @@ class GuacamolDataset(InMemoryDataset):
     ):
         self.stage = stage
         self.filtered = filtered
-        self.filtered = False # FIXME: i had to put this because the other files did not exist.
+        self.filtered = (
+            False  # FIXME: i had to put this because the other files did not exist.
+        )
         if self.stage == "train":
             self.file_idx = 0
         elif self.stage == "val":

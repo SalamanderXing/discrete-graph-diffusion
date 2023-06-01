@@ -1,7 +1,7 @@
-#import tensorflow as tf
+# import tensorflow as tf
 from jax import config
 
-#tf.config.experimental.set_visible_devices([], "GPU")
+# tf.config.experimental.set_visible_devices([], "GPU")
 
 from jax.lib import xla_bridge
 

@@ -104,174 +104,6 @@ class GATLayer(nn.Module):
         return node_feats
 
 
-#
-#
-# class GATLayer(nn.Module):
-#     out_features: int  # Dimensionality of output features
-#     num_heads: int  # Number of heads, i.e. attention mechanisms to apply in parallel.
-#     n_nodes: int
-#     concat_heads: bool = True  # If True, the output of the different heads is concatenated instead of averaged.
-#     alpha: float = 0.2  # Negative slope of the LeakyReLU activation.
-#
-#     def setup(self):
-#         if self.concat_heads:
-#             assert (
-#                 self.out_features % self.num_heads == 0
-#             ), "Number of output features must be a multiple of the count of heads."
-#             c_out_per_head = self.out_features // self.num_heads
-#         else:
-#             c_out_per_head = self.out_features
-#
-#         # Sub-modules and parameters needed in the layer
-#         self.projection = nn.Dense(
-#             c_out_per_head * self.num_heads,
-#             kernel_init=nn.initializers.glorot_uniform(),
-#         )
-#         self.a = self.param(
-#             "a", nn.initializers.glorot_uniform(), (self.num_heads, 2 * c_out_per_head)
-#         )  # One per head
-#         self.to_adj = nn.Dense(self.n_nodes)
-#
-#     def edges_to_adj(self, edges: Edges) -> Edges:
-#         edges_reshape = edges.reshape((edges.shape[0] * edges.shape[1], edges.shape[2]))
-#         adj = nn.sigmoid(self.to_adj(edges_reshape))
-#         adj = adj.reshape((edges.shape[0], edges.shape[1], edges.shape[2]))
-#         # makes adj symmetric
-#         adj = adj + jnp.transpose(adj, (0, 2, 1))
-#         # applies sigmoid
-#         adj = jax.nn.sigmoid(adj)
-#         return adj
-#
-#     def __call__(self, node_feats: Nodes, edges: Edges, print_attn_probs=False):
-#         """
-#         Inputs:
-#             node_feats - Input features of the node. Shape: [batch_size, c_in]
-#             adj_matrix - Adjacency matrix including self-connections. Shape: [batch_size, num_nodes, num_nodes]
-#             print_attn_probs - If True, the attention weights are printed during the forward pass (for debugging purposes)
-#         """
-#         batch_size, num_nodes = node_feats.shape[0], node_feats.shape[1]
-#
-#         adj_matrix = self.edges_to_adj(edges)
-#         # Apply linear layer and sort nodes by head
-#         node_feats = self.projection(node_feats)
-#         node_feats = node_feats.reshape((batch_size, num_nodes, self.num_heads, -1))
-#
-#         # We need to calculate the attention logits for every edge in the adjacency matrix
-#         # In order to take advantage of JAX's just-in-time compilation, we should not use
-#         # arrays with shapes that depend on e.g. the number of edges. Hence, we calculate
-#         # the logit for every possible combination of nodes. For efficiency, we can split
-#         # a[Wh_i||Wh_j] = a_:d/2 * Wh_i + a_d/2: * Wh_j.
-#         pa = self.a[None, None, :, : self.a.shape[0] // 2]
-#         # ipdb.set_trace()
-#         logit_parent = (node_feats * pa).sum(axis=-1)
-#         pc = self.a[None, None, :, self.a.shape[0] // 2 :]
-#         ipdb.set_trace()
-#         logit_child = (node_feats * pc).sum(axis=-1)
-#
-#         attn_logits = logit_parent[:, :, None, :] + logit_child[:, None, :, :]
-#         attn_logits = nn.leaky_relu(attn_logits, self.alpha)
-#         # Mask out nodes that do not have an edge between them
-#         attn_logits = jnp.where(
-#             adj_matrix[..., None] > 0.5,
-#             attn_logits,
-#             jnp.ones_like(attn_logits) * (-9e15),
-#         )
-#
-#         # Weighted average of attention
-#         attn_probs = nn.softmax(attn_logits, axis=2)
-#         if print_attn_probs:
-#             print("Attention probs\n", attn_probs.transpose(0, 3, 1, 2))
-#         node_feats = jnp.einsum("bijh,bjhc->bihc", attn_probs, node_feats)
-#
-#         # If heads should be concatenated, we can do this by reshaping. Otherwise, take mean
-#         if self.concat_heads:
-#             node_feats = node_feats.reshape(batch_size, num_nodes, -1)
-#         else:
-#             node_feats = node_feats.mean(axis=2)
-#
-#         return node_feats
-#
-#
-# class GATLayerSimple(nn.Module):
-#     c_out: int  # Dimensionality of output features
-#     num_heads: int  # Number of heads, i.e. attention mechanisms to apply in parallel.
-#     concat_heads: bool = True  # If True, the output of the different heads is concatenated instead of averaged.
-#     alpha: float = 0.2  # Negative slope of the LeakyReLU activation.
-#
-#     def setup(self):
-#         if self.concat_heads:
-#             assert (
-#                 self.c_out % self.num_heads == 0
-#             ), "Number of output features must be a multiple of the count of heads."
-#             c_out_per_head = self.c_out // self.num_heads
-#         else:
-#             c_out_per_head = self.c_out
-#
-#         # Sub-modules and parameters needed in the layer
-#         self.projection = nn.Dense(
-#             c_out_per_head * self.num_heads,
-#             kernel_init=nn.initializers.glorot_uniform(),
-#         )
-#         self.a = self.param(
-#             "a", nn.initializers.glorot_uniform(), (self.num_heads, 2 * c_out_per_head)
-#         )  # One per head
-#
-#     def __call__(self, node_feats, adj_matrix, print_attn_probs=False):
-#         """
-#         Inputs:
-#             node_feats - Input features of the node. Shape: [batch_size, c_in]
-#             adj_matrix - Adjacency matrix including self-connections. Shape: [batch_size, num_nodes, num_nodes]
-#             print_attn_probs - If True, the attention weights are printed during the forward pass (for debugging purposes)
-#         """
-#         batch_size, num_nodes = node_feats.shape[0], node_feats.shape[1]
-#
-#         # Apply linear layer and sort nodes by head
-#         node_feats = self.projection(node_feats)
-#         node_feats = node_feats.reshape((batch_size, num_nodes, self.num_heads, -1))
-#
-#         # We need to calculate the attention logits for every edge in the adjacency matrix
-#         # In order to take advantage of JAX's just-in-time compilation, we should not use
-#         # arrays with shapes that depend on e.g. the number of edges. Hence, we calculate
-#         # the logit for every possible combination of nodes. For efficiency, we can split
-#         # a[Wh_i||Wh_j] = a_:d/2 * Wh_i + a_d/2: * Wh_j.
-#         logit_parent = (node_feats * self.a[None, None, :, : self.a.shape[0] // 2]).sum(
-#             axis=-1
-#         )
-#         logit_child = (node_feats * self.a[None, None, :, self.a.shape[0] // 2 :]).sum(
-#             axis=-1
-#         )
-#         attn_logits = logit_parent[:, :, None, :] + logit_child[:, None, :, :]
-#         attn_logits = nn.leaky_relu(attn_logits, self.alpha)
-#
-#         # Mask out nodes that do not have an edge between them
-#         attn_logits = jnp.where(
-#             adj_matrix[..., None] == 1.0,
-#             attn_logits,
-#             jnp.ones_like(attn_logits) * (-9e15),
-#         )
-#
-#         # Weighted average of attention
-#         attn_probs = nn.softmax(attn_logits, axis=2)
-#         if print_attn_probs:
-#             print("Attention probs\n", attn_probs.transpose(0, 3, 1, 2))
-#         node_feats = jnp.einsum("bijh,bjhc->bihc", attn_probs, node_feats)
-#
-#         # If heads should be concatenated, we can do this by reshaping. Otherwise, take mean
-#         if self.concat_heads:
-#             node_feats = node_feats.reshape(batch_size, num_nodes, -1)
-#         else:
-#             node_feats = node_feats.mean(axis=2)
-#
-#         return node_feats
-#
-
-# class SingleLayerWithEdges(nn.Module):
-#     @nn.compact
-#     def __call__(self, nodes_and_edges, _):
-#
-#         return (out_nodes, out_edges), None
-#
-
 from mate.jax import typed, Key
 
 
@@ -309,8 +141,62 @@ class GAT(nn.Module):
         )
         return model, params
 
+    @classmethod
+    @typed
+    def initialize(
+        cls,
+        key: Key,
+        batch_size: int,
+        n: int,
+        in_node_features: int,
+        in_edge_features: int,
+        out_node_features: int = -1,
+        out_edge_features: int = -1,
+        hidden_node_features: int = 64,
+        hidden_edge_features: int = 64,
+        num_layers: int = 2,
+        num_heads: int = 8,
+    ) -> tuple[nn.Module, FrozenDict]:
+        out_node_features = (
+            out_node_features if out_node_features > 0 else in_node_features
+        )
+        out_edge_features = (
+            out_edge_features if out_edge_features > 0 else in_edge_features
+        )
+        n_heads_per_layer = (num_heads,) * num_layers
+        model = cls(
+            n_heads_per_layer=n_heads_per_layer,
+            hidden_node_features=hidden_node_features,
+            hidden_edge_features=hidden_edge_features,
+        )
+
+        key_nodes, key_edges = jax.random.split(key, num=2)
+        nodes_shape = (batch_size, n, in_node_features)
+        edges_shape = (batch_size, n, n, in_edge_features)
+        nodes = jax.random.normal(key_nodes, nodes_shape)
+        edges = jax.random.normal(key_edges, edges_shape).argmax(-1).astype(float)
+        node_mask = jnp.ones((batch_size, n), dtype=bool)
+        print(f"[orange]Init nodes[/orange]: {nodes.shape}")
+        print(f"Init edges: {edges.shape}")
+        graph = Graph.create(
+            nodes=nodes,
+            edges=edges,
+            edges_counts=jnp.ones(batch_size, dtype=int),
+            nodes_counts=jnp.ones(batch_size, dtype=int),
+        )
+        params = model.init(
+            key,
+            nodes,
+            edges,
+        )
+        return model, params
+
     @nn.compact
-    def __call__(self, g: Graph, deterministic: bool = True) -> Graph:
+    def __call__(
+        self,
+        g: Graph,
+        deterministic: bool = True,
+    ) -> Graph:
         nodes = g.nodes
         edges = g.edges
         n_nodes = nodes.shape[1]

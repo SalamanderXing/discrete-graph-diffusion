@@ -11,7 +11,6 @@ class PlaceHolder:
         self.e = e
         self.y = y
 
-
     def __str__(self):
         return f"X: {self.x.shape}, E: {self.e.shape}, y: {self.y.shape}"
 

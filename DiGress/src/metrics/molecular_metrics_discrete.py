@@ -151,9 +151,6 @@ class AtomMetricsCE(MetricCollection):
 
         metrics_list = []
         for i, atom_type in enumerate(atom_decoder):
-            import ipdb
-
-            ipdb.set_trace()
             metrics_list.append(class_dict[atom_type](i))
         super().__init__(metrics_list)
 

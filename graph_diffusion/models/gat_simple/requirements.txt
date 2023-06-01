@@ -6,4 +6,4 @@ jax==0.4.10
 
 jaxtyping==0.2.15
 
-shared==0.0.25
+shared==0.0.26

@@ -1,4 +1,5 @@
 import torch
+import ipdb
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
@@ -202,6 +203,11 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         nll = self.compute_val_loss(
             pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=False
         )
+        if hasattr(self.dataset_info, "use_bpe") and self.dataset_info.use_bpe:
+            nll = nll / (
+                torch.log(torch.tensor(2.0)) * self.dataset_info.mean_n_edges * 2
+            )
+
         return {"loss": nll}
 
     def on_validation_epoch_end(self) -> None:
@@ -237,41 +243,41 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         print("Val loss: %.4f \t Best val loss:  %.4f\n" % (val_nll, self.best_val_nll))
 
         self.val_counter += 1
-        if self.val_counter % self.cfg.general.sample_every_val == 0:
-            start = time.time()
-            samples_left_to_generate = self.cfg.general.samples_to_generate
-            samples_left_to_save = self.cfg.general.samples_to_save
-            chains_left_to_save = self.cfg.general.chains_to_save
-
-            samples = []
-
-            ident = 0
-            while samples_left_to_generate > 0:
-                bs = 2 * self.cfg.train.batch_size
-                to_generate = min(samples_left_to_generate, bs)
-                to_save = min(samples_left_to_save, bs)
-                chains_save = min(chains_left_to_save, bs)
-                samples.extend(
-                    self.sample_batch(
-                        batch_id=ident,
-                        batch_size=to_generate,
-                        num_nodes=None,
-                        save_final=to_save,
-                        keep_chain=chains_save,
-                        number_chain_steps=self.number_chain_steps,
-                    )
-                )
-                ident += to_generate
-
-                samples_left_to_save -= to_save
-                samples_left_to_generate -= to_generate
-                chains_left_to_save -= chains_save
-            print("Computing sampling metrics...")
-            self.sampling_metrics(
-                samples, self.name, self.current_epoch, val_counter=-1, test=False
-            )
-            print(f"Done. Sampling took {time.time() - start:.2f} seconds\n")
-            self.sampling_metrics.reset()
+        # if self.val_counter % self.cfg.general.sample_every_val == 0:
+        #     start = time.time()
+        #     samples_left_to_generate = self.cfg.general.samples_to_generate
+        #     samples_left_to_save = self.cfg.general.samples_to_save
+        #     chains_left_to_save = self.cfg.general.chains_to_save
+        #
+        #     samples = []
+        #
+        #     ident = 0
+        #     while samples_left_to_generate > 0:
+        #         bs = 2 * self.cfg.train.batch_size
+        #         to_generate = min(samples_left_to_generate, bs)
+        #         to_save = min(samples_left_to_save, bs)
+        #         chains_save = min(chains_left_to_save, bs)
+        #         samples.extend(
+        #             self.sample_batch(
+        #                 batch_id=ident,
+        #                 batch_size=to_generate,
+        #                 num_nodes=None,
+        #                 save_final=to_save,
+        #                 keep_chain=chains_save,
+        #                 number_chain_steps=self.number_chain_steps,
+        #             )
+        #         )
+        #         ident += to_generate
+        #
+        #         samples_left_to_save -= to_save
+        #         samples_left_to_generate -= to_generate
+        #         chains_left_to_save -= chains_save
+        #     print("Computing sampling metrics...")
+        #     self.sampling_metrics(
+        #         samples, self.name, self.current_epoch, val_counter=-1, test=False
+        #     )
+        #     print(f"Done. Sampling took {time.time() - start:.2f} seconds\n")
+        #     self.sampling_metrics.reset()
 
     def on_test_epoch_start(self) -> None:
         print("Starting test...")
@@ -294,6 +300,12 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         nll = self.compute_val_loss(
             pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=True
         )
+        if hasattr(self.dataset_info, "use_bpe") and self.dataset_info.use_bpe:
+            ipdb.set_trace()
+            nll = nll / (
+                torch.log(torch.tensor(2.0)) * self.dataset_info.mean_n_edges * 2
+            )
+
         return {"loss": nll}
 
     def test_epoch_end(self, outs) -> None:
@@ -427,7 +439,6 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         kl_distance_E = F.kl_div(
             input=probE.log(), target=limit_dist_E, reduction="none"
         )
-
         return diffusion_utils.sum_except_batch(
             kl_distance_X
         ) + diffusion_utils.sum_except_batch(kl_distance_E)
@@ -482,10 +493,10 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             node_mask=node_mask,
         )
         kl_x = (self.test_X_kl if test else self.val_X_kl)(
-            prob_true.X, torch.log(prob_pred.X)
+            prob_true_X, prob_pred.X.log()
         )
         kl_e = (self.test_E_kl if test else self.val_E_kl)(
-            prob_true.E, torch.log(prob_pred.E)
+            prob_true_E, prob_pred.E.log()
         )
         return self.T * (kl_x + kl_e)
 

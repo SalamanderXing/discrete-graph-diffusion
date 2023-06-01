@@ -28,7 +28,8 @@ batch_size = 32
 data_key = random.PRNGKey(0)
 ds_name = "MUTAG"
 train_loader, test_loader, dataset_infos = load_data(
-    save_path=mate.save_dir, seed=data_key, batch_size=batch_size)
+    save_path=mate.save_dir, seed=data_key, batch_size=batch_size
+)
 training_config = TrainingConfig.from_dict(
     dict(
         diffusion_steps=500,

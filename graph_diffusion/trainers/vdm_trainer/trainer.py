@@ -23,7 +23,7 @@ from jax_tqdm import scan_tqdm
 
 from flax import linen as nn
 from mate.jax import Key, typed
-from ...shared.graph import Graph
+from ...shared.graph_distribution import GraphDistribution
 from .train_state import TrainState
 from . import utils
 
@@ -360,7 +360,7 @@ class Trainer:
 
         return new_state, metrics
 
-    def eval_step(self, base_rng, params, batch: Graph, eval_step=0):
+    def eval_step(self, base_rng, params, batch: GraphDistribution, eval_step=0):
         # rng = jax.random.fold_in(base_rng, jax.lax.axis_index("batch"))
         rng = jax.random.fold_in(base_rng, eval_step)
 
@@ -377,7 +377,7 @@ class Trainer:
         return metrics
 
     @typed
-    def loss_fn(self, params, inputs: Graph, rng, is_train):
+    def loss_fn(self, params, inputs: GraphDistribution, rng, is_train):
         rng, sample_rng = jax.random.split(rng)
         rngs = {"sample": sample_rng}
         if is_train:

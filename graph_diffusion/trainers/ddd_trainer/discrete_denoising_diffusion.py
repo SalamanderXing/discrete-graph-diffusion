@@ -2,6 +2,8 @@
 Entrypoint of the discrete denoising diffusion model.
 The function `train_model` is the main entrypoint.
 """
+import sys
+from memory_profiler import profile
 import os
 from typing import Callable, cast
 from jax import numpy as np, Array
@@ -22,18 +24,22 @@ from rich import print as print
 from tqdm import tqdm
 from flax.core.frozen_dict import FrozenDict
 from mate.jax import SFloat, SInt, SBool, SUInt, typed, Key, jit
+from orbax import checkpoint
+
 
 from ...shared.graph import SimpleGraphDist
+from ...shared.graph_distribution import GraphDistribution
 from . import diffusion_functions as df
 from .config import TrainingConfig
 from .types import (
-    GraphDistribution,
     TransitionModel,
 )
 
 
 class TrainState(train_state.TrainState):
     key: jax.random.KeyArray  # type: ignore
+    lr: SFloat
+    last_loss: SFloat
 
 
 @jdc.pytree_dataclass
@@ -42,24 +48,23 @@ class GetProbabilityFromState(jdc.EnforcedAnnotationsMixin):
     dropout_rng: Key
     transition_model: TransitionModel
 
-    @jit
+    @typed
     def __call__(
         self, g: GraphDistribution, t: Int[Array, "batch_size"]
     ) -> GraphDistribution:
-        temporal_embeddings = self.transition_model.temporal_embeddings[t][:, None]
+        temporal_embeddings = self.transition_model.temporal_embeddings[t]
         # print(f"[blue]Init nodes[/blue]: {g.x.shape}")
         # print(f"[orange]Init nodes[/orange]: {g.e.shape}")
-        pred_x, pred_e = self.state.apply_fn(
+        pred_graph = self.state.apply_fn(
             self.state.params,
-            g.x + temporal_embeddings,
-            g.e,
-            # g.mask,  # .astype(float),
+            g,
+            temporal_embeddings,
+            deterministic=True,
             rngs={"dropout": self.dropout_rng},
-            # deterministic=True,
         )
-        pred = GraphDistribution.masked(
-            x=jax.nn.softmax(pred_x, -1),
-            e=jax.nn.softmax(pred_e, -1),
+        pred = GraphDistribution.create(
+            nodes=jax.nn.softmax(pred_graph.nodes, -1),
+            edges=jax.nn.softmax(pred_graph.edges, -1),
             edges_counts=g.edges_counts,
             nodes_counts=g.nodes_counts,
         )
@@ -78,18 +83,18 @@ class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
     def __call__(
         self, g: GraphDistribution, t: Int[Array, "batch_size"]
     ) -> GraphDistribution:
-        temporal_embeddings = self.transition_model.temporal_embeddings[t][:, None]
-        pred_x, pred_e = self.state.apply_fn(
+        temporal_embeddings = self.transition_model.temporal_embeddings[t]
+        pred_graph = self.state.apply_fn(
             self.params,
-            g.x + temporal_embeddings,
-            g.e,
-            # g.mask,  # .astype(float),
+            g,
+            temporal_embeddings,
+            deterministic=False,
             rngs={"dropout": self.dropout_rng},
             # deterministic=False,
         )
-        pred = GraphDistribution.masked(
-            x=jax.nn.softmax(pred_x, -1),
-            e=jax.nn.softmax(pred_e, -1),
+        pred = GraphDistribution.create(
+            nodes=jax.nn.softmax(pred_graph.nodes, -1),
+            edges=jax.nn.softmax(pred_graph.edges, -1),
             edges_counts=g.edges_counts,
             nodes_counts=g.nodes_counts,
         )
@@ -97,30 +102,48 @@ class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
         return pred
 
 
-@typed
+@jit
 def compute_train_loss(
-    pred_graph: GraphDistribution,
-    q_g_s: GraphDistribution,
-    lambda_train_e: SFloat = 0.0,
+    g: GraphDistribution,
+    rng: Key,
+    transition_model: TransitionModel,
+    get_probability: Callable[
+        [GraphDistribution, Int[Array, "batch_size"]], GraphDistribution
+    ],
 ):
+    t = jax.random.randint(rng, (g.batch_size,), 1, len(transition_model.q_bars))
+    q_bars = transition_model.q_bars[t]
+    z = (g @ q_bars).sample_one_hot(rng)
+    pred_graph = get_probability(z, t)
     loss_fn = optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
-    true_x = q_g_s.x.reshape(-1, q_g_s.x.shape[-1])  # (bs*n, dx)
-    true_e = q_g_s.e.reshape(-1, q_g_s.e.shape[-1])  # (bs*n*n, de)
-    pred_x = pred_graph.x.reshape(-1, pred_graph.x.shape[-1])  # (bs*n, dx)
-    pred_e = pred_graph.e.reshape(-1, pred_graph.e.shape[-1])  # (bs*n*n, de)
+    true_x = g.nodes.reshape(-1, g.nodes.shape[-1])  # (bs*n, dx)
+    true_e = g.edges.reshape(-1, g.edges.shape[-1])  # (bs*n*n, de)
+    pred_x = pred_graph.nodes.reshape(-1, pred_graph.nodes.shape[-1])  # (bs*n, dx)
+    pred_e = pred_graph.edges.reshape(-1, pred_graph.edges.shape[-1])  # (bs*n*n, de)
 
     # Remove masked rows
-    mask_x = (true_x != 0).any(axis=-1)
-    mask_e = (true_e != 0).any(axis=-1)
+    mask_x, mask_e = g.masks()
 
-    loss_x = np.where(mask_x, loss_fn(pred_x, true_x).mean(-1), 0).sum() / mask_x.sum()
-    loss_e = np.where(mask_e, loss_fn(pred_e, true_e).mean(-1), 0).sum() / mask_e.sum()
+    # loss_x = np.where(mask_x, loss_fn(pred_x, true_x).mean(-1), 0).sum() / mask_x.sum()
+    # loss_e = np.where(mask_e, loss_fn(pred_e, true_e).mean(-1), 0).sum() / mask_e.sum()
+    n = g.nodes.shape[1]
+    uba = loss_fn(pred_x, true_x).reshape(g.batch_size, n, -1).mean(-1)
+    alla = loss_fn(pred_e, true_e).reshape(g.batch_size, n, n, -1).mean(-1)
+    loss_x = (uba * mask_x).sum()
+    loss_e = (alla * mask_e).sum()
+    rec_loss = loss_x + loss_e
+    reconstruction_logp = df.reconstruction_logp(
+        rng_key=rng,
+        g=g,
+        transition_model=transition_model,
+        get_probability=get_probability,
+        n_samples=1,
+        base=np.e,
+    )
+    return -reconstruction_logp.mean() + rec_loss
 
-    # return loss_x + lambda_train_e * loss_e  # + lambda_train_y * loss_y
-    return loss_x + loss_e
 
-
-@typed
+@jit
 def compute_val_loss(
     *,
     diffusion_steps: SInt,
@@ -132,19 +155,23 @@ def compute_val_loss(
     nodes_dist: Array,
     rng_key: Key,
     full: SBool = False,
+    bits_per_edge: SBool = False,
 ) -> dict[str, Float[Array, "batch_size"]]:
-    # TODO: ask jamie, can you guess why there were other terms in this loss in the original code?
-    # 2. The KL between q(z_T | x) and p(z_T) = Uniform(1/num_classes). Should be close to zero.
+    base = jax.lax.select(bits_per_edge, 2.0, np.e)
+
+    # 1.  log_prob of the target graph under the nodes distribution (based on # of nodes)
+    log_probs = np.log(nodes_dist[target.nodes_counts]) / np.log(base)
+
+    # 2. The KL between q(z_T | x) and p(z_T) = (simply an Empirical prior). Should be close to zero.
     kl_prior = df.kl_prior(
         target=target,
-        diffusion_steps=diffusion_steps,
         transition_model=transition_model,
+        bits_per_edge=bits_per_edge,
     )
     # 3. Diffusion loss
     loss_all_t = df.compute_lt(
         rng=rng_key,
         g=target,
-        n_t_samples=1 if not full else 0,
         diffusion_steps=diffusion_steps,
         transition_model=transition_model,
         get_probability=get_probability,
@@ -157,23 +184,13 @@ def compute_val_loss(
         transition_model=transition_model,
         get_probability=get_probability,
         n_samples=1,
+        base=base,
     )
-    # jprint(
-    #     "{kl_prior} {loss_all_t} {reconstruction_logp}",
-    #     kl_prior=kl_prior,
-    #     loss_all_t=loss_all_t,
-    #     reconstruction_logp=reconstruction_logp,
-    # )
-    # print(f"{kl_prior=} {loss_all_t=} {reconstruction_logp=}")
-    # log_n = np.log()
-    base = 2
-    current_node_sizes = (target.x[:, :, -1] == 0).sum(-1)
-    assert (current_node_sizes <= target.x.shape[1]).all()
-    log_probs = np.log(nodes_dist[current_node_sizes]) / np.log(base)
-    # n_edges = (target.e[..., -1] == 0).sum((1, 2))
-    # print(f"{n_edges=}")
-    # n_edges = target.e.shape[1] * (target.e.shape[1] - 1)
-    edges_counts = target.edges_counts * 2
+    # assert (current_node_sizes <= target.x.shape[1]).all()
+
+    edges_counts = jax.lax.select(
+        bits_per_edge, target.edges_counts * 2, np.ones(len(target.edges_counts), int)
+    )
     tot_loss = (-log_probs + kl_prior + loss_all_t - reconstruction_logp) / edges_counts
     return {
         "kl_prior": kl_prior / edges_counts,
@@ -211,55 +228,38 @@ def train_step(
     rng: Key,
     diffusion_steps: SInt,
     transition_model: TransitionModel,
+    nodes_dist: Array,
+    bits_per_edge: bool = True,
 ):  # -> tuple[TrainState, Float[Array, "batch_size"]]:
     dropout_train_key = jax.random.fold_in(key=rng, data=state.step)
-    # t, z_t = df.apply_random_noise(
-    #     graph=g,
-    #     test=np.array(False),
-    #     rng=rng,
-    #     diffusion_steps=diffusion_steps,
-    #     transition_model=transition_model,
-    # )
-    # temporal_embeddings = transition_model.temporal_embeddings[t][:, None]
-    # z_t = z_t.set("x", z_t.x + temporal_embeddings)
-    # q_s = transition_model.q_bars[t - 1]
-    # q_g_s = g @ q_s
 
     def loss_fn(params: FrozenDict):
-        # pred_x, pred_e = state.apply_fn(  # TODO: suffix dist for distributions
-        #     params,
-        #     z_t.x,
-        #     z_t.e,
-        #     z_t.mask,
-        #     rngs={"dropout": dropout_train_key},
-        # )
-        # pred = GraphDistribution.masked(
-        #     x=pred_x,
-        #     e=pred_e,
-        #     mask=z_t.mask,
-        # )  # consider changing the name of this class to something that suggests ditribution
-
-        # loss = compute_train_loss(
-        #     pred_graph=pred,
-        #     q_g_s=q_g_s,
-        # )
         get_probability = GetProbabilityFromParams(
             state=state,
             params=params,
             transition_model=transition_model,
             dropout_rng=dropout_train_key,
         )
-        loss = df.compute_lt(
-            rng=rng,
+        # losses = compute_val_loss(
+        #     target=g,
+        #     diffusion_steps=diffusion_steps,
+        #     transition_model=transition_model,
+        #     rng_key=rng,
+        #     get_probability=get_probability,
+        #     nodes_dist=nodes_dist,
+        #     full=False,
+        #     bits_per_edge=bits_per_edge,
+        # )
+        losses = compute_train_loss(
             g=g,
-            n_t_samples=1,
-            diffusion_steps=diffusion_steps,
             transition_model=transition_model,
+            rng=rng,
             get_probability=get_probability,
         )
 
         # jprint("loss {loss}", loss=loss)
-        return loss.mean(), None
+        # return losses["bpe"].mean(), None
+        return losses, None
 
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
@@ -267,8 +267,9 @@ def train_step(
     # grads = jax.tree_map(
     #     lambda x: np.where(np.isnan(x), 0.0, x), grads
     # )  # remove the nans :(
+    # state = state.replace()
     state = state.apply_gradients(grads=grads)
-    return state, loss
+    return state, loss * g.batch_size
 
 
 @typed
@@ -288,6 +289,7 @@ def run_model(
     nodes_dist: Array,
     nodes_prior: Array,
     edges_prior: Array,
+    bits_per_edge: bool,
 ) -> float:
     train_loader = cast(Iterable[SimpleGraphDist], train_loader)
     val_loader = cast(Iterable[SimpleGraphDist], val_loader)
@@ -311,7 +313,7 @@ def run_model(
             nodes_dist=nodes_dist,
         )
         print(f"Validation loss: {best_val_loss:.4f} time: {val_time:.4f}")
-    elif action == "train":
+    elif action in ("train", "restart"):
         best_val_loss = train_all_epochs(
             num_epochs=num_epochs,
             rngs=rngs,
@@ -323,6 +325,8 @@ def run_model(
             save_path=save_path,
             ds_name=ds_name,
             nodes_dist=nodes_dist,
+            bits_per_edge=bits_per_edge,
+            restart=action == "restart",
         )
     elif action == "sample":
         get_probability = GetProbabilityFromState(
@@ -337,16 +341,65 @@ def run_model(
             node_embedding_size=config.node_embedding_size,
             edge_embedding_size=config.edge_embedding_size,
         )
+
+    elif action == "plot_noise":
+        os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)
+        plot_noised_graphs(
+            val_loader, transition_model, os.path.join(save_path, "plots")
+        )
     else:
         raise ValueError(f"Unknown action {action}")
 
     return best_val_loss
 
 
+def noise(transition_model, g, t, rng):
+    q = transition_model.q_bars[np.array(t)[None]]
+    probs = g @ q
+    noised = probs.sample_one_hot(rng)
+    return noised
+
+
+@typed
+def plot_noised_graphs(train_loader, transition_model: TransitionModel, save_path: str):
+    print(f"Plotting noised graphs to {save_path}")
+    T = len(transition_model.q_bars)
+    simple = next(iter(train_loader))
+    g = GraphDistribution.from_simple(simple)[np.array([0])].repeat(
+        len(transition_model.q_bars)
+    )
+    rng = jax.random.PRNGKey(0)
+    # new_file_name = os.path.join(save_path, f"noise_original.png")
+    # g.plot(location=new_file_name)
+    # q = transition_model.q_bars[np.array(45)[None]]
+    # probs_1 = g @ q
+    # q = transition_model.q_bars[np.array(20)[None]]
+    # probs_2 = g @ q
+    # noised = probs_1.sample_one_hot(rng)
+    # file_name = os.path.join(save_path, f"noise_test.png")
+    # noised_graph = noised.plot(location=file_name)
+    timesteps = np.arange(len(transition_model.alpha_bars))
+    q_bars = transition_model.q_bars[timesteps]
+    probs = (g @ q_bars).sample_one_hot(rng)
+    probs.plot()
+
+
 def prettify(val: dict[str, Float[Array, ""]]) -> dict[str, float]:
     return {k: float(f"{v.tolist():.4f}") for k, v in val.items()}
 
 
+def get_optimizer(lr):
+    return optax.chain(
+        optax.clip_by_global_norm(10.0),
+        optax.adamw(learning_rate=lr, weight_decay=1e-5),
+    )
+
+
+def save_stuff():
+    pass
+
+
+# @typed
 @typed
 def train_all_epochs(
     num_epochs: int,
@@ -359,11 +412,43 @@ def train_all_epochs(
     save_path: str,
     ds_name: str,
     nodes_dist: Array,
+    bits_per_edge: bool,
+    from_epoch: int = 0,
+    restart: bool = False,
 ):
+    orbax_checkpointer = checkpoint.PyTreeCheckpointer()
+    options = checkpoint.CheckpointManagerOptions(max_to_keep=2, create=True)
+    checkpoint_manager = checkpoint.CheckpointManager(
+        save_path, orbax_checkpointer, options
+    )
+    if restart:
+        print("Restarting training")
+        if checkpoint_manager.latest_step() is not None:
+            state_dict = checkpoint_manager.restore(checkpoint_manager.latest_step())
+            state = TrainState(
+                tx=get_optimizer(lr=state_dict["lr"]),
+                apply_fn=state.apply_fn,
+                **{k: v for k, v in state_dict.items()},
+            )
+            print(
+                f"[yellow]Restored from epoch {checkpoint_manager.latest_step()}[/yellow]"
+            )
+        else:
+            print("[yellow]No checkpoint found, starting from scratch[/yellow]")
+
     val_losses = []
     train_losses = []
-    for epoch_idx in range(1, num_epochs + 1):
-        rng, _ = jax.random.split(rngs["params"])
+    patience = 3
+    current_patience = patience
+    rng, _ = jax.random.split(rngs["params"])
+    for epoch_idx in range(from_epoch, num_epochs):
+        rng, rng_this_epoch = jax.random.split(rng) # TODO use that
+        print(
+            "\n".join(
+                f"{name} : {sys.getsizeof(value):.2f} B"
+                for name, value in locals().items()
+            )
+        )
         print(
             f"[green bold]Epoch[/green bold]: {epoch_idx} \n\n[underline]Validating[/underline]"
         )
@@ -377,8 +462,28 @@ def train_all_epochs(
         )
         val_losses.append(val_loss)
         print(
-            f"[green underline]Validation[/green underline] \ncurrent={prettify(val_loss)}\nbest={prettify(min(val_losses, key=lambda x: x['eval_bpe']))}\ntime={val_time:.4f}"
+            f"""[green underline]Validation[/green underline]
+            current={prettify(val_loss)}
+            best={prettify(min(val_losses, key=lambda x: x['eval_bpe']))}
+            time={val_time:.4f}"""
         )
+        avg_loss = val_losses[-1]["eval_bpe"]
+        if state.last_loss < avg_loss:
+            if current_patience == 0:
+                new_lr = state.lr * 0.1
+                if new_lr >= 1e-05:
+                    print(
+                        f"[red] learning rate did not decrease. Reducing lr to {new_lr} [/red]"
+                    )
+                    state = state.replace(
+                        lr=new_lr, tx=get_optimizer(new_lr), last_loss=avg_loss
+                    )
+                    current_patience = patience
+            else:
+                current_patience -= 1
+        if avg_loss < state.last_loss:
+            state = state.replace(last_loss=avg_loss)
+
         state, train_loss, train_time = train_epoch(
             rng=rng,
             state=state,
@@ -386,28 +491,18 @@ def train_all_epochs(
             epoch=epoch_idx,
             diffusion_steps=config.diffusion_steps,
             transition_model=transition_model,
+            nodes_dist=nodes_dist,
+            bits_per_edge=bits_per_edge,
         )
         train_losses.append(train_loss)
+
+        wandb.log({"train_loss": train_loss, "val_loss": val_loss}, epoch_idx)
         print(
             f"[red underline]Train[/red underline]\nloss={train_loss:.5f} best={min(train_losses):.5f} time={train_time:.4f}"
         )
-        wandb.log({"train_loss": train_loss, "val_loss": val_loss}, epoch_idx)
-
-        # import json
-        #
-        # with open(os.path.join(save_path, "val_losses.json"), "w") as f:
-        #     json.dump(val_losses, f)
-        #
-        # with open(os.path.join(save_path, "train_losses.json"), "w") as f:
-        #     json.dump(train_losses, f)
-        #
-        # if val_loss == min(val_losses):
-        #     print("Saving model")
-        #     import pickle
-        #
-        #     pickle.dump(
-        #         state.params, open(os.path.join(save_path, "checkpoint.pickle"), "wb")
-        #     )
+        print(f"[yellow] Saving checkpoint[/yellow]")
+        checkpoint_manager.save(epoch_idx, state)
+        print(f"[yellow] Saved! [/yellow]")
 
     rng, _ = jax.random.split(rngs["params"])
     val_loss, val_time = val_epoch(
@@ -432,48 +527,25 @@ def setup(
     nodes_prior: Array,
     edges_prior: Array,
 ):
-    cosine_decay_scheduler = optax.cosine_decay_schedule(
-        0.0001, decay_steps=epochs, alpha=0.95
-    )
+    # scheduler = optax.cosine_decay_schedule(
+    #     0.001, decay_steps=epochs, alpha=0.95
+    # )
+    # scheduler = optax.linear_schedule(0.001, 0.000001, 1)
+    initial_lr = lr
     state = TrainState.create(
         apply_fn=model.apply,
         params=params,
-        tx=optax.adam(cosine_decay_scheduler),
+        tx=get_optimizer(initial_lr),
         key=rngs["dropout"],
+        last_loss=1000000,
+        lr=initial_lr,
     )
-    """
-    The following is the prior of the data. It is used to generate matrices Q_t, 
-    and also to compute the prior loss term in the ELBO.
-    """
-    # Key idea proposed in the DiGress paper: use the prior distribution to gnerate Q_t
-    # These priors are extracted from the dataset.
-    # transition_model = TransitionModel.create(
-    #     x_priors=np.array(
-    #         [
-    #             0.7230000495910645,
-    #             0.11510000377893448,
-    #             0.15930001437664032,
-    #             0.0026000002399086952,
-    #         ]
-    #     ),
-    #     e_priors=np.array(
-    #         [
-    #             0.7261000275611877,
-    #             0.23839999735355377,
-    #             0.027400000020861626,
-    #             0.008100000210106373,
-    #             0.0,
-    #         ]
-    #     ),
-    #     diffusion_steps=config.diffusion_steps,
-    #     temporal_embedding_dim=4,  # FIXME: same as the node embedding. Should improve this parametrization
-    # )
+
     transition_model = TransitionModel.create(
         x_priors=nodes_prior,
         e_priors=edges_prior,
         diffusion_steps=config.diffusion_steps,
-        temporal_embedding_dim=config.num_node_features
-        - 1,  # FIXME: same as the node embedding. Should improve this parametrization
+        temporal_embedding_dim=128,
     )
     return state, transition_model
 
@@ -487,6 +559,7 @@ def val_step(
     rng: Key,
     transition_model: TransitionModel,
     nodes_dist: Array,
+    bits_per_edge: bool = False,
     full=False,
 ) -> dict[str, Float[Array, "batch_size"]]:
     dropout_test_key = jax.random.fold_in(key=rng, data=state.step)
@@ -502,6 +575,7 @@ def val_step(
         get_probability=get_probability,
         nodes_dist=nodes_dist,
         full=full,
+        bits_per_edge=bits_per_edge,
     )
 
 
@@ -551,11 +625,14 @@ def train_epoch(
     diffusion_steps: SInt,
     rng: Key,
     transition_model: TransitionModel,
+    nodes_dist: Array,
+    bits_per_edge: bool = True,
 ):
     run_losses = []
     tot_len: int = 0
     t0 = time()
-    n_train_steps = 100
+    n_train_steps = 20
+    print(f"[pink] {state.lr=} [/pink]")
     for batch_index in tqdm(range(n_train_steps)):
         simple_graph_dist = next(train_loader)
         graph_dist = GraphDistribution.from_simple(simple_graph_dist)
@@ -568,9 +645,12 @@ def train_epoch(
             diffusion_steps=diffusion_steps,
             rng=rng,
             transition_model=transition_model,
+            nodes_dist=nodes_dist,
+            bits_per_edge=bits_per_edge,
         )
+
         run_losses.append(loss)
+    avg_loss = np.mean(np.array(run_losses)).tolist()
     t1 = time()
     tot_time = t1 - t0
-    avg_loss = np.mean(np.array(run_losses)).tolist()
     return state, avg_loss, tot_time

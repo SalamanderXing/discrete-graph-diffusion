@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import jax_dataloader as jdl
 from jax import random
 
+
 def to_dense(x, edge_index, edge_attr, batch):
     x, node_mask = to_dense_batch(x=x, batch=batch)
     edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)

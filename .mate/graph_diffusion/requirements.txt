@@ -30,7 +30,7 @@ chardet==3.0.4
 charset-normalizer==3.1.0
 chex==0.1.7
 click==8.1.3
-cloud-init==23.1.2
+cloud-init==23.2
 clu==0.0.9
 cmake==3.25.0
 configobj==5.0.8
@@ -39,7 +39,7 @@ contourpy==1.0.7
 cryptography==40.0.2
 cssselect==1.2.0
 cycler==0.11.0
-Cython==0.29.34
+Cython==0.29.35
 dacite==1.8.0
 decorator==5.1.1
 dill==0.3.6
@@ -49,13 +49,14 @@ dm-tree==0.1.8
 dnspython==2.3.0
 docker-pycreds==0.4.0
 docopt==0.6.2
+einops==0.6.1
 emoji-search==1.2.0
 etils==1.2.0
 evdev==1.6.1
 eventlet==0.33.3
 executing==1.2.0
 fastapi==0.95.1
-fastjsonschema==2.16.3
+fastjsonschema==2.17.1
 fcd-torch==1.0.7
 ffmpy==0.3.0
 filelock==3.9.0
@@ -114,7 +115,7 @@ jsonpatch==1.32
 jsonpointer==2.3
 jsonschema==4.17.3
 keras==2.12.0
-keyring==23.11.0
+keyring==23.13.1
 kiwisolver==1.4.4
 lensfun==0.3.3
 libclang==16.0.0
@@ -127,11 +128,12 @@ lxml==4.9.2
 Markdown==3.4.3
 markdown-it-py==2.2.0
 MarkupSafe==2.1.2
--e git+https://github.com/salamanderxing/mate@ad9f1b0a0e8f3c7cd3a82f5d8d344dd7fa728d96#egg=mate
+-e git+https://github.com/salamanderxing/mate@0506c94522e0455a55c11f37aa77bad777ce21e4#egg=mate
 matplotlib==3.7.1
 matplotlib-inline==0.1.6
 mdit-py-plugins==0.3.3
 mdurl==0.1.2
+memory-profiler==0.61.0
 mini-moses @ git+https://github.com/igor-krawczuk/mini-moses@1eda77fcc13045a93024835d403ff61634ac4b69
 ml-collections==0.1.1
 ml-dtypes==0.1.0
@@ -164,7 +166,7 @@ orbax-checkpoint==0.2.2
 ordered-set==4.1.0
 orjson==3.8.12
 overrides==7.3.1
-packaging==23.0
+packaging==23.1
 pandas==2.0.1
 parso==0.8.3
 pathos==0.3.0
@@ -174,7 +176,7 @@ pexpect==4.8.0
 pickleshare==0.7.5
 Pillow==9.3.0
 pipreqs==0.4.13
-platformdirs==3.5.0
+platformdirs==3.5.1
 ply==3.11
 pox==0.3.2
 ppft==1.7.6.6
@@ -189,7 +191,7 @@ pyasn1==0.5.0
 pyasn1-modules==0.3.0
 pycairo==1.23.0
 pycparser==2.21
-pydantic==1.10.7
+pydantic==1.10.8
 pydub==0.25.1
 pyemd==1.0.0
 PyExecJS==1.5.1
@@ -208,7 +210,7 @@ python-xlib==0.33
 pythondialog==3.5.3
 pytorch-lightning==2.0.2
 pytz==2023.3
-pyudev==0.24.0
+pyudev==0.24.1
 pyxdg==0.28
 PyYAML==6.0
 rdkit==2023.3.1
@@ -218,6 +220,7 @@ requests==2.28.2
 requests-oauthlib==1.3.1
 rfc3986==1.5.0
 rich==13.3.5
+rotary-embedding-torch==0.2.3
 rsa==4.9
 scantree==0.0.1
 scikit-learn==1.2.2
@@ -247,6 +250,7 @@ tensorflow-metadata==1.13.1
 tensorstore==0.1.36
 termcolor==2.3.0
 threadpoolctl==3.1.0
+tokenize-rt==5.0.0
 toml==0.10.2
 tomli==2.0.1
 toolz==0.12.0
@@ -259,15 +263,15 @@ tqdm==4.65.0
 traitlets==5.9.0
 translators==5.7.1
 triton==2.0.0
-trove-classifiers==2023.4.29
+trove-classifiers==2023.5.25
 typeguard==3.0.2
-typing_extensions==4.5.0
+typing_extensions==4.6.2
 tzdata==2023.3
 uc-micro-py==1.0.2
 urllib3==1.26.15
 uvicorn==0.22.0
 validate==5.0.8
-validate-pyproject==0.12.2.post1.dev0+g2940279.d20230508
+validate-pyproject==0.13.post1.dev0+gb752273.d20230520
 validators==0.20.0
 wandb==0.15.2
 wcwidth==0.2.6

@@ -340,6 +340,3 @@ def sample_p_zs_given_zt(
     return out_one_hot.mask(node_mask).type_as(y_t), out_discrete.mask(
         node_mask, collapse=True
     ).type_as(y_t)
-
-
-
