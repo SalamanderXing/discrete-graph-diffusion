@@ -26,8 +26,8 @@ from mate import mate
 # from ..data_loaders.tu import load_data
 from ..data_loaders.qm92 import load_data
 import os
-from ..models.graph_transformer import GraphTransformer
-from ..trainers.ddd_trainer import run_model, TrainingConfig
+from ..models.graph_transformer import GraphTransformerGraphDistribution
+from ..trainers.ddgd_trainer import run_model, TrainingConfig
 import ipdb
 from jax import numpy as np
 from jax import random
@@ -72,7 +72,7 @@ training_config = TrainingConfig.from_dict(
     )
 )
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
-model, params = GraphTransformer.initialize(
+model, params = GraphTransformerGraphDistribution.initialize(
     key=rngs["params"],
     in_node_features=dataset.node_prior.shape[-1],
     in_edge_features=dataset.edge_prior.shape[-1],

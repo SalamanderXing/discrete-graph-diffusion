@@ -77,18 +77,7 @@ def create_graph(nodes, edges, edges_counts, nodes_counts, train=False):
         nodes = nodes.squeeze(-1)
     if train:
         batch_size, n, _ = nodes.shape
-
-        # if np.random.rand() < 0.5:
-        #     # takes a subgraph
-        #     max_n = np.max(nodes_counts)
-        #     new_nodes_counts = np.random.randint(1, max_n, size=batch_size)
-        #     # ipdb.set_trace()
-        #     for i in range(batch_size):
-        #         nodes[i, new_nodes_counts[i] :] = np.eye(nodes.shape[-1])[0]
-        #         edges[i, new_nodes_counts[i] :, new_nodes_counts[i] :] = np.eye(
-        #             edges.shape[-1]
-        #         )[0]
-        # pass
+        # SOME DATA AUGMENTATION HERE
 
     nodes = jnp.asarray(nodes)
 
@@ -115,7 +104,7 @@ def create_graph(nodes, edges, edges_counts, nodes_counts, train=False):
     )
 
 
-def get_dense_data(save_dir: str, batch_size: int):
+def get_dense_data(save_dir: str, batch_size: int, onehot: bool = True):
     cfg = Bunch.from_dict(
         {
             "dataset": {
@@ -135,12 +124,12 @@ def get_dense_data(save_dir: str, batch_size: int):
     datamodule = QM9DataModule(cfg)
     dataset_infos = QM9infos(datamodule=datamodule, cfg=cfg)
     datamodule.prepare_data()
-    train_smiles = get_train_smiles(
-        cfg=cfg,
-        train_dataloader=datamodule.train_dataloader(),
-        dataset_infos=dataset_infos,
-        evaluate_dataset=False,
-    )
+    # train_smiles = get_train_smiles(
+    #     cfg=cfg,
+    #     train_dataloader=datamodule.train_dataloader(),
+    #     dataset_infos=dataset_infos,
+    #     evaluate_dataset=False,
+    # )
     train_dataloader = datamodule.train_dataloader()
     test_dataloader = datamodule.test_dataloader()
     train_nodes, train_edges, train_nodes_counts = to_dense_numpy(train_dataloader)
@@ -232,13 +221,13 @@ def get_dataloaders(bunch: Bunch, batch_size: int) -> QM9Dataset:
     )
 
 
-def load_data(save_dir: str, batch_size: int):
+def load_data(save_dir: str, batch_size: int, onehot: bool = True):
     # gets the directory containing this file
     save_dir = os.path.dirname(os.path.realpath(__file__))
     cache = os.path.join(save_dir, "qm9.pt")
     if not os.path.exists(cache):
         print("Creating cache")
-        dense_data = get_dense_data(save_dir, batch_size)
+        dense_data = get_dense_data(save_dir, batch_size, onehot)
         pickle.dump(dense_data, open(cache, "wb"))
     else:
         print("Loading cache")

@@ -10,7 +10,6 @@ import numpy as np
 import ipdb
 from mate.jax import typed, SInt
 from jaxtyping import Array, Float
-from ...shared.graph_distribution import GraphDistribution
 from ...shared.graph import Edges, Nodes, Graph
 
 
@@ -76,10 +75,10 @@ class EncoderDecoder(nn.Module):
         return logprobs
 
     @typed
-    def decode(self, z: GraphDistribution, g_0) -> GraphDistribution:
+    def decode(self, z: Graph, g_0) -> Graph:
         zn = z.nodes
         ze = z.edges
-        return GraphDistribution.create(
+        return Graph.create(
             nodes=self.__decode_node(zn, g_0),
             edges=self.__decode_edge(ze, g_0),
             nodes_counts=z.nodes_counts,

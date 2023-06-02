@@ -9,7 +9,7 @@ import jax
 from jax import numpy as jnp
 import ipdb
 
-Nodes = Float[Array, "b n k"]
+Nodes = Float[Array, "b n"]
 Edges = Float[Array, "b n n"]
 Masks = Int[Array, "b"]
 

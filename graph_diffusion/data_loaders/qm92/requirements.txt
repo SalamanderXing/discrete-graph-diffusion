@@ -1,47 +1,185 @@
 auto_mix_prep==0.2.0
 
+
+
+
+
+
+
 graph_tool==2.11
+
+
+
+
+
+
 
 imageio==2.28.1
 
+
+
+
+
+
+
 ipdb==0.13.9
+
+
+
+
+
+
 
 jax==0.4.10
 
+
+
+
+
+
+
 jaxtyping==0.2.15
+
+
+
+
+
+
 
 matplotlib==3.7.1
 
+
+
+
+
+
+
 networkx==3.0
+
+
+
+
+
+
 
 numpy==1.23.5
 
+
+
+
+
+
+
 numpy==1.24.3
+
+
+
+
+
+
 
 omegaconf==2.3.0
 
+
+
+
+
+
+
 overrides==7.3.1
+
+
+
+
+
+
 
 pandas==2.0.1
 
+
+
+
+
+
+
 pyemd==1.0.0
+
+
+
+
+
+
 
 PyGSP==0.5.1
 
+
+
+
+
+
+
 pytorch_lightning==2.0.2
+
+
+
+
+
+
 
 rdkit==2023.3.1
 
+
+
+
+
+
+
 scipy==1.10.1
+
+
+
+
+
+
 
 shared==0.0.27
 
+
+
+
+
+
+
 tensorflow==2.12.0
+
+
+
+
+
+
 
 torch==2.0.1+cu118
 
+
+
+
+
+
+
 torch_geometric==2.3.1
 
+
+
+
+
+
+
 tqdm==4.65.0
+
+
+
+
+
+
 
 wandb==0.15.2

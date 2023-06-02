@@ -1,2 +1,2 @@
-from .graph_transformer_proxy import GraphTransformerProxy as GraphTransformer
-from .graph_transformer_simple import GraphTransformerProxy as GraphTransformerSimple
+from .graph_transformer_graph_distribution import GraphTransformerGraphDistribution
+from .graph_transformer_graph import GraphTransformerGraph

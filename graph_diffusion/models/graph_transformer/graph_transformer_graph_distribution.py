@@ -1,6 +1,5 @@
 from .graph_transformer import GraphTransformer, DDense
 from ...shared.graph_distribution import GraphDistribution
-from ...shared.graph import Graph
 import ipdb
 import flax.linen as nn
 import jax.numpy as np
@@ -25,6 +24,16 @@ class Conv(nn.Module):
         return res
 
 
+# def compute_spectral_features(adj_matrix):
+#     degree = compute_degree(adj_matrix)
+#     laplacian = np.diag(degree) - adj_matrix
+#     return np.linalg.eigvals(laplacian)
+#
+#
+# def compute_degree(adj_matrix):
+#     return np.sum(adj_matrix, axis=-1)
+
+
 def compute_degree(adj_matrix):
     return np.sum(adj_matrix, axis=-1)
 
@@ -42,10 +51,8 @@ def compute_spectral_features(edges):
     return nn.sigmoid(v[..., None]), nn.sigmoid(ev[..., None])
 
 
-class GraphTransformerProxy(nn.Module):
+class GraphTransformerGraphDistribution(nn.Module):
     depth: int
-    num_node_features: int
-    num_edge_features: int
     edge_dim: int = -1
     dim_head: int = 64
     heads: int = 8
@@ -56,16 +63,17 @@ class GraphTransformerProxy(nn.Module):
     @typed
     @nn.compact
     def __call__(
-        self, g: GraphDistribution, deterministic: bool = False
+        self, g: GraphDistribution, embedding: Array, deterministic: bool = False
     ) -> GraphDistribution:
-        ipdb.set_trace()
-        # nodes_embedding = nn.Sequential((DDense(5), nn.tanh))(embedding, deterministic)
-        # edges_embedding = nn.Sequential((DDense(5), nn.tanh))(embedding, deterministic)
+        embedding_to_nodes = nn.Sequential((DDense(5), nn.sigmoid))
+        embedding_to_edges = nn.Sequential((DDense(5), nn.sigmoid))
+        nodes_embedding = embedding_to_nodes(embedding, deterministic)
+        edges_embedding = embedding_to_edges(embedding, deterministic)
         n = g.nodes.shape[1]
-        # nodes_embedding = e.repeat(nodes_embedding, "b ten -> b n ten", n=n)
-        # edges_embedding = e.repeat(edges_embedding, "b tee -> b n1 n2 tee", n1=n, n2=n)
-        # gn, _ = e.pack([g.x, nodes_embedding], "b n *")
-        # ge, _ = e.pack([g.e, edges_embedding], "b n1 n2 *")
+        nodes_embedding = e.repeat(nodes_embedding, "b ten -> b n ten", n=n)
+        edges_embedding = e.repeat(edges_embedding, "b tee -> b n1 n2 tee", n1=n, n2=n)
+        gn, _ = e.pack([g.nodes, nodes_embedding], "b n *")
+        ge, _ = e.pack([g.edges, edges_embedding], "b n1 n2 *")
 
         # g = GraphDistribution.create(
         #     x=gn,
@@ -73,11 +81,11 @@ class GraphTransformerProxy(nn.Module):
         #     nodes_counts=g.nodes_counts,
         #     edges_counts=g.edges_counts,
         # )
-        nodes, edges, mask = g.nodes, g.edges, g.node_mask()
+        nodes, edges, mask = gn, ge, g.node_mask()
 
         spec_nodes, spec_edges = compute_spectral_features(g.edges)
-        spec_nodes = nn.tanh(nn.Dense(5)(spec_nodes))
-        spec_edges = nn.tanh(nn.Dense(5)(spec_edges))
+        spec_nodes = nn.sigmoid(nn.Dense(5)(spec_nodes))
+        spec_edges = nn.sigmoid(nn.Dense(5)(spec_edges))
         conv_features = Conv()(g.edges, deterministic)
         nodes = np.concatenate([nodes, spec_nodes], axis=-1)
         edges = np.concatenate([edges, spec_edges, conv_features], axis=-1)
@@ -96,7 +104,7 @@ class GraphTransformerProxy(nn.Module):
         new_edges = (new_edges + np.transpose(new_edges, (0, 2, 1, 3))) / 2
         return GraphDistribution.create(
             nodes=new_nodes,
-            e=new_edges,
+            edges=new_edges,
             edges_counts=g.edges_counts,
             nodes_counts=g.nodes_counts,
         )
@@ -121,8 +129,6 @@ class GraphTransformerProxy(nn.Module):
         )
         model = cls(
             depth=num_layers,
-            num_edge_features=in_edge_features,
-            num_node_features=in_node_features,
         )
 
         key_nodes, key_edges = jax.random.split(key, num=2)
@@ -142,6 +148,7 @@ class GraphTransformerProxy(nn.Module):
         params = model.init(
             key,
             dummy_graph,
+            np.zeros((2, 129)),
             deterministic=True,
         )
         return model, params

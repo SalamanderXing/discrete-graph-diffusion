@@ -79,7 +79,7 @@ class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
     transition_model: TransitionModel
     deterministic: SBool = False
 
-    @jit
+    @typed
     def __call__(
         self, g: GraphDistribution, t: Int[Array, "batch_size"]
     ) -> GraphDistribution:
@@ -102,7 +102,7 @@ class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
         return pred
 
 
-@jit
+@typed
 def compute_train_loss(
     g: GraphDistribution,
     rng: Key,
@@ -143,7 +143,7 @@ def compute_train_loss(
     return -reconstruction_logp.mean() + rec_loss
 
 
-@jit
+@typed
 def compute_val_loss(
     *,
     diffusion_steps: SInt,
@@ -442,7 +442,7 @@ def train_all_epochs(
     current_patience = patience
     rng, _ = jax.random.split(rngs["params"])
     for epoch_idx in range(from_epoch, num_epochs):
-        rng, rng_this_epoch = jax.random.split(rng) # TODO use that
+        rng, rng_this_epoch = jax.random.split(rng)  # TODO use that
         print(
             "\n".join(
                 f"{name} : {sys.getsizeof(value):.2f} B"

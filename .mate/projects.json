@@ -1015,8 +1015,8 @@
                 "graph_transformer": {
                     "name": "graph_transformer",
                     "exports": [
-                        "GraphTransformerProxy",
-                        "GraphTransformerProxy"
+                        "GraphTransformerGraphDistribution",
+                        "GraphTransformerGraph"
                     ],
                     "errors": [],
                     "dependencies": [
@@ -1042,7 +1042,7 @@
                         ],
                         [
                             "rich",
-                            "13.3.5"
+                            "13.4.1"
                         ],
                         [
                             "rotary_embedding_torch",
@@ -1307,205 +1307,6 @@
                     ],
                     "tags": []
                 },
-                "qm9": {
-                    "name": "qm9",
-                    "exports": [],
-                    "errors": [
-                        "No exports found in data_loaders.qm9. Consider exporting with 'mate export <module>'"
-                    ],
-                    "dependencies": [
-                        [
-                            "auto_mix_prep",
-                            "0.2.0"
-                        ],
-                        [
-                            "ipdb",
-                            "0.13.9"
-                        ],
-                        [
-                            "jax",
-                            "0.4.10"
-                        ],
-                        [
-                            "numpy",
-                            "1.23.5"
-                        ],
-                        [
-                            "numpy",
-                            "1.24.3"
-                        ],
-                        [
-                            "pandas",
-                            "2.0.1"
-                        ],
-                        [
-                            "pytorch_lightning",
-                            "2.0.2"
-                        ],
-                        [
-                            "rdkit",
-                            "2023.3.1"
-                        ],
-                        [
-                            "torch",
-                            "2.0.1+cu118"
-                        ],
-                        [
-                            "torch_geometric",
-                            "2.3.1"
-                        ],
-                        [
-                            "tqdm",
-                            "4.65.0"
-                        ],
-                        [
-                            "wandb",
-                            "0.15.2"
-                        ]
-                    ],
-                    "tags": []
-                },
-                "qm9_p": {
-                    "name": "qm9_p",
-                    "exports": [
-                        "QM9DataModule",
-                        "load_data"
-                    ],
-                    "errors": [],
-                    "dependencies": [
-                        [
-                            "h5py",
-                            "3.8.0"
-                        ],
-                        [
-                            "ipdb",
-                            "0.13.9"
-                        ],
-                        [
-                            "jax",
-                            "0.4.10"
-                        ],
-                        [
-                            "jaxtyping",
-                            "0.2.15"
-                        ],
-                        [
-                            "numpy",
-                            "1.23.5"
-                        ],
-                        [
-                            "numpy",
-                            "1.24.3"
-                        ],
-                        [
-                            "omegaconf",
-                            "2.3.0"
-                        ],
-                        [
-                            "overrides",
-                            "7.3.1"
-                        ],
-                        [
-                            "pandas",
-                            "2.0.1"
-                        ],
-                        [
-                            "pytorch_lightning",
-                            "2.0.2"
-                        ],
-                        [
-                            "rdkit",
-                            "2023.3.1"
-                        ],
-                        [
-                            "rich",
-                            "13.3.5"
-                        ],
-                        [
-                            "scipy",
-                            "1.10.1"
-                        ],
-                        [
-                            "shared",
-                            "0.0.27"
-                        ],
-                        [
-                            "tensorflow",
-                            "2.12.0"
-                        ],
-                        [
-                            "torch",
-                            "2.0.1+cu118"
-                        ],
-                        [
-                            "torch_geometric",
-                            "2.3.1"
-                        ],
-                        [
-                            "tqdm",
-                            "4.65.0"
-                        ],
-                        [
-                            "wandb",
-                            "0.15.2"
-                        ]
-                    ],
-                    "tags": []
-                },
-                "tu_old": {
-                    "name": "tu_old",
-                    "exports": [
-                        "load_data"
-                    ],
-                    "errors": [],
-                    "dependencies": [
-                        [
-                            "h5py",
-                            "3.8.0"
-                        ],
-                        [
-                            "ipdb",
-                            "0.13.9"
-                        ],
-                        [
-                            "jax",
-                            "0.4.10"
-                        ],
-                        [
-                            "jax_dataloader",
-                            "0.0.3"
-                        ],
-                        [
-                            "jaxtyping",
-                            "0.2.15"
-                        ],
-                        [
-                            "numpy",
-                            "1.23.5"
-                        ],
-                        [
-                            "numpy",
-                            "1.24.3"
-                        ],
-                        [
-                            "rich",
-                            "13.3.5"
-                        ],
-                        [
-                            "scipy",
-                            "1.10.1"
-                        ],
-                        [
-                            "torch",
-                            "2.0.1+cu118"
-                        ],
-                        [
-                            "torch_geometric",
-                            "2.3.1"
-                        ]
-                    ],
-                    "tags": []
-                },
                 "tu": {
                     "name": "tu",
                     "exports": [
@@ -1552,44 +1353,6 @@
                         [
                             "tensorflow",
                             "2.12.0"
-                        ],
-                        [
-                            "torch_geometric",
-                            "2.3.1"
-                        ]
-                    ],
-                    "tags": []
-                },
-                "qm9_simple": {
-                    "name": "qm9_simple",
-                    "exports": [
-                        "load_data"
-                    ],
-                    "errors": [],
-                    "dependencies": [
-                        [
-                            "ipdb",
-                            "0.13.9"
-                        ],
-                        [
-                            "jax",
-                            "0.4.10"
-                        ],
-                        [
-                            "jax_dataloader",
-                            "0.0.3"
-                        ],
-                        [
-                            "numpy",
-                            "1.23.5"
-                        ],
-                        [
-                            "numpy",
-                            "1.24.3"
-                        ],
-                        [
-                            "torch",
-                            "2.0.1+cu118"
                         ],
                         [
                             "torch_geometric",
@@ -1658,8 +1421,8 @@
                     ],
                     "tags": []
                 },
-                "ddd_trainer": {
-                    "name": "ddd_trainer",
+                "ddgd_trainer": {
+                    "name": "ddgd_trainer",
                     "exports": [
                         "run_model",
                         "TrainingConfig"
@@ -1868,8 +1631,18 @@
                 }
             },
             "experiments": {
-                "ddd_gat_tu_PROTEINS": {
-                    "name": "ddd_gat_tu_PROTEINS.py",
+                "ddgd_gat_tu_PTC_MR": {
+                    "name": "ddgd_gat_tu_PTC_MR.py",
+                    "errors": [],
+                    "imports": [
+                        "data_loaders",
+                        "models",
+                        "trainers"
+                    ],
+                    "tags": []
+                },
+                "ddgd_gat_tu_MUTAG": {
+                    "name": "ddgd_gat_tu_MUTAG.py",
                     "errors": [],
                     "imports": [
                         "data_loaders",
@@ -1889,28 +1662,8 @@
                     ],
                     "tags": []
                 },
-                "ddd_gat_tu_MUTAG_copy": {
-                    "name": "ddd_gat_tu_MUTAG_copy.py",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": []
-                },
-                "ddd_gat_tu_MUTAG": {
-                    "name": "ddd_gat_tu_MUTAG.py",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": []
-                },
-                "ddd_gat_tu_QM9": {
-                    "name": "ddd_gat_tu_QM9.py",
+                "ddgd_gat_tu_QM9": {
+                    "name": "ddgd_gat_tu_QM9.py",
                     "errors": [
                         "The experiment should have at most one if statement (for the condition on train/test)"
                     ],
@@ -1919,19 +1672,19 @@
                         "models",
                         "trainers"
                     ],
-                    "tags": [
-                        "book"
-                    ]
+                    "tags": []
                 },
-                "ddd_gat_simple_tu_MUTAG": {
-                    "name": "ddd_gat_simple_tu_MUTAG.py",
+                "ddgd_tr_QM9": {
+                    "name": "ddgd_tr_QM9.py",
                     "errors": [],
                     "imports": [
                         "data_loaders",
                         "models",
                         "trainers"
                     ],
-                    "tags": []
+                    "tags": [
+                        "rocket"
+                    ]
                 },
                 "vdm_tu_gat2": {
                     "name": "vdm_tu_gat2.py",
@@ -1957,58 +1710,6 @@
                         "book"
                     ]
                 },
-                "ddd_gat_tu_PTC_MR": {
-                    "name": "ddd_gat_tu_PTC_MR.py",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": []
-                },
-                "ddd_gat_tu_MUTAG_stripped": {
-                    "name": "ddd_gat_tu_MUTAG_stripped.py",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": []
-                },
-                "ddd_gat_tu_IMDB_MULTY": {
-                    "name": "ddd_gat_tu_IMDB_MULTY.py",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": []
-                },
-                "ddd_gat_tu_IMDB_BINARY": {
-                    "name": "ddd_gat_tu_IMDB_BINARY.py",
-                    "errors": [
-                        "The experiment should only contain assignments, function calls and imports"
-                    ],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": []
-                },
-                "ddd_gat_qm9_simle": {
-                    "name": "ddd_gat_qm9_simle.py",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": []
-                },
                 "vdm_tu_gat": {
                     "name": "vdm_tu_gat.py",
                     "errors": [],
@@ -2020,31 +1721,13 @@
                     ],
                     "tags": []
                 },
-                "ddd_tr_QM9": {
-                    "name": "ddd_tr_QM9.py",
+                "ddgd_gat_tu_PROTEINS": {
+                    "name": "ddgd_gat_tu_PROTEINS.py",
                     "errors": [],
                     "imports": [
                         "data_loaders",
                         "models",
                         "trainers"
-                    ],
-                    "tags": [
-                        "research"
-                    ]
-                },
-                "test": {
-                    "name": "test.py",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders"
-                    ],
-                    "tags": []
-                },
-                "ddd_tu": {
-                    "name": "ddd_tu.py",
-                    "errors": [],
-                    "imports": [
-                        "data_loaders"
                     ],
                     "tags": []
                 }

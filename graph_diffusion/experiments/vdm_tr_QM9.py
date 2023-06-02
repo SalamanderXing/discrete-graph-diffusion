@@ -28,6 +28,7 @@ batch_size = 32
 dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
+    onehot=True,
 )
 
 
@@ -35,18 +36,19 @@ import os  # nopep8
 
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
+
 import jax
 import tensorflow as tf
 import jax.numpy as jnp
 from ..trainers.vdm_trainer import VDMTrainer, VDMTrainingConfig
-from ..models.graph_transformer import GraphTransformerSimple
+from ..models.graph_transformer import GraphTransformerGraph
 from ..models.vdm import VDM, VDMConfig
 from ..shared.graph import Graph
 from ..shared.encoder_decoder import EncoderDecoder
 
 print(f"Using device: {jax.lib.xla_bridge.get_backend().platform}")
 
-model, params = GraphTransformerSimple.initialize(
+model, params = GraphTransformerGraph.initialize(
     key=jax.random.PRNGKey(0),
     in_node_features=dataset.node_prior.shape[-1],
     in_edge_features=dataset.edge_prior.shape[-1],

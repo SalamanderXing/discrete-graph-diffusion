@@ -8,7 +8,7 @@ jax==0.4.10
 
 jaxtyping==0.2.15
 
-rich==13.3.5
+rich==13.4.1
 
 rotary_embedding_torch==0.2.3
 
