@@ -1,6 +1,7 @@
 """
 A lot of functions related to diffusion models. But which do not depend on the on the model itself.
 """
+import ipdb
 from typing import Callable
 import jax
 from jax import Array, random
@@ -11,14 +12,186 @@ from flax import linen as nn
 import mate as m
 from mate.jax import SInt, SFloat, Key, typed, SBool
 from jaxtyping import Int, Float, Bool
-
-from ...shared.graph_distribution import GraphDistribution
+from einop import einop
+from ...shared.graph import graph_distribution as gd
 from .types import TransitionModel
+from einop import einop
+
+GraphDistribution = gd.GraphDistribution
+EdgeDistribution = gd.EdgeDistribution
+NodeDistribution = gd.NodeDistribution
+Q = gd.Q
 
 GetProbabilityType = Callable[
     [GraphDistribution, Int[Array, "batch_size"]], GraphDistribution
 ]
 check = lambda _, __: None
+
+
+# prob_true = diffusion_utils.posterior_distributions(
+#     X=X,
+#     E=E,
+#     y=y,
+#     X_t=noisy_data["X_t"],
+#     E_t=noisy_data["E_t"],
+#     y_t=noisy_data["y_t"],
+#     Qt=Qt,
+#     Qsb=Qsb,
+#     Qtb=Qtb,
+# )
+
+
+# def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M):
+#     """M: X or E
+#     Compute xt @ Qt.T * x0 @ Qsb / x0 @ Qtb @ xt.T
+#
+#     Compute xt @ Qt.T * x0 @ Qsb / sum(x0 @ Qtb * xt, -1)
+#     """
+#     # Flatten feature tensors
+#     M = M.flatten(start_dim=1, end_dim=-2).to(
+#         torch.float32
+#     )  # (bs, N, d) with N = n or n * n
+#     M_t = M_t.flatten(start_dim=1, end_dim=-2).to(torch.float32)  # same
+#
+#     Qt_M_T = torch.transpose(Qt_M, -2, -1)  # (bs, d, d)
+#
+#     left_term = M_t @ Qt_M_T  # (bs, N, d)
+#     right_term = M @ Qsb_M  # (bs, N, d)
+#     product = left_term * right_term  # (bs, N, d)
+#
+#     denom = M @ Qtb_M  # (bs, N, d) @ (bs, d, d) = (bs, N, d)
+#     denom = (denom * M_t).sum(dim=-1)  # (bs, N, d) * (bs, N, d) + sum = (bs, N)
+#     # denom = product.sum(dim=-1)
+#     # denom[denom == 0.] = 1
+#
+#     prob = product / denom.unsqueeze(-1)  # (bs, N, d)
+#     return prob
+#
+
+
+@typed
+def __compute_posterior_distribution_edges(
+    edges: EdgeDistribution,
+    edges_t: EdgeDistribution,
+    q_t: Array,
+    q_s_bar: Array,
+    q_t_bar: Array,
+):
+    q_t_e_transposed = einop(
+        q_t, "bs e1 e2 -> bs n1 n2 e2 e1", n1=edges.shape[1], n2=edges.shape[2]
+    )
+    left_term = einop(
+        edges_t, q_t_e_transposed, "bs n1 n2 de, bs n1 n2 de e1 -> bs n1 n2 e1"
+    )
+
+    right_term = einop(edges, q_s_bar, "bs n1 n2 de, bs de e1 -> bs n1 n2 e1")
+    product = left_term * right_term
+    denom = einop(edges, q_t_bar, "bs n1 n2 de, bs de e1 -> bs n1 n2 e1")
+    denom = einop(denom * edges_t, "bs n1 n2 e -> bs n1 n2", reduction="sum")
+    denom = np.where(denom == 0, 1, denom)
+    prob = product / denom[..., None]
+    return prob
+
+
+@typed
+def __compute_posterior_distribution_nodes(
+    nodes: NodeDistribution,
+    nodes_t: NodeDistribution,
+    q_t: Array,
+    q_s_bar: Array,
+    q_t_bar: Array,
+):
+    q_t_e_transposed = einop(q_t, "bs e1 e2 -> bs n e2 e1", n=nodes.shape[1])
+    left_term = einop(nodes_t, q_t_e_transposed, "bs n de, bs n de e1 -> bs n e1")
+    right_term = nodes @ q_s_bar
+    product = left_term * right_term
+
+    denom = nodes @ q_t_bar
+    denom = einop(denom * nodes_t, "bs n e -> bs n", reduction="sum")
+    denom = np.where(denom == 0, 1, denom)
+    prob = product / denom[..., None]  # type:ignore
+    return prob
+
+
+# def posterior_distributions(X, E, y, X_t, E_t, y_t, Qt, Qsb, Qtb):
+#     prob_X = compute_posterior_distribution(
+#         M=X, M_t=X_t, Qt_M=Qt.X, Qsb_M=Qsb.X, Qtb_M=Qtb.X
+#     )  # (bs, n, dx)
+#     prob_E = compute_posterior_distribution(
+#         M=E, M_t=E_t, Qt_M=Qt.E, Qsb_M=Qsb.E, Qtb_M=Qtb.E
+#     )  # (bs, n * n, de)
+#
+#     return PlaceHolder(X=prob_X, E=prob_E, y=y_t)
+#
+
+
+@typed
+def posterior_distribution(
+    g: GraphDistribution,
+    g_t: GraphDistribution,
+    transition_model: TransitionModel,
+    t: Int[Array, "b"],
+):
+    q_t = transition_model.qs[t]
+    q_t_bar = transition_model.q_bars[t]
+    q_s_bar = transition_model.q_bars[t - 1]
+
+    prob_x = __compute_posterior_distribution_nodes(
+        nodes=g.nodes,
+        nodes_t=g_t.nodes,
+        q_t=q_t.nodes,
+        q_s_bar=q_s_bar.nodes,
+        q_t_bar=q_t_bar.nodes,
+    )
+    prob_e = __compute_posterior_distribution_edges(
+        edges=g.edges,
+        edges_t=g_t.edges,
+        q_t=q_t.edges,
+        q_s_bar=q_s_bar.edges,
+        q_t_bar=q_t_bar.edges,
+    )
+    prob_x = prob_x / prob_x.sum(-1, keepdims=True)
+    prob_e = prob_e / prob_e.sum(-1, keepdims=True)
+    return GraphDistribution.create(
+        nodes=prob_x,
+        edges=prob_e,
+        edges_counts=g.edges_counts,
+        nodes_counts=g.nodes_counts,
+    )
+
+
+# get_probability: GetProbabilityType,
+#     g: GraphDistribution,
+#     transition_model: TransitionModel,
+#     rng: Key,
+
+
+@typed
+def compute_lt(
+    get_probability: GetProbabilityType,
+    g: GraphDistribution,
+    transition_model: TransitionModel,
+    rng: Key,
+):
+    t = random.randint(rng, (g.batch_size,), 1, transition_model.diffusion_steps + 1)
+    g_t: GraphDistribution = g @ transition_model.q_bars[t]
+    g_pred: GraphDistribution = get_probability(g_t, t)
+    # Compute distributions to compare with KL
+    # bs, n, d = X.shape
+    prob_true = posterior_distribution(
+        g=g,
+        g_t=g_t,
+        transition_model=transition_model,
+        t=t,
+    )
+    prob_pred = posterior_distribution(
+        g_pred,
+        g_t,
+        transition_model=transition_model,
+        t=t,
+    )
+    # Reshape and filter masked rows
+    return transition_model.diffusion_steps * gd.kl_div(prob_true, prob_pred)
 
 
 @typed
@@ -54,7 +227,7 @@ def reconstruction_logp(
     n_samples: SInt,
     base: SFloat = 2,
 ):
-    t = np.ones(g.batch_size, dtype=int)
+    t = np.zeros(g.batch_size, dtype=int)
     q_t = transition_model.qs[t]
     g_t = (g @ q_t).sample_one_hot(rng_key)
     g_t_probs = get_probability(g_t, t)
@@ -62,56 +235,41 @@ def reconstruction_logp(
     return result / np.log(base)
 
 
-@typed
-def compute_lt(
-    get_probability: GetProbabilityType,
-    g: GraphDistribution,
-    diffusion_steps: SInt,
-    transition_model: TransitionModel,
-    rng: Key,
-) -> Float[Array, "batch_size"]:
-    t = random.randint(rng, (g.batch_size,), 1, diffusion_steps + 1)
-    q_t = transition_model.qs[t]
-    q_s_bar = transition_model.q_bars[t - 1]
-    g_q_t_bar = g @ transition_model.q_bars[t]
-
-    g_t = g_q_t_bar.sample_one_hot(rng)
-    p = get_probability(g_t, t)
-    left_num = g @ q_t
-    q_t_bar = transition_model.q_bars[t]
-
-    # use bayes rule to compute q(z_s | z_t, g)
-    mult = (g @ q_s_bar) / (g @ q_t_bar)
-    # mult_x = mult.x[:, 0][:, None]
-    # mult_e = mult.e[:, 0][:, None, None]
-    q = left_num * mult
-    # q = GraphDistribution.create(
-    #     x=left_num.x * mult_x,
-    #     e=left_num.e * mult_e,
-    #     nodes_counts=left_num.nodes_counts,
-    #     edges_counts=left_num.edges_counts,
-    # )
-    # result = graph_dist_kl_div(left_term, g_s_probs)
-    # check_is_dist(q.x)
-    # check_is_dist(q.e)
-    mask_x, mask_e = p.masks()
-    nodes_kl = (kl_div(q.nodes, p.nodes) * mask_x).sum(axis=1)
-    edges_kl = (kl_div(q.edges, p.edges) * mask_e).sum(axis=(1, 2))
-    result = nodes_kl + edges_kl
-    return result * diffusion_steps
-
-
-@typed
-def kl_div(
-    p: Array,
-    q: Array,
-    base: SFloat = np.e,
-    eps: SFloat = 1**-17,
-) -> Array:
-    """Calculates the Kullback-Leibler divergence between arrays p and q."""
-    p += eps
-    q += eps
-    return np.sum(p * np.log(p / q) / np.log(base), axis=-1)
+# @typed
+# def compute_lt(
+#     get_probability: GetProbabilityType,
+#     g: GraphDistribution,
+#     diffusion_steps: SInt,
+#     transition_model: TransitionModel,
+#     rng: Key,
+# ) -> Float[Array, "batch_size"]:
+#     t = random.randint(rng, (g.batch_size,), 1, diffusion_steps + 1)
+#     q = transition_model.qs
+#     q_bar = transition_model.q_bars
+#
+#     # q_t = transition_model.qs[t]
+#     # q_s_bar = transition_model.q_bars[t - 1]
+#     g_t = (g @ q_bar[t]).sample_one_hot(rng)
+#     p = get_probability(g_t, t)
+#     # f(G_{t-1}) = q(G_{t-1} | G, G_t) = q(G_t | G, G_{t-1})q(G_{t-1} | G) / q(G_t | G)
+#     # q_t_bar = transition_model.q_bars[t]
+#
+#     # use bayes rule to compute q(z_s | z_t, g)
+#     # __unsafe=True because at that multiplication, the graph is not a distribution.
+#     # but it will be after the division.
+#     q_num = (g @ q[t]).__mul__(g @ q_bar[t - 1], _safe=False)
+#     denom = g @ q_bar[t]
+#     # q_denom_nodes, q_denom_edges = denom.nodes.sum(-1), denom.edges.sum(-1)
+#     # q = GraphDistribution.create(
+#     #     q_num.nodes / q_num.nodes.sum(-1)[..., None],  # q_denom_nodes[..., None],
+#     #     q_num.edges / q_num.edges.sum(-1)[..., None],  # q_denom_edges[..., None],
+#     #     edges_counts=q_num.edges_counts,
+#     #     nodes_counts=q_num.nodes_counts,
+#     # )
+#     q = q_num / denom
+#     result = gd.kl_div(q, p)
+#     return result * diffusion_steps
+#
 
 
 def check_is_dist(p):
@@ -185,13 +343,6 @@ def kl_prior(
 
     # turn the prior into a graph distribution
     bs, n, _ = transition_probs.nodes.shape
-    limit_X = np.broadcast_to(
-        np.expand_dims(prior.x, (0, 1)), (bs, n, prior.x.shape[-1])
-    )
-    limit_X /= limit_X.sum(-1, keepdims=True)
-    limit_E = np.broadcast_to(
-        np.expand_dims(prior.e, (0, 1, 2)), (bs, n, n, prior.e.shape[-1])
-    )
 
     def check_is_dist(vals):
         return (
@@ -200,14 +351,6 @@ def kl_prior(
             and np.all(vals <= 1.0)
         )
 
-    # assert check_is_dist(limit_X), ipdb.set_trace()
-    # assert check_is_dist(limit_E), ipdb.set_trace()
-    # assert check_is_dist(transition_probs.x), ipdb.set_trace()
-    # assert check_is_dist(transition_probs.e), ipdb.set_trace()
     base = jax.lax.select(bits_per_edge, 2.0, np.e)
-    mask_x, mask_e = target.masks()
-    kl_distance_X = (kl_div(transition_probs.nodes, limit_X, base=base) * mask_x).sum(1)
-    kl_distance_E = (kl_div(transition_probs.edges, limit_E, base=base) * mask_e).sum(
-        (1, 2)
-    )
-    return kl_distance_X + kl_distance_E
+    limit_dist = transition_model.limit_dist.repeat(bs)
+    return gd.kl_div(transition_probs, limit_dist, base=base)

@@ -23,9 +23,18 @@ from jax_tqdm import scan_tqdm
 
 from flax import linen as nn
 from mate.jax import Key, typed
-from ...shared.graph_distribution import GraphDistribution
+
+from ...shared.graph.graph_distribution import (
+    EncodedGraphDistribution,
+    VariationalGraphDistribution,
+)
+
+# from ...shared.graph import graph
 from .train_state import TrainState
 from . import utils
+
+Graph = VariationalGraphDistribution
+EncodedGraph = EncodedGraphDistribution
 
 
 # TODO: change number of diffusion steps
@@ -33,19 +42,35 @@ from . import utils
 # TODO: mask stuff!!
 
 
+def save_checkpoint():
+    if checkpoint_manager.latest_step() is not None:
+        state_dict = checkpoint_manager.restore(checkpoint_manager.latest_step())
+        state = TrainState(
+            tx=get_optimizer(lr=state_dict["lr"]),
+            apply_fn=state.apply_fn,
+            **{k: v for k, v in state_dict.items()},
+        )
+        print(
+            f"[yellow]Restored from epoch {checkpoint_manager.latest_step()}[/yellow]"
+        )
+    else:
+        print("[yellow]No checkpoint found, starting from scratch[/yellow]")
+
+
 @dataclass
 class TrainingConfig:
-    num_steps_eval: int = 2
+    plot_location: str
+    num_steps_eval: int = 4
     steps_per_save: int = 1
-    steps_per_eval: int = 1
-    steps_per_logging: int = 1
+    steps_per_eval: int = 80
+    steps_per_logging: int = 10
     num_steps_train: int = 100000
     seed: int = 0
     lr_decay: float | bool = False
     ckpt_restore_dir: str | None = None
     lr: float = 0.0001
     weight_decay: float = 0.0
-    grad_clip: float = 1.0
+    # grad_clip: float = 1.0
     ema_decay: float = 0.999
     num_steps_lr_warmup: int = 1000
     optimizer_name: str = "adamw"
@@ -117,16 +142,6 @@ class Trainer:
         self.rng, eval_rng, sample_rng = jax.random.split(self.rng, 3)
         self.eval_rng = eval_rng
         self.p_eval_step = functools.partial(self.eval_step, eval_rng)
-        # self.p_eval_step = jax.pmap(self.p_eval_step, "batch")
-        # self.p_sample = functools.partial(
-        #     self.sample_fn,
-        #     dummy_inputs=next(self.eval_iter)["images"][0],  # FIXME: no images maybe
-        #     rng=sample_rng,
-        # )
-        # self.p_sample = utils.dist(
-        #     self.p_sample, accumulate="concat", axis_name="batch"
-        # )
-
         print("=== Done with Experiment.__init__ ===")
 
     def get_lr_schedule(self):
@@ -176,7 +191,7 @@ class Trainer:
                 b1=0.9,
                 b2=0.99,
                 eps=1e-8,
-                weight_decay=0.01,
+                weight_decay=self.config.weight_decay,
                 # lr_decay=False,
                 # ema_rate=0.99999
             )
@@ -190,6 +205,8 @@ class Trainer:
 
     @typed
     def train_and_evaluate(self, workdir: str):
+        os.system(f"rm {self.config.plot_location}/*")
+
         print("=== Experiment.train_and_evaluate() ===")
         # if jax.process_index() == 0:
         #  if not tf.io.gfile.exists(workdir):
@@ -208,23 +225,6 @@ class Trainer:
         #     state = ckpt.restore_or_initialize(state, checkpoint_to_restore)
         initial_step = int(state.step)
 
-        # Distribute training.
-
-        # state = flax_utils.replicate(state)
-
-        # Create logger/writer
-        # writer = utils.create_custom_writer(workdir, jax.process_index())
-        # if initial_step == 0:
-        #     writer.write_hparams(dict(self.config))
-
-        # report_progress = periodic_actions.ReportProgress(
-        #     num_train_steps=self.config.num_steps_train, writer=writer
-        # )
-        # if jax.process_index() == 0:
-        #     hooks += [report_progress]
-        #     if config.profile:
-        #         hooks += [periodic_actions.Profile(num_profile_steps=5, logdir=workdir)]
-
         step = initial_step
         substeps = self.config.substeps
 
@@ -236,8 +236,10 @@ class Trainer:
                 print("=== Running eval ===")
                 eval_metrics = {}
                 for eval_step in range(self.config.num_steps_eval):
-                    batch = next(self.eval_iter)
-                    batch = jax.tree_map(jnp.asarray, batch)
+                    batch = Graph.from_graph_ditribution(next(self.eval_iter))
+                    if eval_step == 0:
+                        print(f"[green underline] Plotting [green underline]")
+                        self.plot(self.train_rng, state.ema_params, batch, step)
                     metrics = self.eval_step(
                         self.eval_rng, state.ema_params, batch, eval_step
                     )
@@ -260,9 +262,8 @@ class Trainer:
 
             is_last_step = step + substeps >= self.config.num_steps_train
 
-            # batch = jax.tree_map(jnp.asarray, next(self.train_iter))
             # state, _train_metrics = self.p_train_step(state, batch)
-            batch = jax.tree_map(jnp.asarray, next(self.train_iter))
+            batch = Graph.from_graph_ditribution(next(self.train_iter))
             state, _train_metrics = self.train_step(self.train_rng, state, batch)
             # ipdb.set_trace()
             new_step = int(state.step)
@@ -274,27 +275,16 @@ class Trainer:
                 metrics = _train_metrics[
                     "scalars"
                 ]  # flax_utils.unreplicate(_train_metrics["scalars"])
-                # metrics = {
-                #     key: np.mean(val).tolist()
-                #     for key, val in metrics.items()
-                #     if key == "train_bpd"
-                # }
                 wandb.log(metrics, step)
-                print({key: round(val, 3) for key, val in metrics.items()})
+                print(
+                    {
+                        key: round(val.squeeze().tolist(), 3)
+                        for key, val in metrics.items()
+                    }
+                )
 
             if step % self.config.steps_per_eval == 0 or is_last_step or step == 1000:
                 single_eval()
-
-                # print out a batch of images
-                # metrics = flax_utils.unreplicate(metrics)
-                # images = metrics["images"]
-                # samples = self.p_sample(params=state.ema_params)
-                # samples = utils.generate_image_grids(samples)[None, :, :, :]
-                # images["samples"] = samples.astype(np.uint8)
-                # wandb.log(step, images)
-
-            # if step % self.config.steps_per_save == 0 or is_last_step:
-            # ckpt.save(flax_utils.unreplicate(state))
 
     def evaluate(self, checkpoint_dir):
         """Perform one evaluation."""
@@ -311,7 +301,6 @@ class Trainer:
 
         for eval_step in range(self.config.num_steps_eval):
             batch = self.eval_iter.next()
-            batch = jax.tree_map(jnp.asarray, batch)
             metrics = self.p_eval_step(params, batch, flax_utils.replicate(eval_step))
             eval_metrics.append(metrics["scalars"])
 
@@ -360,7 +349,7 @@ class Trainer:
 
         return new_state, metrics
 
-    def eval_step(self, base_rng, params, batch: GraphDistribution, eval_step=0):
+    def eval_step(self, base_rng: Key, params: FrozenDict, batch: Graph, eval_step=0):
         # rng = jax.random.fold_in(base_rng, jax.lax.axis_index("batch"))
         rng = jax.random.fold_in(base_rng, eval_step)
 
@@ -376,8 +365,22 @@ class Trainer:
 
         return metrics
 
+    def plot(self, rng: Key, params: FrozenDict, inputs: Graph, step: int):
+        rng, sample_rng = jax.random.split(rng)
+        rngs = {"sample": sample_rng}
+        # graphs = Graph(**input)
+        # sample time steps, with antithetic sampling
+        self.state.apply_fn(
+            variables={"params": params},
+            x=inputs,
+            rngs=rngs,
+            deterministic=True,
+            plot=True,
+            plot_location=os.path.join(self.config.plot_location, str(step)),
+        )
+
     @typed
-    def loss_fn(self, params, inputs: GraphDistribution, rng, is_train):
+    def loss_fn(self, params, inputs: Graph, rng, is_train):
         rng, sample_rng = jax.random.split(rng)
         rngs = {"sample": sample_rng}
         if is_train:
@@ -397,7 +400,7 @@ class Trainer:
         #     (np.prod(inputs["nodes"].shape[1:] + np.prod(inputs["edges"].shape[1:])))
         #     * np.log(2.0)
         # )
-        rescale_to_bpd = 1.0 / (n_edges * np.log(2.0))
+        rescale_to_bpd = 1.0  # 1.0 / (n_edges * np.log(2.0))
 
         # rescale_to_bpd = 1.0 / (n_edges * np.log(2.0))
         bpd_latent = (outputs.loss_klz * rescale_to_bpd).mean()

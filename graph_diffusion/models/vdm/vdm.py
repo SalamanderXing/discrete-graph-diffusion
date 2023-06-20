@@ -18,49 +18,19 @@ from .noise_schedules import (
     NoiseSchedule_NNet,
     NoiseSchedule_FixedLinear,
     NoiseSchedule_Scalar,
+    CosineSchedule,
 )
-from ...shared.graph_distribution import GraphDistribution
+
+# from ...shared.graph_distribution import GraphDistribution
+# from ...shared.graph import graph
+# Graph = graph.Graph
+# EncodedGraph = graph.EncodedGraph
 
 
-class EncoderDecoder(nn.Module, metaclass=Interface):
-    """Encoder and decoder."""
-
-    # config: VDMConfig
-
-    def __call__(self, x, g_0):
-        # For initialization purposes
-        ...
-
-    def encode(self, x: Any) -> Any:
-        # # This transforms x from discrete values (0, 1, ...)
-        # # to the domain (-1,1).
-        # # Rounding here just a safeguard to ensure the input is discrete
-        # # (although typically, x is a discrete variable such as uint8)
-        # x = x.round()
-        # return 2 * ((x + 0.5) / self.config.vocab_size) - 1
-        ...
-
-    def decode(self, z: Any, g_0: Array) -> Any:
-        # config = self.config
-        #
-        # # Logits are exact if there are no dependencies between dimensions of x
-        # x_vals = jnp.arange(0, config.vocab_size)[:, None]
-        # x_vals = jnp.repeat(x_vals, 3, 1)
-        # x_vals = self.encode(x_vals).transpose([1, 0])[None, None, None, :, :]
-        # inv_stdev = jnp.exp(-0.5 * g_0[..., None])
-        # logits = -0.5 * jnp.square((z[..., None] - x_vals) * inv_stdev)
-        #
-        # logprobs = jax.nn.log_softmax(logits)
-        # return logprobs
-        ...
-
-    def logprob(self, x: Any, z: Any, g_0: Array) -> Any:
-        # x = x.round().astype("int32")
-        # x_onehot = jax.nn.one_hot(x, self.config.vocab_size)
-        # logprobs = self.decode(z, g_0)
-        # logprob = jnp.sum(x_onehot * logprobs, axis=(1, 2, 3, 4))
-        # return logprob
-        ...
+from ...shared.graph.graph_distribution import (
+    VariationalGraphDistribution as Graph,
+    EncodedGraphDistribution as EncodedGraph,
+)
 
 
 @dataclass
@@ -96,8 +66,8 @@ class Conditioner(nn.Module):
     @typed
     @nn.compact
     def __call__(
-        self, z: GraphDistribution, g_t: Float[Array, "batch_size"], deterministic: bool
-    ):
+        self, z: EncodedGraph, g_t: Float[Array, "batch_size"], deterministic: bool
+    ) -> EncodedGraph:
         # Compute conditioning vector based on 'g_t' and 'conditioning'
         n_embd = self.num_time_embedding
 
@@ -112,23 +82,7 @@ class Conditioner(nn.Module):
 
         timestep_embedding = get_timestep_embedding(t, n_embd)
         cond = timestep_embedding  # jnp.concatenate([timestep_embedding, conditioning[:, None]], axis=1)
-        cond = nn.swish(nn.Dense(features=n_embd, name="dense0")(cond))
-        cond = nn.tanh(nn.Dense(features=n_embd, name="dense1")(cond))[:, None].repeat(
-            z.nodes.shape[1], axis=1
-        )
-        # Concatenate Fourier features to input
-        # if self.with_fourier_features:
-        #     z_f = Base2FourierFeatures(start=6, stop=8, step=1)(z)
-        #     h = jnp.concatenate([z, z_f], axis=-1)
-        # else:
-        #     h = z
-        z = GraphDistribution.create(
-            nodes=jnp.concatenate([z.nodes, cond], axis=-1),
-            e=z.edges,
-            nodes_counts=z.nodes_counts,
-            edges_counts=z.edges_counts,
-        )
-        z_pred = self.model(z, deterministic=deterministic)
+        z_pred = self.model(z, cond, deterministic=deterministic)
         return z_pred
 
 
@@ -147,16 +101,16 @@ class VDMOutput:
 class VDM(nn.Module):
     config: VDMConfig
     probability_model: nn.Module
-    encoder_decoder: EncoderDecoder
+    # encoder_decoder: EncoderDecoder
 
     @classmethod
     @typed
     def create(
         cls,
         config: VDMConfig,
-        example_input: GraphDistribution,
+        example_input: Graph,
         probability_model: nn.Module,
-        encoder_decoder: EncoderDecoder,
+        # encoder_decoder: EncoderDecoder,
         rng: Key,
     ) -> tuple[nn.Module, FrozenDict]:
         # config = self.config
@@ -164,7 +118,7 @@ class VDM(nn.Module):
         model = cls(
             config=config,
             probability_model=probability_model,
-            encoder_decoder=encoder_decoder,
+            # encoder_decoder=encoder_decoder,
         )
         # inputs = {
         #     "images": jnp.zeros((2, 32, 32, 3), "uint8"),
@@ -198,17 +152,69 @@ class VDM(nn.Module):
             self.gamma = NoiseSchedule_Scalar(
                 gamma_max=self.config.gamma_max, gamma_min=self.config.gamma_min
             )
+        elif self.config.gamma_type == "cosine":
+            self.gamma = CosineSchedule()
+
         else:
             raise Exception("Unknown self.var_model")
 
     @typed
-    def __call__(self, x: GraphDistribution, deterministic: bool = True):
-        g_0, g_1 = self.gamma(0.0), self.gamma(1.0)
+    def plot(
+        self,
+        sample: Graph,
+        sample_rng: Key,
+        n_steps: int = 15,
+        save_to: str | None = None,
+    ):
+        if save_to is not None:
+            print(f"Saving to {save_to}")
+        # Graph.plot([sample, sample.encode().decode_no_probs()])
+        f = sample.encode()
+        gammas = []
+        # g_0 = self.gamma(0.0)
+        # g_1 = self.gamma(1.0)
+        noised_graphs = []
+        for i in range(n_steps):
+            t = jnp.array([i / n_steps])
+            var_t = self.gamma(t)
+            # print(f"gamma({t}) = {g_t}, var_t = {var_t}")
+            gammas.append(var_t)
+            eps = f.noise_like(sample_rng)
+            z_t = jnp.sqrt(1.0 - var_t) * f + jnp.sqrt(var_t) * eps
+            noised_graphs.append(z_t[jnp.array([0])])
+        gammas = jnp.array(gammas).squeeze(-1)
+        # import matplotlib.pyplot as plt
+        # plt.plot(gammas)
+        # plt.show()
+        # plt.clf()
+        # plc.close()
+        noised_graphs_encoded = EncodedGraph.concatenate(noised_graphs)
+        noised_graphs = noised_graphs_encoded.decode_no_probs()
+        original_graph = sample[jnp.array([0])].repeat(n_steps)
+        eps_hat = self.score_model(noised_graphs_encoded, gammas, deterministic=True)
+        pred_graphs = (noised_graphs_encoded + eps_hat).decode_no_probs()
+        Graph.plot(
+            [original_graph, pred_graphs, noised_graphs],
+            share_position_among_graphs=True,
+            location=save_to,
+        )
+
+    @typed
+    def __call__(
+        self,
+        x: Graph,
+        deterministic: bool = True,
+        plot: bool = False,
+        plot_location: str | None = None,
+    ):
+        if plot:
+            self.plot(x, self.make_rng("sample"), save_to=plot_location)
+        g_0, g_1 = self.gamma(jnp.array([0.0])), self.gamma(jnp.array([1.0]))
         var_0, var_1 = nn.sigmoid(g_0), nn.sigmoid(g_1)
         n_batch = x.nodes.shape[0]
 
         # encode
-        f = self.encoder_decoder.encode(x)
+        f = x.encode()
 
         sample_rng = self.make_rng("sample")
         # 1. RECONSTRUCTION LOSS
@@ -217,10 +223,8 @@ class VDM(nn.Module):
         # z_0 = (
         #     jnp.sqrt(1.0 - var_0) * f + jnp.sqrt(var_0) * eps_0
         # )  # FIXME why is this not accessed??
-        z_0_rescaled = f + (
-            jnp.exp(0.5 * g_0) * eps_0
-        )  # = z_0/sqrt(1-var) # FIXME remove that 2!! just for testing
-        loss_recon = -self.encoder_decoder.logprob(x, z_0_rescaled, g_0)
+        z_0_rescaled = f + (jnp.exp(0.5 * g_0) * eps_0)
+        loss_recon = -x.logprob(z_0_rescaled, g_0)
 
         # 2. LATENT LOSS
         # KL z1 with N(0,1) prior
@@ -230,11 +234,11 @@ class VDM(nn.Module):
         # 3. DIFFUSION LOSS
         # sample time steps
         rng1 = self.make_rng("sample")
-        if self.config.antithetic_time_sampling:
-            t0 = jax.random.uniform(rng1)
-            t = jnp.mod(t0 + jnp.arange(0.0, 1.0, step=1.0 / n_batch), 1.0)
-        else:
-            t = jax.random.uniform(rng1, shape=(n_batch,))
+        # if self.config.antithetic_time_sampling:
+        #     t0 = jax.random.uniform(rng1)
+        #     t = jnp.mod(t0 + jnp.arange(0.0, 1.0, step=1.0 / n_batch), 1.0)
+        # else:
+        t = jax.random.uniform(rng1, shape=(n_batch,))
 
         # discretize time steps if we're working with discrete time
         T = self.config.sm_n_timesteps
@@ -242,14 +246,14 @@ class VDM(nn.Module):
             t = jnp.ceil(t * T) / T
 
         # sample z_t
-        g_t = self.gamma(t)
-        var_t = nn.sigmoid(g_t)[:, None, None]
+        var_t = self.gamma(t)
+        # var_t = nn.sigmoid(g_t)
         eps = f.noise_like(self.make_rng("sample"))
         z_t = jnp.sqrt(1.0 - var_t) * f + jnp.sqrt(var_t) * eps
         # compute predicted noise
-        eps_hat = self.score_model(z_t, g_t, deterministic)
+        eps_hat = self.score_model(z_t, var_t, deterministic)
         # compute MSE of predicted noise
-        loss_diff_mse = ((eps - eps_hat) ** 2).sum()
+        loss_diff_mse = ((eps - eps_hat) ** 2).sum()  # contains
         if T == 0:
             # loss for infinite depth T, i.e. continuous time
             _, g_t_grad = jax.jvp(self.gamma, (t,), (jnp.ones_like(t),))
@@ -259,7 +263,6 @@ class VDM(nn.Module):
             s = t - (1.0 / T)
             g_s = self.gamma(s)
             loss_diff = 0.5 * T * jnp.expm1(g_t - g_s) * loss_diff_mse
-
         # End of diffusion loss computation
 
         return VDMOutput(
@@ -303,7 +306,7 @@ class VDM(nn.Module):
         var_0 = nn.sigmoid(g_0)
         z_0_rescaled = z_0 / jnp.sqrt(1.0 - var_0)
 
-        logits = self.encoder_decoder.decode(z_0_rescaled, g_0)
+        logits = z_0_rescaled.decode(g_0)
 
         # get output samples
         if self.config.sample_softmax:

@@ -1,5 +1,6 @@
 import os
 import os.path as osp
+import ipdb
 import pathlib
 from typing import Any, Sequence
 
@@ -77,6 +78,7 @@ class QM9Dataset(InMemoryDataset):
         else:
             self.file_idx = 2
         self.remove_h = remove_h
+        # ipdb.set_trace()
         super().__init__(root, transform, pre_transform, pre_filter)
         self.data, self.slices = torch.load(self.processed_paths[self.file_idx])
 
@@ -216,6 +218,7 @@ class QM9DataModule(MolecularDataModule):
         self.datadir = cfg.dataset.datadir
         super().__init__(cfg)
         self.remove_h = cfg.dataset.remove_h
+        self.cfg = cfg
 
     def prepare_data(self) -> None:
         target = getattr(self.cfg.general, "guidance_target", None)
@@ -229,8 +232,9 @@ class QM9DataModule(MolecularDataModule):
         else:
             transform = RemoveYTransform()
 
-        base_path = pathlib.Path(os.path.realpath(__file__)).parents[2]
-        root_path = os.path.join(base_path, self.datadir)
+        # base_path = pathlib.Path(os.path.realpath(__file__)).parents[2]
+        # root_path = os.path.join(base_path, self.datadir)
+        root_path = self.datadir
         datasets = {
             "train": QM9Dataset(
                 stage="train",

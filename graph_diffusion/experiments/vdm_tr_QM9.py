@@ -5,17 +5,24 @@ tags:
 ```
 
 """
+# import ipdb;
+# ipdb.set_trace()
 
-from ..shared.graph_distribution import GraphDistribution
+import jax
+
+key = jax.random.PRNGKey(0)
+
+jax.config.update("jax_debug_nans", True)
+# import tensorflow as tf
+#
+# tf.config.experimental.set_visible_devices([], "GPU")
+#
 from ..data_loaders.qm92 import load_data
-import tensorflow as tf
-
-tf.config.experimental.set_visible_devices([], "GPU")
 
 
 import jax
 
-jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+# jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
 from mate import mate
 
@@ -24,7 +31,7 @@ from mate import mate
 #     save_path=mate.data_dir, batch_size=10, seed=0
 # )
 #
-batch_size = 32
+batch_size = 5
 dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
@@ -41,15 +48,19 @@ import jax
 import tensorflow as tf
 import jax.numpy as jnp
 from ..trainers.vdm_trainer import VDMTrainer, VDMTrainingConfig
-from ..models.graph_transformer import GraphTransformerGraph
+from ..models.graph_transformer import GraphTransformerNew
 from ..models.vdm import VDM, VDMConfig
-from ..shared.graph import Graph
-from ..shared.encoder_decoder import EncoderDecoder
+from ..shared.graph.graph_distribution import VariationalGraphDistribution
+
+# Graph = graph.Graph
+
+# from ..shared.encoder_decoder import EncoderDecoder
 
 print(f"Using device: {jax.lib.xla_bridge.get_backend().platform}")
+num_time_embedding = 15
 
-model, params = GraphTransformerGraph.initialize(
-    key=jax.random.PRNGKey(0),
+model, params = GraphTransformerNew.initialize(
+    key=key,
     in_node_features=dataset.node_prior.shape[-1],
     in_edge_features=dataset.edge_prior.shape[-1],
     number_of_nodes=dataset.n,
@@ -69,20 +80,15 @@ vdm_config = VDMConfig(
     with_fourier_features=True,
     with_attention=False,
     # configurations of the noise schedule
-    gamma_type="learnable_scalar",  # "fixed",  # "learnable_scalar",  # learnable_scalar / learnable_nnet / fixed
-    gamma_min=0.3,
-    gamma_max=5.3,
+    gamma_type="cosine",  # "fixed",  # "learnable_scalar",  # "fixed",  # "learnable_scalar",  # learnable_scalar / learnable_nnet / fixed
+    gamma_min=-7.0,
+    gamma_max=2.5,
     sm_n_timesteps=0,
-    num_time_embedding=10,
+    num_time_embedding=num_time_embedding,
     sm_n_layer=32,
     sm_pdrop=0.1,
 )
 
-
-encoder_decoder = EncoderDecoder(
-    edge_vocab_size=len(dataset.edge_prior),
-    node_vocab_size=len(dataset.node_prior),
-)
 
 # gat, params = GAT.initialize(
 #     jax.random.PRNGKey(0), n=tu_dataset.n, n_heads_per_layer=(1, 1)
@@ -90,18 +96,26 @@ encoder_decoder = EncoderDecoder(
 
 vmd, vmd_params = VDM.create(
     config=vdm_config,
-    example_input=GraphDistribution.create(
-        nodes=jnp.zeros((2, dataset.n, len(dataset.node_prior)), dtype=float),
-        e=jnp.zeros((2, dataset.n, dataset.n, len(dataset.edge_prior)), dtype=float),
+    example_input=VariationalGraphDistribution.create(
+        nodes=jnp.zeros((2, dataset.n, dataset.node_prior.shape[0]), dtype=float),
+        edges=jnp.zeros(
+            (2, dataset.n, dataset.n, dataset.edge_prior.shape[0]), dtype=float
+        ),
         nodes_counts=jnp.ones((2,), dtype=int),
         edges_counts=jnp.ones((2,), dtype=int),
+        # edge_vocab_size=jnp.array(len(dataset.edge_prior)),
+        # node_vocab_size=jnp.array(len(dataset.node_prior)),
     ),
     probability_model=model,
     rng=jax.random.PRNGKey(0),
-    encoder_decoder=encoder_decoder,
 )
 
-training_config = VDMTrainingConfig()
+
+training_config = VDMTrainingConfig(
+    lr=1e-3,
+    weight_decay=1e-7,
+    plot_location=mate.plots_dir,
+)
 
 experiment = VDMTrainer(
     config=training_config,

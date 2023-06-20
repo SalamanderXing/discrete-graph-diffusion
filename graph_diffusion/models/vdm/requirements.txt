@@ -1,12 +1,12 @@
 chex==0.1.7
 
-flax==0.6.9
+flax==0.6.10
 
-ipdb==0.13.9
+ipdb==0.13.13
 
-jax==0.4.10
+jax==0.4.11
 
-jaxtyping==0.2.15
+jaxtyping==0.2.20
 
 numpy==1.23.5
 

@@ -169,18 +169,39 @@ class GraphTransformer(nn.Module):
     @typed
     @nn.compact
     def __call__(
-        self, nodes: Array, edges: Array, mask: Array, deterministic
+        self,
+        nodes: Array,
+        edges: Array,
+        mask: Array,
+        node_time_embedding: Array,
+        edge_time_embedding: Array,
+        deterministic: bool,
     ) -> tuple[Array, Array]:
-        nodes, edges, _, _ = nn.Sequential(
-            [
-                NodeEdgeLayerPair(
-                    dim_head=self.dim_head,
-                    heads=self.heads,
-                    with_feedforward=self.with_feedforward,
-                )
-                for _ in range(self.depth)
-            ]
-        )(nodes, edges, mask, deterministic)
+        nodes = np.concatenate((nodes, node_time_embedding), axis=-1)
+        edges = np.concatenate((edges, edge_time_embedding), axis=-1)
+        for i in range(self.depth):
+            # print(f"depth {i} nodes {nodes.shape} edges {edges.shape}")
+            # if i > 0 and i < self.depth - 1:
+            #     # nodes = np.concatenate((nodes, node_time_embedding), axis=-1)
+            #     # edges = np.concatenate((edges, edge_time_embedding), axis=-1)
+            #     nodes += node_time_embedding
+            #     edges += edge_time_embedding
+
+            nodes, edges, mask, deterministic = NodeEdgeLayerPair(
+                dim_head=self.dim_head,
+                heads=self.heads,
+                with_feedforward=self.with_feedforward,
+            )(nodes, edges, mask, deterministic)
+        # nodes, edges, _, _ = nn.Sequential(
+        #     [
+        #         NodeEdgeLayerPair(
+        #             dim_head=self.dim_head,
+        #             heads=self.heads,
+        #             with_feedforward=self.with_feedforward,
+        #         )
+        #         for _ in range(self.depth)
+        #     ]
+        # )(nodes, edges, mask, deterministic)
         return nodes, edges
 
     @classmethod

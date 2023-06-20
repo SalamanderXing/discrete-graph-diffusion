@@ -4,10 +4,39 @@ import chex
 import flax
 from flax import linen as nn
 import jax
+from mate.jax import typed
 from jax import Array
 from jax import numpy as jnp
 import numpy as np
 from flax.struct import dataclass
+from jaxtyping import Float
+
+
+class CosineSchedule(nn.Module):
+    n_cosine_steps: int = 100000
+
+    # @typed
+    # def cosine_beta_schedule_discrete(
+    #     self, diffusion_steps: int, s=0.008
+    # ) -> Float[Array, "n"]:
+    #     """Cosine schedule as proposed in https://openreview.net/forum?id=-NEXDKk8gZ."""
+    #     steps = diffusion_steps + 2
+    #     x = jnp.linspace(0, steps, steps)
+    #
+    #     alphas_cumprod = jnp.cos(0.5 * jnp.pi * ((x / steps) + s) / (1 + s)) ** 2
+    #     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    #     alphas = alphas_cumprod[1:] / alphas_cumprod[:-1]
+    #     betas = 1 - alphas
+    #     return betas.squeeze().astype(jnp.float32)
+
+    @typed
+    def __call__(self, t: Float[Array, "b"]) -> Float[Array, "b"]:
+        # t_round = jnp.round(t * self.n_cosine_steps).astype(jnp.int32)
+        # return self.betas[t_round]
+        start_lr = 0
+        end_lr = 1
+        c_i = 0.5 * (1 + jnp.cos(t * jnp.pi))
+        return end_lr + (start_lr - end_lr) * c_i
 
 
 class NoiseSchedule_NNet(nn.Module):
@@ -36,7 +65,7 @@ class NoiseSchedule_NNet(nn.Module):
             self.l3 = DenseMonotone(n_out, kernel_init=kernel_init, use_bias=False)
 
     @nn.compact
-    def __call__(self, t, det_min_max=False):
+    def __call__(self, t: Float[Array, "b"], det_min_max=False) -> Float[Array, "b"]:
         assert jnp.isscalar(t) or len(t.shape) == 0 or len(t.shape) == 1
 
         if jnp.isscalar(t) or len(t.shape) == 0:
@@ -52,7 +81,7 @@ class NoiseSchedule_NNet(nn.Module):
             _h = self.l3(_h) / self.n_features
             h += _h
 
-        return jnp.squeeze(h, axis=-1)
+        return nn.sigmoid(jnp.squeeze(h, axis=-1))
 
 
 class NoiseSchedule_FixedLinear(nn.Module):
@@ -60,8 +89,11 @@ class NoiseSchedule_FixedLinear(nn.Module):
     gamma_max: float
 
     @nn.compact
-    def __call__(self, t) -> Array:
-        return jnp.array(self.gamma_min + (self.gamma_max - self.gamma_min) * t)
+    @typed
+    def __call__(self, t: Float[Array, "b"]) -> Float[Array, "b"]:
+        return nn.sigmoid(
+            jnp.array(self.gamma_min + (self.gamma_max - self.gamma_min) * t)
+        )
 
 
 class NoiseSchedule_Scalar(nn.Module):
@@ -75,8 +107,9 @@ class NoiseSchedule_Scalar(nn.Module):
         self.b = self.param("b", constant_init(init_bias), (1,))
 
     @nn.compact
-    def __call__(self, t):
-        return self.b + abs(self.w) * t
+    @typed
+    def __call__(self, t: Float[Array, "b"]) -> Float[Array, "b"]:
+        return nn.sigmoid(self.b + abs(self.w) * t)
 
 
 def constant_init(value, dtype="float32"):
@@ -106,4 +139,4 @@ class DenseMonotone(nn.Dense):
             bias = self.param("bias", self.bias_init, (self.features,))
             bias = jnp.asarray(bias, self.dtype)
             y = y + bias
-        return y
+        return nn.sigmoid(y)

@@ -1,5 +1,4 @@
-from .qm9_dataset import QM9DataModule, QM9infos, get_train_smiles
-from . import utils
+# import ipdb;ipdb.set_trace()
 import os
 import numpy as np
 from tqdm import tqdm
@@ -9,7 +8,10 @@ from typing import Iterable
 from dataclasses import dataclass
 from jaxtyping import Float, Array
 from jax import numpy as jnp
-from ...shared.graph import Graph, SimpleGraphDist
+from mate.jax import SFloat
+from ...shared.graph import graph_distribution as gd, graph
+
+GraphDistribution = gd.GraphDistribution
 
 
 @dataclass(frozen=True)
@@ -22,6 +24,10 @@ class QM9Dataset:
     nodes_dist: Float[Array, "k"]
     node_prior: Float[Array, "m"]
     edge_prior: Float[Array, "l"]
+    mean_edge_count: SFloat = 0.0
+    mean_node_count: SFloat = 0.0
+    var_edge_count: SFloat = 0.0
+    var_node_count: SFloat = 0.0
 
 
 class Bunch:
@@ -40,6 +46,8 @@ class Bunch:
 
 
 def to_dense_numpy(dataloader):
+    from . import utils
+
     xs = []
     es = []
     nodes_counts = []
@@ -48,26 +56,28 @@ def to_dense_numpy(dataloader):
             data.x, data.edge_index, data.edge_attr, data.batch
         )
         dense_data = dense_data.mask(node_mask)
-        X, E = dense_data.X, dense_data.E
-        xs.append(X.numpy())
-        es.append(E.numpy())
-        nodes_counts.append(node_mask.sum(-1).numpy())
+        X, E = dense_data.X.numpy(), dense_data.E.numpy()
+        if X.shape[1] == 9:  # for some reason in one case there are only 8 nodes
+            xs.append(X)
+            es.append(E)
+            nodes_counts.append(node_mask.sum(-1).numpy())
     xs = np.concatenate(xs, axis=0)
     es = np.concatenate(es, axis=0)
+    es[np.where(es.sum(-1) == 0)] = np.eye(es.shape[-1])[0]
     nodes_counts = np.concatenate(nodes_counts, axis=0)
 
     zero_node = np.zeros_like(xs)[..., 0][..., None]
-    zero_edge = np.zeros_like(es)[..., 0][..., None]
+    # zero_edge = np.zeros_like(es)[..., 0][..., None]
     xs_ = np.concatenate([zero_node, xs], axis=-1)
-    es_ = np.concatenate([zero_edge, es], axis=-1)
+    # es_ = np.concatenate([zero_edge, es], axis=-1)
     xs_[np.where(xs.sum(-1) == 0)] = np.eye(xs_.shape[-1])[0]
-    es_[np.where(es.sum(-1) == 0)] = np.eye(es_.shape[-1])[0]
+    # es_[np.where(es.sum(-1) == 0)] = np.eye(es_.shape[-1])[0]
     assert np.all(xs_.sum(-1) == 1)
-    assert np.all(es_.sum(-1) == 1)
-    return xs_, es_, nodes_counts
+    # assert np.all(es_.sum(-1) == 1)
+    return xs_, es, nodes_counts
 
 
-def create_graph(nodes, edges, edges_counts, nodes_counts, train=False):
+def create_graph(nodes, edges, edges_counts, nodes_counts, onehot: bool, train=False):
     nodes = np.asarray(nodes)
     edges = np.asarray(edges)
     nodes_counts = np.asarray(nodes_counts)
@@ -87,24 +97,27 @@ def create_graph(nodes, edges, edges_counts, nodes_counts, train=False):
     nodes_counts = jnp.asarray(nodes_counts)
     # assert len(nodes_counts.shape) == 1
     return (
-        Graph.create(
-            nodes=nodes,
-            edges=edges,
+        graph.Graph.create(
+            nodes=nodes.argmax(-1).astype(int),
+            edges=edges.argmax(-1).astype(int),
             edges_counts=edges_counts,
             nodes_counts=nodes_counts,
+            node_vocab_size=nodes.shape[-1],
+            edge_vocab_size=edges.shape[-1],
         )
-        if len(edges.shape) < 4
-        else SimpleGraphDist.create(
+        if not onehot
+        else GraphDistribution.create(
             nodes=nodes,
             edges=edges,
             edges_counts=edges_counts,
             nodes_counts=nodes_counts,
-            # node_masks=jnp.ones_like(nodes_counts),
         )
     )
 
 
 def get_dense_data(save_dir: str, batch_size: int, onehot: bool = True):
+    from .qm9_dataset import QM9DataModule, QM9infos, get_train_smiles
+
     cfg = Bunch.from_dict(
         {
             "dataset": {
@@ -167,7 +180,7 @@ def compute_priors(train_nodes, train_edges, train_nodes_counts):
     return node_prior, edge_prior
 
 
-def get_dataloaders(bunch: Bunch, batch_size: int) -> QM9Dataset:
+def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
     import tensorflow as tf
 
     tf.config.experimental.set_visible_devices([], "GPU")
@@ -183,6 +196,7 @@ def get_dataloaders(bunch: Bunch, batch_size: int) -> QM9Dataset:
                 Dataset.from_tensor_slices(bunch.train_nodes_counts),
             )
         )
+        #.drop_remainder(True)
         .shuffle(1000)
         .repeat()
         .batch(batch_size)
@@ -197,16 +211,17 @@ def get_dataloaders(bunch: Bunch, batch_size: int) -> QM9Dataset:
                 Dataset.from_tensor_slices(bunch.test_nodes_counts),
             )
         )
+        #.drop_remainder(True)
         .shuffle(1000)
         .repeat()
         .batch(batch_size)
     )
     train_loader = map(
-        lambda x: create_graph(*x, train=True),
+        lambda x: create_graph(*x, onehot=onehot, train=True),
         train_loader,
     )
     test_loader = map(
-        lambda x: create_graph(*x),
+        lambda x: create_graph(*x, onehot=onehot),
         test_loader,
     )
     return QM9Dataset(
@@ -227,12 +242,12 @@ def load_data(save_dir: str, batch_size: int, onehot: bool = True):
     cache = os.path.join(save_dir, "qm9.pt")
     if not os.path.exists(cache):
         print("Creating cache")
-        dense_data = get_dense_data(save_dir, batch_size, onehot)
+        dense_data = get_dense_data(save_dir, batch_size, onehot=False)
         pickle.dump(dense_data, open(cache, "wb"))
     else:
         print("Loading cache")
         dense_data = pickle.load(open(cache, "rb"))
-    dataset = get_dataloaders(dense_data, batch_size)
+    dataset = get_dataloaders(dense_data, batch_size, onehot)
     return dataset
 
 
