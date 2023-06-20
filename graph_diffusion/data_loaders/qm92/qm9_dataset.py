@@ -78,8 +78,9 @@ class QM9Dataset(InMemoryDataset):
         else:
             self.file_idx = 2
         self.remove_h = remove_h
-        # ipdb.set_trace()
+        #self.raw_dir = os.path.join(root, "raw")
         super().__init__(root, transform, pre_transform, pre_filter)
+        self.root = root
         self.data, self.slices = torch.load(self.processed_paths[self.file_idx])
 
     @property

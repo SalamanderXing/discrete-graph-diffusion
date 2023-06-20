@@ -13,7 +13,7 @@ data_key = jax.random.PRNGKey(
 )  # has to be done at the beginning to allow JAX to take control of the GPU memory.
 
 jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
-jax.config.update("jax_log_compiles", True)
+# jax.config.update("jax_log_compiles", True)
 jax.config.update("jax_debug_nans", True)
 
 
@@ -53,7 +53,7 @@ dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
 )
-diffusion_steps = 100
+diffusion_steps = 50
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
 model, params = GraphTransformerGraphDistribution.initialize(
     key=rngs["params"],

@@ -116,7 +116,7 @@ def compute_train_loss(
     # print(pred_graph.nodes.argmax(-1)[0])
     # print(pred_graph.edges.argmax(-1)[0])
     target = z if stepwise else g
-    loss_type = "ce"
+    loss_type = "mse"
     if loss_type == 'mse':
         mse_nodes = (target.nodes - pred_graph.nodes) ** 2
         mse_edges = (target.edges - pred_graph.edges) ** 2
@@ -519,7 +519,8 @@ class Trainer:
         limit_dist = g_batch.set(
             "edges", jax.nn.softmax(self.transition_model.limit_dist.edges + 0.1)
         ).set("nodes", jax.nn.softmax(self.transition_model.limit_dist.nodes + 0.1))
-        g = limit_dist.sample_one_hot(rng)
+        #g = limit_dist.sample_one_hot(rng)
+        g = limit_dist
         # g = g.set("edges_counts", ((g.edges.argmax(-1) != 0).sum() / 2).astype(int))
         gs = [g]
         # print(f"Plotting noised graphs to {plot_path}")
@@ -528,7 +529,7 @@ class Trainer:
             # g = g_batch[np.array([0])].repeat(len(self.transition_model.q_bars))
             # posterior_samples = (g @ q_bars).sample_one_hot(rng)
             timesteps = np.array([t] * len(g))
-            model_probs = model(g, timesteps)
+            model_probs = model(g.sample_one_hot(rng), timesteps)
             # g = model_probs.argmax()
             g = df.posterior_distribution(
                 g=g,

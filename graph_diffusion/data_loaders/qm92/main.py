@@ -238,7 +238,7 @@ def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
 
 def load_data(save_dir: str, batch_size: int, onehot: bool = True):
     # gets the directory containing this file
-    save_dir = os.path.dirname(os.path.realpath(__file__))
+    # save_dir = os.path.dirname(os.path.realpath(__file__))
     cache = os.path.join(save_dir, "qm9.pt")
     if not os.path.exists(cache):
         print("Creating cache")
