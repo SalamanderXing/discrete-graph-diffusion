@@ -245,8 +245,8 @@ def sample_discrete_features(probX, probE, node_mask):
     :param proby: bs, dy_out           global features.
     """
     bs, n, _ = probX.shape
-    print(f"{probX.shape=} {node_mask.shape=}")
     # Noise X
+    ipdb.set_trace()
     # The masked rows should define probability distributions as well
     probX[~node_mask] = 1 / probX.shape[-1]
 

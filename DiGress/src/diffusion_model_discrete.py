@@ -1,3 +1,4 @@
+from operator import ipow
 import torch
 import ipdb
 import torch.nn as nn
@@ -33,6 +34,7 @@ import jax
 from jax import numpy as jnp, Array
 
 jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+jax.config.update("jax_debug_nans", True)
 from einop import einop
 
 GraphDistribution = gd.GraphDistribution
@@ -51,17 +53,23 @@ def get_prob_from_forward(
 ):
     def inner(g: GraphDistribution, time: Int[Array, "b"]):
         node_mask, _ = g.masks()
+        node_mask = t.tensor(node_mask.tolist(), dtype=torch.bool).to(device)
+        # node_mask = einop("b n -> b n ")
         # placeholder: utils.PlaceHolder, node_mask, time):
         # X = placeholder.X
         # E = placeholder.E
         # y = placeholder.y
-        X = t.tensor(g.nodes)
-        E = t.tensor(g.edges)
-        beta_0 = noise_schedule(time)
-        Q_bar = transition_model.get_Qt_bar(beta_t=beta_0, device=device)
+        X = t.tensor(g.nodes.tolist()).to(device)
+        E = t.tensor(g.edges.tolist()).to(device)
+        time = t.tensor(time.tolist())[..., None]
+        beta_0 = noise_schedule.get_alpha_bar(
+            t_int=time
+        )  # FIXME: get the actual timesteps
+        Q_bar = transition_model.get_Qt_bar(1 - beta_0, device=device)
         probX0 = X @ Q_bar.X  # (bs, n, dx_out)
-        probE0 = E @ Q_bar.E.unsqueeze(1)  # (bs, n, n, de_out)
+        probE0 = E @ Q_bar.E.unsqueeze(1) # (bs, n, n, de_out)
 
+        # print(node_mask.shape)
         sampled0 = diffusion_utils.sample_discrete_features(
             probX=probX0, probE=probE0, node_mask=node_mask
         )
@@ -79,14 +87,14 @@ def get_prob_from_forward(
             "E_t": sampled_0.E,
             "y_t": sampled_0.y,
             "node_mask": node_mask,
-            "t": time,  # torch.zeros(X0.shape[0], 1).type_as(y0),
+            "t": time.to(device),  # torch.zeros(X0.shape[0], 1).type_as(y0),
         }
         extra_data = compute_extra_data(noisy_data)
         pred = forward(noisy_data, extra_data, node_mask)
 
+        ipdb.set_trace()
         # Normalize predictions
         probX = F.softmax(pred.X, dim=-1)
-        ipdb.set_trace()
         # probE0 = F.softmax(pred0.E, dim=-1)
         # proby0 = F.softmax(pred0.y, dim=-1)
 
@@ -107,7 +115,7 @@ def get_prob_from_forward(
         #     ([t.zeros(pred.x.shape[:-1] + (1,)).type_as(pred.x), pred.x]), dim=-1
         # )
         # above concatenation but with einop (a proxy to einops operations)
-        uba = (t.zeros(probX.shape[:-1] + (1,)).to(pred.X.device), probX)
+        # uba = (t.zeros(probX.shape[:-1] + (1,)).to(pred.X.device), probX)
         # import einops as e
         #
         # ipdb.set_trace()
@@ -115,7 +123,7 @@ def get_prob_from_forward(
         pred_e = F.softmax(pred.E, -1)
         uba = t.eye(pred_e.shape[-1])[None, None, None, 0].to(pred_e.device)
         pred_e = t.where((pred_e.sum(-1) == 0)[..., None], uba, pred_e)
-
+        assert (pred_e.sum(-1) != 0).all()
         pred_e = gd.GraphDistribution.to_symmetric(jnp.array(pred_e.cpu()))
         node_mask = jnp.array(node_mask.cpu())
         pred_g = gd.GraphDistribution.create(
@@ -315,7 +323,8 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=False
         )
 
-        inner = get_prob_from_forward(
+        print(f"{node_mask.shape=}")
+        get_probs = get_prob_from_forward(
             Xdim_output=self.Xdim_output,
             Edim_output=self.Edim_output,
             forward=self.forward,
@@ -325,11 +334,25 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             compute_extra_data=self.compute_extra_data,
         )
 
-        uba = (
+        jax_transition_model = (
             ddgd_trainer.discrete_denoising_graph_diffusion.TransitionModel.from_torch(
                 self.transition_model, self.noise_schedule
             )
         )
+        g = GraphDistribution.create(
+            nodes=jnp.array(dense_data.X.cpu()),
+            edges=jnp.array(dense_data.E.cpu()),
+            nodes_counts=jnp.array(node_mask.sum(-1).cpu(), int),
+            edges_counts=jnp.array(node_mask.sum(-1).cpu(), int),
+        )
+        uba = ddgd_trainer.diffusion_functions.compute_lt(
+            get_probability=get_probs,
+            g=g,
+            transition_model=jax_transition_model,
+            rng=jax.random.PRNGKey(0),
+        )
+
+        print(uba)
         ipdb.set_trace()
         # both = inner(dense_data, node_mask, noisy_data["t"])
         # ipdb.set_trace()

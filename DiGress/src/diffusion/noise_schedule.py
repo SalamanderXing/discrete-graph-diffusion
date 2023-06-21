@@ -135,18 +135,22 @@ class DiscreteUniformTransition:
         self.u_e = self.u_e.to(device)
         self.u_y = self.u_y.to(device)
 
-        q_x = (
-            alpha_bar_t * torch.eye(self.X_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * self.u_x
-        )
-        q_e = (
-            alpha_bar_t * torch.eye(self.E_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * self.u_e
-        )
-        q_y = (
-            alpha_bar_t * torch.eye(self.y_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * self.u_y
-        )
+        try:
+            q_x = (
+                alpha_bar_t * torch.eye(self.X_classes, device=device).unsqueeze(0)
+                + (1 - alpha_bar_t) * self.u_x
+            )
+            q_e = (
+                alpha_bar_t * torch.eye(self.E_classes, device=device).unsqueeze(0)
+                + (1 - alpha_bar_t) * self.u_e
+            )
+            q_y = (
+                alpha_bar_t * torch.eye(self.y_classes, device=device).unsqueeze(0)
+                + (1 - alpha_bar_t) * self.u_y
+            )
+        except:
+            import ipdb
+            ipdb.set_trace()
 
         return utils.PlaceHolder(X=q_x, E=q_e, y=q_y)
 
@@ -202,18 +206,22 @@ class MarginalUniformTransition:
         self.u_e = self.u_e.to(device)
         self.u_y = self.u_y.to(device)
 
-        q_x = (
-            alpha_bar_t * torch.eye(self.X_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * self.u_x
-        )
-        q_e = (
-            alpha_bar_t * torch.eye(self.E_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * self.u_e
-        )
-        q_y = (
-            alpha_bar_t * torch.eye(self.y_classes, device=device).unsqueeze(0)
-            + (1 - alpha_bar_t) * self.u_y
-        )
+        try:
+            q_x = (
+                alpha_bar_t * torch.eye(self.X_classes, device=device).unsqueeze(0)
+                + (1 - alpha_bar_t) * self.u_x
+            )
+            q_e = (
+                alpha_bar_t * torch.eye(self.E_classes, device=device).unsqueeze(0)
+                + (1 - alpha_bar_t) * self.u_e
+            )
+            q_y = (
+                alpha_bar_t * torch.eye(self.y_classes, device=device).unsqueeze(0)
+                + (1 - alpha_bar_t) * self.u_y
+            )
+        except:
+            import ipdb
+            ipdb.set_trace()
 
         return utils.PlaceHolder(X=q_x, E=q_e, y=q_y)
 
