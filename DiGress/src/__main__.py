@@ -133,7 +133,7 @@ class DummyMetric:
 
 @hydra.main(version_base="1.1", config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
-    #os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    # os.environ["CUDA_VISIBLE_DEVICES"] = ""
     dataset_config = cfg["dataset"]
 
     if dataset_config["name"] == "tu":

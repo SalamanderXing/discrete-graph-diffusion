@@ -273,9 +273,11 @@ def sample_discrete_features(probX, probE, node_mask):
     return PlaceHolder(X=X_t, E=E_t, y=torch.zeros(bs, 0).type_as(X_t))
 
 
-def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M):
+def __org_compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M):
     """M: X or E
     Compute xt @ Qt.T * x0 @ Qsb / x0 @ Qtb @ xt.T
+
+    Compute xt @ Qt.T * x0 @ Qsb / (x0 @ Qtb * xt.T)
     """
     # Flatten feature tensors
     M = M.flatten(start_dim=1, end_dim=-2).to(
@@ -296,6 +298,82 @@ def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M):
 
     prob = product / denom.unsqueeze(-1)  # (bs, N, d)
 
+    return prob
+
+
+def compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M):
+    return __compute_posterior_distribution(M, M_t, Qt_M, Qsb_M, Qtb_M)
+
+
+# import einops as e
+from einop import einop
+import ipdb
+
+
+def __compute_posterior_distribution_edges(edges, edges_t, q_t_e, q_s_bar, q_t_bar):
+    edges_reshaped = edges.to(torch.float32)
+    edges_t_reshaped = edges_t.to(torch.float32)
+
+    q_t_e_transposed = einop(
+        q_t_e, "bs e1 e2 -> bs n1 n2 e2 e1", n1=edges.shape[1], n2=edges.shape[2]
+    )
+    left_term = einop(
+        edges_t_reshaped, q_t_e_transposed, "bs n1 n2 de, bs n1 n2 de e1 -> bs n1 n2 e1"
+    )
+
+    right_term = einop(edges_reshaped, q_s_bar, "bs n1 n2 de, bs de e1 -> bs n1 n2 e1")
+    product = left_term * right_term
+    denom = einop(edges_reshaped, q_t_bar, "bs n1 n2 de, bs de e1 -> bs n1 n2 e1")
+    denom = (denom * edges_t_reshaped).sum(dim=-1)
+    denom[denom == 0.0] = 1.0
+    prob = product / denom[..., None]
+    prob = einop(prob, "bs n1 n2 e -> bs (n1 n2) e")
+    return prob
+
+
+def __compute_posterior_distribution_nodes(nodes, nodes_t, q_t_e, q_s_bar, q_t_bar):
+    edges_reshaped = nodes.to(torch.float32)
+    edges_t_reshaped = nodes_t.to(torch.float32)
+
+    q_t_e_transposed = einop(q_t_e, "bs e1 e2 -> bs n e2 e1", n=nodes.shape[1])
+    left_term = einop(
+        edges_t_reshaped, q_t_e_transposed, "bs n de, bs n de e1 -> bs n e1"
+    )
+    right_term = edges_reshaped @ q_s_bar
+    product = left_term * right_term
+
+    denom = edges_reshaped @ q_t_bar
+    denom = (denom * edges_t_reshaped).sum(dim=-1)
+    denom[denom == 0.0] = 1.0
+    prob = product / denom[..., None]
+    return prob
+
+
+def __compute_posterior_distribution(edges, edges_t, q_t_e, q_s_bar, q_t_bar):
+    org_res = __org_compute_posterior_distribution(
+        edges, edges_t, q_t_e, q_s_bar, q_t_bar
+    )
+    # edges_reshaped = (
+    #     edges if len(edges.shape) == 3 else einop(edges, "bs n1 n2 de -> bs (n1 n2) de")
+    # ).to(torch.float32)
+    # edges_t_reshaped = (
+    #     edges_t
+    #     if len(edges_t.shape) == 3
+    #     else einop(edges_t, "bs n1 n2 de -> bs (n1 n2) de")
+    # ).to(torch.float32)
+
+    if len(edges.shape) == 3:
+        prob = __compute_posterior_distribution_nodes(
+            edges, edges_t, q_t_e, q_s_bar, q_t_bar
+        )
+    else:
+        prob = __compute_posterior_distribution_edges(
+            edges, edges_t, q_t_e, q_s_bar, q_t_bar
+        )
+
+    # assert prob.sum(-1).allclose(torch.tensor(1.0)), ipdb.set_trace()
+    mask = ~torch.isnan(org_res)
+    assert prob[mask].allclose(org_res[mask]), ipdb.set_trace()
     return prob
 
 

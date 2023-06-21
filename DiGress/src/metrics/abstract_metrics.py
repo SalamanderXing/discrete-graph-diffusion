@@ -120,14 +120,14 @@ class ProbabilityMetric(Metric):
         """This metric is used to track the marginal predicted probability of a class during training."""
         super().__init__()
         self.add_state("prob", default=torch.tensor(0.0), dist_reduce_fx="sum")
-        self.add_state("total", default=torch.tensor(0.0), dist_reduce_fx="sum")
+        self.add_state("total_samples", default=torch.tensor(0.0), dist_reduce_fx="sum")
 
     def update(self, preds: Tensor) -> None:
         self.prob += preds.sum()
-        self.total += preds.numel()
+        self.total_samples += preds.numel()
 
     def compute(self):
-        return self.prob / self.total
+        return self.prob / self.total_samples
 
 
 class NLL(Metric):

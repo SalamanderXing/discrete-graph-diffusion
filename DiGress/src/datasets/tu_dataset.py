@@ -153,7 +153,7 @@ class TUInfos(AbstractDatasetInfos):
         self.atom_weights = {i: i + 1 for i in range(len(self.n_nodes))}
         self.mean_n_nodes = datamodule.mean_n_nodes
         self.mean_n_edges = datamodule.mean_n_edges
-        self.use_bpe = True 
+        self.use_bpe = True
         self.input_dims = {
             "X": len(self.node_types),
             "E": len(self.edge_types),

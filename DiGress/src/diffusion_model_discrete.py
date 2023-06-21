@@ -14,9 +14,119 @@ from .diffusion.noise_schedule import (
     MarginalUniformTransition,
 )
 from .diffusion import diffusion_utils
-from .metrics.train_metrics import TrainLossDiscrete
+from .metrics.train_metrics import (
+    TrainLossDiscreteMSE as TrainLossDiscrete,
+)  # TrainLossDiscrete
 from .metrics.abstract_metrics import SumExceptBatchMetric, SumExceptBatchKL, NLL
 from . import utils
+from rich import print
+import sys
+from collections.abc import Callable
+import torch as t
+
+sys.path.insert(0, "../")
+
+import graph_diffusion
+from graph_diffusion.trainers import ddgd_trainer
+from graph_diffusion.shared.graph import graph_distribution as gd
+import jax
+from jax import numpy as jnp, Array
+
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+from einop import einop
+
+GraphDistribution = gd.GraphDistribution
+from jaxtyping import Int
+
+
+def get_prob_from_forward(
+    *,
+    forward: Callable,
+    noise_schedule,
+    compute_extra_data,
+    device,
+    Xdim_output,
+    Edim_output,
+    transition_model,
+):
+    def inner(g: GraphDistribution, time: Int[Array, "b"]):
+        node_mask, _ = g.masks()
+        # placeholder: utils.PlaceHolder, node_mask, time):
+        # X = placeholder.X
+        # E = placeholder.E
+        # y = placeholder.y
+        X = t.tensor(g.nodes)
+        E = t.tensor(g.edges)
+        beta_0 = noise_schedule(time)
+        Q_bar = transition_model.get_Qt_bar(beta_t=beta_0, device=device)
+        probX0 = X @ Q_bar.X  # (bs, n, dx_out)
+        probE0 = E @ Q_bar.E.unsqueeze(1)  # (bs, n, n, de_out)
+
+        sampled0 = diffusion_utils.sample_discrete_features(
+            probX=probX0, probE=probE0, node_mask=node_mask
+        )
+
+        X0 = F.one_hot(sampled0.X, num_classes=Xdim_output).float()
+        E0 = F.one_hot(sampled0.E, num_classes=Edim_output).float()
+        y0 = sampled0.y
+        assert (X.shape == X0.shape) and (E.shape == E0.shape)
+
+        sampled_0 = utils.PlaceHolder(X=X0, E=E0, y=y0).mask(node_mask)
+
+        # Predictions
+        noisy_data = {
+            "X_t": sampled_0.X,
+            "E_t": sampled_0.E,
+            "y_t": sampled_0.y,
+            "node_mask": node_mask,
+            "t": time,  # torch.zeros(X0.shape[0], 1).type_as(y0),
+        }
+        extra_data = compute_extra_data(noisy_data)
+        pred = forward(noisy_data, extra_data, node_mask)
+
+        # Normalize predictions
+        probX = F.softmax(pred.X, dim=-1)
+        ipdb.set_trace()
+        # probE0 = F.softmax(pred0.E, dim=-1)
+        # proby0 = F.softmax(pred0.y, dim=-1)
+
+        # ipdb.set_trace()
+        # Set masked rows to arbitrary values that don't contribute to loss
+        # probX0[~node_mask] = torch.ones(Xdim_output).type_as(probX0)
+        # probE0[~(node_mask.unsqueeze(1) * node_mask.unsqueeze(2))] = torch.ones(
+        #     Edim_output
+        # ).type_as(probE0)
+        #
+        # diag_mask = torch.eye(probE0.size(1)).type_as(probE0).bool()
+        # diag_mask = diag_mask.unsqueeze(0).expand(probE0.size(0), -1, -1)
+        # probE0[diag_mask] = torch.ones(Edim_output).type_as(probE0)
+
+        # return utils.PlaceHolder(X=probX0, E=probE0, y=proby0)
+
+        # pred_x = t.cat(
+        #     ([t.zeros(pred.x.shape[:-1] + (1,)).type_as(pred.x), pred.x]), dim=-1
+        # )
+        # above concatenation but with einop (a proxy to einops operations)
+        uba = (t.zeros(probX.shape[:-1] + (1,)).to(pred.X.device), probX)
+        # import einops as e
+        #
+        # ipdb.set_trace()
+        # pred_x = einop(uba, "a b *")[0]
+        pred_e = F.softmax(pred.E, -1)
+        uba = t.eye(pred_e.shape[-1])[None, None, None, 0].to(pred_e.device)
+        pred_e = t.where((pred_e.sum(-1) == 0)[..., None], uba, pred_e)
+
+        pred_e = gd.GraphDistribution.to_symmetric(jnp.array(pred_e.cpu()))
+        node_mask = jnp.array(node_mask.cpu())
+        pred_g = gd.GraphDistribution.create(
+            nodes=jnp.array(probX.cpu()),
+            edges=pred_e,
+            nodes_counts=jnp.array(node_mask.sum(-1)).astype(int),
+            edges_counts=(node_mask.sum(-1) ** 2 - node_mask.sum(-1)).astype(int),
+        )
+        return pred_g
+
+    return inner
 
 
 class DiscreteDenoisingDiffusion(pl.LightningModule):
@@ -124,6 +234,7 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         self.number_chain_steps = cfg.general.number_chain_steps
         self.best_val_nll = 1e8
         self.val_counter = 0
+        self.val_results = []
 
     def training_step(self, data, i):
         data.y = torch.zeros(data.y.shape[0], 0)
@@ -200,14 +311,50 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         noisy_data = self.apply_noise(dense_data.X, dense_data.E, data.y, node_mask)
         extra_data = self.compute_extra_data(noisy_data)
         pred = self.forward(noisy_data, extra_data, node_mask)
-        nll = self.compute_val_loss(
+        val_results = self.compute_val_loss(
             pred, noisy_data, dense_data.X, dense_data.E, data.y, node_mask, test=False
         )
-        if hasattr(self.dataset_info, "use_bpe") and self.dataset_info.use_bpe:
-            nll = nll / (
-                torch.log(torch.tensor(2.0)) * self.dataset_info.mean_n_edges * 2
-            )
 
+        inner = get_prob_from_forward(
+            Xdim_output=self.Xdim_output,
+            Edim_output=self.Edim_output,
+            forward=self.forward,
+            noise_schedule=self.noise_schedule,
+            transition_model=self.transition_model,
+            device=self.device,
+            compute_extra_data=self.compute_extra_data,
+        )
+
+        uba = (
+            ddgd_trainer.discrete_denoising_graph_diffusion.TransitionModel.from_torch(
+                self.transition_model, self.noise_schedule
+            )
+        )
+        ipdb.set_trace()
+        # both = inner(dense_data, node_mask, noisy_data["t"])
+        # ipdb.set_trace()
+        # to_py = lambda uba: {
+        #     k: v if not isinstance(v, torch.Tensor) else v.cpu().numpy()
+        #     for k, v in (uba.items() if isinstance(uba, dict) else uba.__dict__.items())
+        # }
+        # to_save = {
+        #     "noisy_data": to_py(noisy_data),
+        #     "pred":to_py(pred),
+        #     "dense_data":to_py(dense_data),
+        #     "val_results":val_results
+        # }
+        # import pickle
+        # import os
+        # print(f"{os.getcwd()=}")
+        # pickle.dump(to_save, open('test.pt', 'wb'))
+        # ipdb.set_trace()
+        self.val_results.append(val_results)
+        nll = val_results["nll"]
+        # if hasattr(self.dataset_info, "use_bpe") and self.dataset_info.use_bpe:
+        #     nll = nll / (
+        #         torch.log(torch.tensor(2.0)) * self.dataset_info.mean_n_edges * 2
+        #     )
+        #
         return {"loss": nll}
 
     def on_validation_epoch_end(self) -> None:
@@ -228,7 +375,14 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
             },
             commit=False,
         )
-
+        merged = {
+            key: torch.tensor([res[key] for res in self.val_results])
+            .mean()
+            .item()
+            .__round__(4)
+            for key in self.val_results[0]
+        }
+        print(merged)
         print(
             f"Epoch {self.current_epoch}: Val NLL {metrics[0] :.2f} -- Val Atom type KL {metrics[1] :.2f} -- ",
             f"Val Edge type KL: {metrics[2] :.2f}",
@@ -635,17 +789,19 @@ class DiscreteDenoisingDiffusion(pl.LightningModule):
         # Update NLL metric object and return batch nll
         nll = (self.test_nll if test else self.val_nll)(nlls)  # Average over the batch
 
+        to_log = {
+            "eval_kl_prior": kl_prior.mean(),
+            "eval_diffusion_loss": loss_all_t.mean(),
+            "log_pn": log_pN.mean(),
+            "eval_rec_logp": loss_term_0,
+            "nll": nll,
+        }
+
         wandb.log(
-            {
-                "kl prior": kl_prior.mean(),
-                "Estimator loss terms": loss_all_t.mean(),
-                "log_pn": log_pN.mean(),
-                "loss_term_0": loss_term_0,
-                "batch_test_nll" if test else "val_nll": nll,
-            },
+            to_log,
             commit=False,
         )
-        return nll
+        return to_log
 
     def forward(self, noisy_data, extra_data, node_mask):
         X = torch.cat((noisy_data["X_t"], extra_data.X), dim=2).float()

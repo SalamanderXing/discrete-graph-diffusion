@@ -94,6 +94,51 @@ class TrainLoss(nn.Module):
             metric.reset()
 
 
+from torchmetrics import Metric, MeanSquaredError
+
+
+class TrainLossDiscreteMSE(nn.Module):
+    """Train with Cross entropy"""
+
+    def __init__(self, lambda_train):
+        super().__init__()
+        self.node_loss = MeanSquaredError()
+        self.edge_loss = MeanSquaredError()
+        # self.y_loss = SumExceptBatchMSE()
+        self.lambda_train = lambda_train
+
+    def forward(
+        self, masked_pred_X, masked_pred_E, pred_y, true_X, true_E, true_y, log: bool
+    ):
+        node_loss = self.node_loss(masked_pred_X, true_X)
+        edge_loss = self.edge_loss(masked_pred_E, true_E)
+        loss = node_loss + edge_loss
+        return loss
+
+    def reset(self):
+        for metric in [self.node_loss, self.edge_loss]:
+            metric.reset()
+
+    def log_epoch_metrics(self, current_epoch, start_epoch_time):
+        epoch_node_loss = (
+            self.node_loss.compute()  # if self.node_loss.total_samples > 0 else -1
+        )
+        epoch_edge_loss = (
+            self.edge_loss.compute()  # if self.edge_loss.total_samples > 0 else -1
+        )
+        epoch_y_loss = 0
+        to_log = {
+            "train_epoch/x_CE": epoch_node_loss,
+            "train_epoch/E_CE": epoch_edge_loss,
+            "train_epoch/y_CE": epoch_y_loss,
+        }
+        wandb.log(to_log, commit=False)
+
+        print(
+            f"Epoch {current_epoch} finished: X: {epoch_node_loss :.2f} -- E: {epoch_edge_loss :.2f} "
+        )
+
+
 class TrainLossDiscrete(nn.Module):
     """Train with Cross entropy"""
 
