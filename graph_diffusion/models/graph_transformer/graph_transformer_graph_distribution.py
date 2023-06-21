@@ -8,7 +8,7 @@ from flax.core.frozen_dict import FrozenDict
 from mate.jax import typed, Key
 from jax import Array
 from rich import print
-import einops as e
+from einop import einop
 
 GraphDistribution = gd.GraphDistribution
 
@@ -61,6 +61,7 @@ class GraphTransformerGraphDistribution(nn.Module):
     gate_residual: bool = False
     with_feedforward: bool = False
     norm_edges: bool = False
+    use_embeddings: bool = True
 
     @typed
     @nn.compact
@@ -69,19 +70,18 @@ class GraphTransformerGraphDistribution(nn.Module):
         g: GraphDistribution,
         embedding: Array,
         deterministic: bool = False,
-        use_embeddings: bool = False,
     ) -> GraphDistribution:
         embedding_to_nodes = nn.Sequential((DDense(5), nn.sigmoid))
         embedding_to_edges = nn.Sequential((DDense(5), nn.sigmoid))
-        if use_embeddings:
+        if self.use_embeddings:
             nodes_embedding = embedding_to_nodes(embedding, deterministic)
             edges_embedding = embedding_to_edges(embedding, deterministic)
         else:
             nodes_embedding = np.empty((g.nodes.shape[0], 0))
             edges_embedding = np.empty((g.edges.shape[0], 0))
         n = g.nodes.shape[1]
-        nodes_embedding = e.repeat(nodes_embedding, "b ten -> b n ten", n=n)
-        edges_embedding = e.repeat(edges_embedding, "b tee -> b n1 n2 tee", n1=n, n2=n)
+        nodes_embedding = einop(nodes_embedding, "b ten -> b n ten", n=n)
+        edges_embedding = einop(edges_embedding, "b tee -> b n1 n2 tee", n1=n, n2=n)
 
         # g = GraphDistribution.create(
         #     x=gn,
@@ -99,12 +99,7 @@ class GraphTransformerGraphDistribution(nn.Module):
         conv_features = np.empty(g.edges.shape)
         nodes = np.concatenate([g.nodes, nodes_embedding, spec_nodes], axis=-1)
         edges = np.concatenate(
-            [
-                g.edges,
-                edges_embedding,
-                spec_edges,
-                conv_features
-            ],
+            [g.edges, edges_embedding, spec_edges, conv_features],
             axis=-1,
         )
         new_nodes, new_edges = GraphTransformer(
@@ -148,6 +143,7 @@ class GraphTransformerGraphDistribution(nn.Module):
         out_node_features: int = -1,
         out_edge_features: int = -1,
         num_layers: int = 3,
+        use_embeddings: bool = True,
     ) -> tuple[nn.Module, FrozenDict]:
         out_node_features = (
             out_node_features if out_node_features > 0 else in_node_features
@@ -157,6 +153,7 @@ class GraphTransformerGraphDistribution(nn.Module):
         )
         model = cls(
             depth=num_layers,
+            use_embeddings=use_embeddings,
         )
 
         key_nodes, key_edges = jax.random.split(key, num=2)

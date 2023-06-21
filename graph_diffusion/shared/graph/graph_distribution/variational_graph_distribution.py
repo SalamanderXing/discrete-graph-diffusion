@@ -121,9 +121,11 @@ class VariationalGraphDistribution(GraphDistribution):
         return logprobs
 
     @typed
-    def __logprob_edges(self, x: EdgeDistribution, z: EdgeDistribution, g_0) -> Float[Array, "b"]:
+    def __logprob_edges(
+        self, x: EdgeDistribution, z: EdgeDistribution, g_0
+    ) -> Float[Array, "b"]:
         x_unscaled = ((x + 1) / 2).astype("int32")
-        #x_onehot = jax.nn.one_hot(x_unscaled, self.edge_vocab_size)
+        # x_onehot = jax.nn.one_hot(x_unscaled, self.edge_vocab_size)
         logprobs = self.__decode_edge(z, g_0)
         # logprob = np.einsum(
         #     "bijkl -> b",
@@ -132,9 +134,10 @@ class VariationalGraphDistribution(GraphDistribution):
         # return logprob
         return logprobs.min(-1).mean(-1).sum(-1).sum(-1)
 
-
     @typed
-    def __logprob_nodes(self, x: NodeDistribution, z: NodeDistribution, g_0):  # -> Float[Array, "b"]:
+    def __logprob_nodes(
+        self, x: NodeDistribution, z: NodeDistribution, g_0
+    ):  # -> Float[Array, "b"]:
         x_unscaled = ((x + 1) / 2).astype("int32")
         x_onehot = jax.nn.one_hot(x_unscaled, self.node_vocab_size)
         logprobs = self.__decode_node(z, g_0)

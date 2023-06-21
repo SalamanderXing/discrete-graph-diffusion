@@ -53,7 +53,7 @@ dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
 )
-diffusion_steps = 50
+diffusion_steps = 500
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
 model, params = GraphTransformerGraphDistribution.initialize(
     key=rngs["params"],
@@ -77,7 +77,6 @@ trainer = Trainer(
     num_epochs=200,
     match_edges=True,
     save_path=save_path,
-    ds_name=ds_name,
     nodes_dist=dataset.nodes_dist,
     nodes_prior=dataset.node_prior,
     edges_prior=dataset.edge_prior,

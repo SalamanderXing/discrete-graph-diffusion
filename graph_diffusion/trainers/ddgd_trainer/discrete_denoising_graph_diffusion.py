@@ -117,16 +117,17 @@ def compute_train_loss(
     # print(pred_graph.edges.argmax(-1)[0])
     target = z if stepwise else g
     loss_type = "mse"
-    if loss_type == 'mse':
+    if loss_type == "mse":
         mse_nodes = (target.nodes - pred_graph.nodes) ** 2
         mse_edges = (target.edges - pred_graph.edges) ** 2
         weight = 1000
         weighted_mse_nodes = np.where(z.nodes != 1, weight, 1) * mse_nodes
         count_diff = (
-            (target.edges.argmax(-1) != 0).sum() - (pred_graph.edges.argmax(-1) != 0).sum()
+            (target.edges.argmax(-1) != 0).sum()
+            - (pred_graph.edges.argmax(-1) != 0).sum()
         ) ** 2
         loss = weighted_mse_nodes.mean() + mse_edges.mean() + match_edges * count_diff
-    elif loss_type == 'ce':
+    elif loss_type == "ce":
         loss = gd.cross_entropy(pred_graph, target).mean()
     else:
         raise ValueError(f"Unknown loss type: {loss_type}")
@@ -134,57 +135,7 @@ def compute_train_loss(
     return loss
 
 
-@typed
-def compute_val_loss(
-    *,
-    target: GraphDistribution,
-    transition_model: TransitionModel,
-    get_probability: Callable[
-        [GraphDistribution, Int[Array, "batch_size"]], GraphDistribution
-    ],
-    nodes_dist: Array,
-    rng_key: Key,
-    bits_per_edge: SBool = False,
-) -> dict[str, Float[Array, "batch_size"]]:
-    base = jax.lax.select(bits_per_edge, 2.0, np.e)
 
-    # 1.  log_prob of the target graph under the nodes distribution (based on # of nodes)
-    log_probs = np.log(nodes_dist[target.nodes_counts]) / np.log(base)
-
-    # 2. The KL between q(z_T | x) and p(z_T) = (simply an Empirical prior). Should be close to zero.
-    kl_prior = df.kl_prior(
-        target=target,
-        transition_model=transition_model,
-        bits_per_edge=bits_per_edge,
-    )
-    # 3. Diffusion loss
-    loss_all_t = df.compute_lt(
-        rng=rng_key,
-        g=target,
-        transition_model=transition_model,
-        get_probability=get_probability,
-    )
-    # 4. Reconstruction loss
-    # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
-    reconstruction_logp = df.reconstruction_logp(
-        rng_key=rng_key,
-        g=target,
-        transition_model=transition_model,
-        get_probability=get_probability,
-        n_samples=1,
-        base=base,
-    )
-    # edges_counts = jax.lax.select(
-    #     bits_per_edge, target.edges_counts * 2, np.ones(len(target.edges_counts), int)
-    # )
-    tot_loss = (-log_probs + kl_prior + loss_all_t - reconstruction_logp)
-    return {
-        "log_pn": log_probs,
-        "kl_prior": kl_prior,
-        "diffusion_loss": loss_all_t,
-        "rec_logp": reconstruction_logp,
-        "nll": tot_loss,
-    }
 
 
 def print_gradient_analysis(grads: FrozenDict):
@@ -277,7 +228,6 @@ class Trainer:
     rngs: dict[str, Key]
     learning_rate: float
     save_path: str
-    ds_name: str
     nodes_dist: Array
     nodes_prior: Array
     edges_prior: Array
@@ -289,8 +239,13 @@ class Trainer:
     num_edge_features: int
     num_node_features: int
     match_edges: bool = True
-    restart: bool = False
+    do_restart: bool = False
     plot_every_steps: int = 2
+    temporal_embedding_dim: int = 128
+    n_val_steps: int = 30
+    grad_clip: float = -1.0
+    weight_decay: float = 0.0
+    min_learning_rate: float = 1e-6
 
     def __post_init__(
         self,
@@ -299,7 +254,7 @@ class Trainer:
         self.state = TrainState.create(
             apply_fn=self.model.apply,
             params=self.params,
-            tx=get_optimizer(self.learning_rate),
+            tx=self.__get_optimizer(),
             key=self.rngs["dropout"],
             last_loss=1000000,
             lr=self.learning_rate,
@@ -310,7 +265,7 @@ class Trainer:
             x_priors=self.nodes_prior,
             e_priors=self.edges_prior,
             diffusion_steps=self.diffusion_steps,
-            temporal_embedding_dim=128,
+            temporal_embedding_dim=self.temporal_embedding_dim,
             n=self.n,
         )
         self.plot_path = os.path.join(self.save_path, "plots")
@@ -329,14 +284,13 @@ class Trainer:
         *,
         rng: Key,
         exhaustive: bool = False,
-        n_val_steps: int = 30,
     ) -> tuple[dict[str, Float[Array, ""]], float]:
         run_losses: list[dict[str, Float[Array, "batch_size"]]] = []
         t0 = time()
         # n_val_steps = (
         #     30  # 10 if not exhaustive else len(self.val_loader)  # type: ignore
         # )
-        for i in tqdm(range(n_val_steps)):
+        for i in tqdm(range(self.n_val_steps)):
             graph_dist = next(self.val_loader)  # type: ignore
             losses = val_step(
                 dense_data=graph_dist,  # , mask.astype(bool)),
@@ -401,8 +355,10 @@ class Trainer:
             state_dict = self.checkpoint_manager.restore(
                 self.checkpoint_manager.latest_step()
             )
+            self.learning_rate = state_dict["lr"]
+            # ipdb.set_trace()
             self.state = TrainState(
-                tx=get_optimizer(lr=state_dict["lr"]),
+                tx=self.__get_optimizer(),
                 apply_fn=self.state.apply_fn,
                 **{k: v for k, v in state_dict.items()},
             )
@@ -412,13 +368,31 @@ class Trainer:
         else:
             print("[yellow]No checkpoint found, starting from scratch[/yellow]")
 
+    #@typed
+    def restart(self):
+        self.do_restart = True
+        self.train()
+
+    def __get_optimizer(self):
+        components = []
+        if self.grad_clip > 0: 
+            components.append(optax.clip_by_global_norm(10.0))
+        components.append(optax.adamw(learning_rate=self.learning_rate, weight_decay=self.weight_decay))
+        return optax.chain(
+            *components
+        ) if len(components) > 1 else components[0]
+
     @typed
     def train(
         self,
     ):
-        if self.restart:
+        last_epoch = 0
+        if self.do_restart:
             self.__restore_checkpoint()
+            last_epoch = self.checkpoint_manager.latest_step()
             print("Restarting training")
+
+        assert last_epoch <= self.num_epochs, "Already trained for this many epochs."
 
         val_losses = []
         train_losses = []
@@ -426,7 +400,7 @@ class Trainer:
         current_patience = patience
         stopping_criterion = -5
         rng, _ = jax.random.split(self.rngs["params"])
-        for epoch_idx in range(1, self.num_epochs + 1):
+        for epoch_idx in range(last_epoch, self.num_epochs + 1):
             rng, rng_this_epoch = jax.random.split(rng)  # TODO use that
             print(
                 f"[green bold]Epoch[/green bold]: {epoch_idx} \n\n[underline]Validating[/underline]"
@@ -445,12 +419,13 @@ class Trainer:
             if self.state.last_loss < avg_loss:
                 if current_patience <= 0:
                     new_lr = self.state.lr * 0.1
-                    if new_lr >= 1e-05:
+                    if self.learning_rate >= self.min_learning_rate:
+                        self.learning_rate = new_lr
                         print(
-                            f"[red] learning rate did not decrease. Reducing lr to {new_lr} [/red]"
+                            f"[red] learning rate did not decrease. Reducing lr to {self.learning_rate} [/red]"
                         )
                         self.state = self.state.replace(
-                            lr=new_lr, tx=get_optimizer(new_lr), last_loss=avg_loss
+                            lr=new_lr, tx=self.__get_optimizer(), last_loss=avg_loss
                         )
                         current_patience = patience
                 else:
@@ -461,7 +436,7 @@ class Trainer:
                         )
                         break
 
-            train_loss, train_time = self.train_epoch(
+            train_loss, train_time = self.__train_epoch(
                 rng=rng,
                 epoch=epoch_idx,
             )
@@ -476,7 +451,9 @@ class Trainer:
                 )
                 print(f"[yellow] Saving checkpoint[/yellow]")
                 self.checkpoint_manager.save(epoch_idx, self.state)
-                print(f"[yellow] Saved! [/yellow]")
+                print(
+                    f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
+                )
 
                 if epoch_idx % self.plot_every_steps == 0:
                     self.plot_preds(
@@ -519,7 +496,7 @@ class Trainer:
         limit_dist = g_batch.set(
             "edges", jax.nn.softmax(self.transition_model.limit_dist.edges + 0.1)
         ).set("nodes", jax.nn.softmax(self.transition_model.limit_dist.nodes + 0.1))
-        #g = limit_dist.sample_one_hot(rng)
+        # g = limit_dist.sample_one_hot(rng)
         g = limit_dist
         # g = g.set("edges_counts", ((g.edges.argmax(-1) != 0).sum() / 2).astype(int))
         gs = [g]
@@ -529,11 +506,13 @@ class Trainer:
             # g = g_batch[np.array([0])].repeat(len(self.transition_model.q_bars))
             # posterior_samples = (g @ q_bars).sample_one_hot(rng)
             timesteps = np.array([t] * len(g))
-            model_probs = model(g.sample_one_hot(rng), timesteps)
+            g_t = g.sample_one_hot(rng)
+            model_probs = model(g_t, timesteps)
+            # ipdb.set_trace()
             # g = model_probs.argmax()
             g = df.posterior_distribution(
-                g=g,
-                g_t=model_probs,
+                g=model_probs,
+                g_t=g_t,
                 t=timesteps,
                 transition_model=self.transition_model,
             )
@@ -547,7 +526,7 @@ class Trainer:
         )
 
     @typed
-    def train_epoch(
+    def __train_epoch(
         self,
         *,
         epoch: int,
@@ -555,7 +534,7 @@ class Trainer:
     ):
         run_losses = []
         t0 = time()
-        n_train_steps = 40
+        n_train_steps = 140
         print(f"[pink] {self.state.lr=} [/pink]")
         for batch_index in tqdm(range(n_train_steps)):
             graph_dist = next(self.train_loader)
@@ -601,12 +580,6 @@ def plot_noised_graphs(train_loader, transition_model: TransitionModel, save_pat
 def prettify(val: dict[str, Float[Array, ""]]) -> dict[str, float]:
     return {k: float(f"{v.tolist():.4f}") for k, v in val.items()}
 
-
-def get_optimizer(lr):
-    return optax.chain(
-        optax.clip_by_global_norm(10.0),
-        optax.adamw(learning_rate=lr, weight_decay=1e-5),
-    )
 
 
 def save_stuff():

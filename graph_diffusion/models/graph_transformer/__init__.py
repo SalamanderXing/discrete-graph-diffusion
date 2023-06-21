@@ -1,3 +1,4 @@
 from .graph_transformer_graph_distribution import GraphTransformerGraphDistribution
-#from .graph_transformer_graph import GraphTransformerGraph
+
+# from .graph_transformer_graph import GraphTransformerGraph
 from .graph_transformer_new import GraphTransformerNew

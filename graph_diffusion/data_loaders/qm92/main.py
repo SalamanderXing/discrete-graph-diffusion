@@ -196,7 +196,7 @@ def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
                 Dataset.from_tensor_slices(bunch.train_nodes_counts),
             )
         )
-        #.drop_remainder(True)
+        # .drop_remainder(True)
         .shuffle(1000)
         .repeat()
         .batch(batch_size)
@@ -211,7 +211,7 @@ def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
                 Dataset.from_tensor_slices(bunch.test_nodes_counts),
             )
         )
-        #.drop_remainder(True)
+        # .drop_remainder(True)
         .shuffle(1000)
         .repeat()
         .batch(batch_size)

@@ -2,7 +2,7 @@ import jax.numpy as np
 from jax import Array
 from jaxtyping import Float, Int
 from mate.jax import SFloat, SInt, typed
-import jax_dataclasses as jdc
+from flax.struct import dataclass
 import jax
 import ipdb
 
@@ -11,6 +11,7 @@ import einops as e
 from ....shared.graph import graph_distribution as gd
 from .distribution import Distribution
 from .noise_schedules import NoiseSchedule_Scalar
+from einop import einop
 
 Q, GraphDistribution = gd.Q, gd.GraphDistribution
 
@@ -81,15 +82,64 @@ def get_timestep_embedding(
 #
 
 
-@jdc.pytree_dataclass
-class TransitionModel(jdc.EnforcedAnnotationsMixin):
-    prior: Distribution
+@dataclass
+class TransitionModel:
+    # prior: Distribution
     diffusion_steps: SInt
     qs: Q
     q_bars: Q
-    alpha_bars: Float[Array, "n"]
+    # alpha_bars: Float[Array, "n"]
     temporal_embeddings: Float[Array, "temporal_embedding_dim"]
     limit_dist: GraphDistribution
+
+    @classmethod
+    @typed
+    def from_torch(cls, torch_transition_model, torch_noise_schedule):
+        import torch as t
+
+        device = t.device("cpu")
+        qs_raw = [
+            torch_transition_model.get_Qt(beta_t[None], device)
+            for beta_t in torch_noise_schedule.betas
+        ]
+        q_bars_raw = [
+            torch_transition_model.get_Qt_bar(beta_t[None], device)
+            for beta_t in torch_noise_schedule.betas
+        ]
+        q_nodes = einop([np.array(q.X.numpy()) for q in qs_raw], "* a b")[0]
+        q_bars_nodes = einop([np.array(q.X.numpy()) for q in q_bars_raw], "* a b")[0]
+        q_edges = einop([np.array(q.E.numpy()) for q in qs_raw], "* a b")[0]
+        q_bars_edges = einop([np.array(q.E.numpy()) for q in q_bars_raw], "* a b")[0]
+        q_nodes = q_nodes + 0.00001
+        q_nodes = q_nodes / q_nodes.sum(axis=-1, keepdims=True)
+        q_edges = q_edges + 0.00001
+        q_edges = q_edges / q_edges.sum(axis=-1, keepdims=True)
+        q_bars_nodes = q_bars_nodes + 0.00001
+        q_bars_nodes = q_bars_nodes / q_bars_nodes.sum(axis=-1, keepdims=True)
+        q_bars_edges = q_bars_edges + 0.00001
+        q_bars_edges = q_bars_edges / q_bars_edges.sum(axis=-1, keepdims=True)
+        qs = Q(nodes=q_nodes, edges=q_edges)
+        q_bars = Q(nodes=q_bars_nodes, edges=q_bars_edges)
+        limit_edges = einop(
+            np.array(torch_transition_model.u_e[0, 0]), "ee -> 1 n1 n2 ee", n1=9, n2=9
+        )  # FIXME: get te actual nodes counts
+        limit_nodes = einop(
+            np.array(torch_transition_model.u_x[0, 0].numpy()), "en -> 1 n en", n=9
+        )
+        print(limit_edges.shape)
+        limit_dist = GraphDistribution.create(
+            nodes=limit_nodes,
+            edges=limit_edges,
+            nodes_counts=np.ones(1, int),
+            edges_counts=np.ones(1, int),
+        )
+        return cls(
+            diffusion_steps=torch_noise_schedule.timesteps,
+            qs=qs,
+            q_bars=q_bars,
+            temporal_embeddings=np.zeros(128),
+            limit_dist=limit_dist,
+        )
 
     @classmethod
     @typed
@@ -172,8 +222,8 @@ class TransitionModel(jdc.EnforcedAnnotationsMixin):
             diffusion_steps=diffusion_steps,
             qs=qs,
             q_bars=q_bars,
-            prior=prior,
-            alpha_bars=alphas_bar,
+            # prior=prior,
+            # alpha_bars=alphas_bar,
             temporal_embeddings=temporal_embeddings,
             limit_dist=limit_dist,
         )

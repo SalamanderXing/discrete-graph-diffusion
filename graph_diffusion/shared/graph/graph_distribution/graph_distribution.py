@@ -339,8 +339,8 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     def __matmul__(self, q: Q) -> "GraphDistribution":
         x = self.nodes @ q.nodes
         e = self.edges @ q.edges[:, None]
-        x = x / x.sum(-1, keepdims=True)
-        e = e / e.sum(-1, keepdims=True)
+        # x = x / x.sum(-1, keepdims=True)
+        # e = e / e.sum(-1, keepdims=True)
         return GraphDistribution.create(
             nodes=x,
             edges=e,
@@ -352,6 +352,22 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         return self.__class__.create(
             nodes=self.nodes**n,
             edges=self.edges**n,
+            nodes_counts=self.nodes_counts,
+            edges_counts=self.edges_counts,
+        )
+
+    def mask(self) -> "GraphDistribution":
+        nodes = np.where(
+            (self.nodes.sum(-1) > 0)[..., None], self.nodes, 1 / self.nodes.shape[-1]
+        )
+        nodes = nodes / nodes.sum(-1, keepdims=True)
+        edges = np.where(
+            (self.edges.sum(-1) > 0)[..., None], self.edges, 1 / self.edges.shape[-1]
+        )
+        edges = edges / edges.sum(-1, keepdims=True)
+        return GraphDistribution.create(
+            nodes=nodes,
+            edges=edges,
             nodes_counts=self.nodes_counts,
             edges_counts=self.edges_counts,
         )
@@ -411,7 +427,12 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             if location is not None and not location.endswith(".png")
             else location
         )
-        import numpy as np
+        original_len = len(rows[0])
+        skip = (len(rows[0]) // 15) if len(rows[0]) > 15 else 1
+        rows = [
+            GraphDistribution.concatenate((row[::skip], row[np.array([-1])]))
+            for row in rows
+        ]
 
         # assert 1 <= len(rows) <= 2, "can only plot 1 or 2 rows"
         import matplotlib.pyplot as plt
@@ -428,25 +449,13 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
         cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1] - 1))
         cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1] - 1))
-        cmap_edge = np.concatenate([cmap_edge, np.zeros((1, 4))], axis=0)
-        cmap_node = np.concatenate([cmap_node, np.zeros((1, 4))], axis=0)
+        cmap_edge = numpy.concatenate([cmap_edge, numpy.zeros((1, 4))], axis=0)
+        cmap_node = numpy.concatenate([cmap_node, numpy.zeros((1, 4))], axis=0)
         node_size = 10.0
         positions = [None] * len(rows[0])
-        row_titles = ["Raw Input", "Prediction", "Noised Input"]
 
-        # Define the titles for each row
-
-        # Add a centered title to each row
-        # for ax, row in zip(axs[:, 0], row_titles):
-        #     fig.text(
-        #         0.5,
-        #         ax.get_position().y0 + ax.get_position().height / 2,
-        #         row,
-        #         ha="center",
-        #         va="center",
-        #         fontsize=12,
-        #         transform=None,
-        #     )
+        # x s.t len(row) / x = 15
+        # => x = len(row) / 15
 
         for i, (row, ax_row) in enumerate(zip(rows, axs)):
             xs = row.nodes.argmax(-1)
@@ -490,7 +499,7 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
                     node_color=color_nodes,
                     ax=ax,
                 )
-                ax.set_title(f"t={j}")
+                ax.set_title(f"t={j*skip if not j == len(row)-1 else original_len-1}")
                 ax.set_aspect("equal")
                 ax.set_axis_off()
 

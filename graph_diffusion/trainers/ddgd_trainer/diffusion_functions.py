@@ -2,7 +2,7 @@
 A lot of functions related to diffusion models. But which do not depend on the on the model itself.
 """
 import ipdb
-from typing import Callable
+from collections.abc import Callable
 import jax
 from jax import Array, random
 import jax
@@ -83,7 +83,6 @@ def __compute_posterior_distribution_edges(
     left_term = einop(
         edges_t, q_t_e_transposed, "bs n1 n2 de, bs n1 n2 de e1 -> bs n1 n2 e1"
     )
-
     right_term = einop(edges, q_s_bar, "bs n1 n2 de, bs de e1 -> bs n1 n2 e1")
     product = left_term * right_term
     denom = einop(edges, q_t_bar, "bs n1 n2 de, bs de e1 -> bs n1 n2 e1")
@@ -150,8 +149,8 @@ def posterior_distribution(
         q_s_bar=q_s_bar.edges,
         q_t_bar=q_t_bar.edges,
     )
-    prob_x = prob_x / prob_x.sum(-1, keepdims=True)
-    prob_e = prob_e / prob_e.sum(-1, keepdims=True)
+    # prob_x = prob_x / prob_x.sum(-1, keepdims=True)
+    # prob_e = prob_e / prob_e.sum(-1, keepdims=True)
     return GraphDistribution.create(
         nodes=prob_x,
         edges=prob_e,
@@ -164,6 +163,7 @@ def posterior_distribution(
 #     g: GraphDistribution,
 #     transition_model: TransitionModel,
 #     rng: Key,
+
 
 
 @typed
@@ -190,94 +190,23 @@ def compute_lt(
         transition_model=transition_model,
         t=t,
     )
-    # Reshape and filter masked rows
-    return transition_model.diffusion_steps * gd.kl_div(prob_true, prob_pred)
+    return transition_model.diffusion_steps * gd.kl_div(prob_true.mask(), prob_pred.mask())
 
 
 @typed
-def sample_batch(
-    rng_key: Key,
-    get_probability: GetProbabilityType,
-    batch_size: SInt,
-    n: SInt,
-    node_embedding_size: SInt,
-    edge_embedding_size: SInt,
-    diffusion_steps: SInt,
-) -> GraphDistribution:
-    random_batch = GraphDistribution.sample_from_uniform(
-        key=rng_key,
-        batch_size=batch_size,
-        n=n,
-        node_embedding_size=node_embedding_size,
-        edge_embedding_size=edge_embedding_size,
-    )
-    for t in range(1, diffusion_steps + 1):
-        t = np.ones(batch_size, dtype=int) * t
-        random_batch = (get_probability(random_batch, t)).sample_one_hot(rng_key)
-    return random_batch
-
-
-@typed
-def reconstruction_logp(
+def compute_reconstruction_logp(
     *,
     rng_key: Key,
     get_probability: GetProbabilityType,
     g: GraphDistribution,
     transition_model: TransitionModel,
-    n_samples: SInt,
-    base: SFloat = 2,
 ):
     t = np.zeros(g.batch_size, dtype=int)
     q_t = transition_model.qs[t]
     g_t = (g @ q_t).sample_one_hot(rng_key)
     g_t_probs = get_probability(g_t, t)
     result = g_t_probs.logprobs_at(g)
-    return result / np.log(base)
-
-
-# @typed
-# def compute_lt(
-#     get_probability: GetProbabilityType,
-#     g: GraphDistribution,
-#     diffusion_steps: SInt,
-#     transition_model: TransitionModel,
-#     rng: Key,
-# ) -> Float[Array, "batch_size"]:
-#     t = random.randint(rng, (g.batch_size,), 1, diffusion_steps + 1)
-#     q = transition_model.qs
-#     q_bar = transition_model.q_bars
-#
-#     # q_t = transition_model.qs[t]
-#     # q_s_bar = transition_model.q_bars[t - 1]
-#     g_t = (g @ q_bar[t]).sample_one_hot(rng)
-#     p = get_probability(g_t, t)
-#     # f(G_{t-1}) = q(G_{t-1} | G, G_t) = q(G_t | G, G_{t-1})q(G_{t-1} | G) / q(G_t | G)
-#     # q_t_bar = transition_model.q_bars[t]
-#
-#     # use bayes rule to compute q(z_s | z_t, g)
-#     # __unsafe=True because at that multiplication, the graph is not a distribution.
-#     # but it will be after the division.
-#     q_num = (g @ q[t]).__mul__(g @ q_bar[t - 1], _safe=False)
-#     denom = g @ q_bar[t]
-#     # q_denom_nodes, q_denom_edges = denom.nodes.sum(-1), denom.edges.sum(-1)
-#     # q = GraphDistribution.create(
-#     #     q_num.nodes / q_num.nodes.sum(-1)[..., None],  # q_denom_nodes[..., None],
-#     #     q_num.edges / q_num.edges.sum(-1)[..., None],  # q_denom_edges[..., None],
-#     #     edges_counts=q_num.edges_counts,
-#     #     nodes_counts=q_num.nodes_counts,
-#     # )
-#     q = q_num / denom
-#     result = gd.kl_div(q, p)
-#     return result * diffusion_steps
-#
-
-
-def check_is_dist(p):
-    assert (
-        np.allclose(p.sum(axis=-1), 1)
-        and (0 <= p.min(axis=-1)).all()
-        and (p.max(axis=-1) <= 1).all()
-    )
+    return result
 
 
 @typed
@@ -323,11 +252,10 @@ def apply_noise(
 
 
 @typed
-def kl_prior(
+def compute_kl_prior(
     *,
     target: GraphDistribution,
     transition_model: TransitionModel,
-    bits_per_edge: SBool,
 ) -> Float[Array, "batch_size"]:
     """Computes the KL between q(z1 | x) and the prior p(z1) (extracted from the data)
 
@@ -335,22 +263,97 @@ def kl_prior(
     compute it so that you see it when you've made a mistake in your noise schedule.
     """
     # Compute the last alpha value, alpha_T.
-    qt_bar = transition_model.q_bars[np.array(-1)[None]]
-    prior = transition_model.prior
+    qt_bar_T = transition_model.q_bars[np.array(-1)[None]]
 
     # Compute transition probabilities
-    transition_probs = target @ qt_bar
+    transition_probs = target @ qt_bar_T
 
-    # turn the prior into a graph distribution
-    bs, n, _ = transition_probs.nodes.shape
+    limit_dist = transition_model.limit_dist.repeat(len(target))
+    return gd.kl_div(transition_probs, limit_dist)
 
-    def check_is_dist(vals):
-        return (
-            np.allclose(np.sum(vals, axis=-1), 1.0)
-            and np.all(vals >= 0.0)
-            and np.all(vals <= 1.0)
-        )
 
-    base = jax.lax.select(bits_per_edge, 2.0, np.e)
-    limit_dist = transition_model.limit_dist.repeat(bs)
-    return gd.kl_div(transition_probs, limit_dist, base=base)
+@typed
+def compute_val_loss(
+    *,
+    target: GraphDistribution,
+    transition_model: TransitionModel,
+    get_probability: Callable[
+        [GraphDistribution, Int[Array, "batch_size"]], GraphDistribution
+    ],
+    nodes_dist: Array,
+    rng_key: Key,
+) -> dict[str, Float[Array, "batch_size"]]:
+    #base = jax.lax.select(bits_per_edge, 2.0, np.e)
+
+    # 1.  log_prob of the target graph under the nodes distribution (based on # of nodes)
+    log_pn = np.log(nodes_dist[target.nodes_counts]) # / np.log(base)
+
+    # 2. The KL between q(z_T | x) and p(z_T) = (simply an Empirical prior). Should be close to zero.
+    kl_prior = compute_kl_prior(
+        target=target,
+        transition_model=transition_model,
+        # bits_per_edge=bits_per_edge,
+    )
+    # 3. Diffusion loss
+    loss_all_t = compute_lt(
+        rng=rng_key,
+        g=target,
+        transition_model=transition_model,
+        get_probability=get_probability,
+    )
+    # 4. Reconstruction loss
+    # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
+    reconstruction_logp = compute_reconstruction_logp(
+        rng_key=rng_key,
+        g=target,
+        transition_model=transition_model,
+        get_probability=get_probability,
+    )
+    # edges_counts = jax.lax.select(
+    #     bits_per_edge, target.edges_counts * 2, np.ones(len(target.edges_counts), int)
+    # )
+    tot_loss = -log_pn + kl_prior + loss_all_t - reconstruction_logp
+    return {
+        "log_pn": log_pn,
+        "kl_prior": kl_prior,
+        "diffusion_loss": loss_all_t,
+        "rec_logp": reconstruction_logp,
+        "nll": tot_loss,
+    }
+
+
+# @typed
+# def compute_lt(
+#     get_probability: GetProbabilityType,
+#     g: GraphDistribution,
+#     diffusion_steps: SInt,
+#     transition_model: TransitionModel,
+#     rng: Key,
+# ) -> Float[Array, "batch_size"]:
+#     t = random.randint(rng, (g.batch_size,), 1, diffusion_steps + 1)
+#     q = transition_model.qs
+#     q_bar = transition_model.q_bars
+#
+#     # q_t = transition_model.qs[t]
+#     # q_s_bar = transition_model.q_bars[t - 1]
+#     g_t = (g @ q_bar[t]).sample_one_hot(rng)
+#     p = get_probability(g_t, t)
+#     # f(G_{t-1}) = q(G_{t-1} | G, G_t) = q(G_t | G, G_{t-1})q(G_{t-1} | G) / q(G_t | G)
+#     # q_t_bar = transition_model.q_bars[t]
+#
+#     # use bayes rule to compute q(z_s | z_t, g)
+#     # __unsafe=True because at that multiplication, the graph is not a distribution.
+#     # but it will be after the division.
+#     q_num = (g @ q[t]).__mul__(g @ q_bar[t - 1], _safe=False)
+#     denom = g @ q_bar[t]
+#     # q_denom_nodes, q_denom_edges = denom.nodes.sum(-1), denom.edges.sum(-1)
+#     # q = GraphDistribution.create(
+#     #     q_num.nodes / q_num.nodes.sum(-1)[..., None],  # q_denom_nodes[..., None],
+#     #     q_num.edges / q_num.edges.sum(-1)[..., None],  # q_denom_edges[..., None],
+#     #     edges_counts=q_num.edges_counts,
+#     #     nodes_counts=q_num.nodes_counts,
+#     # )
+#     q = q_num / denom
+#     result = gd.kl_div(q, p)
+#     return result * diffusion_steps
+#
