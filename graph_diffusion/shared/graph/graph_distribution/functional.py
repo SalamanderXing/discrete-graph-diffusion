@@ -59,22 +59,52 @@ def cross_entropy(
 def __kl_div(
     p: Array,
     q: Array,
-    base: SFloat = np.e,
-    eps: SFloat = 1**-17,
+    # eps: SFloat = 1**-17,
 ) -> Array:
     """Calculates the Kullback-Leibler divergence between arrays p and q."""
-    p += eps
-    q += eps
-    return np.sum(p * np.log(p / q) / np.log(base), axis=-1)
+    # p += eps
+    # q += eps
+    p = np.where(p.argmax(-1)[..., None] == 0, 1 / p.shape[-1], p)
+    q = np.where(q.argmax(-1)[..., None] == 0, 1 / q.shape[-1], q)
+    return np.sum(p * np.log(p / q), axis=-1)
 
 
 @typed
-def kl_div(
-    input: GraphDistribution, target: GraphDistribution, base: SFloat = np.e
-) -> Float[Array, "b"]:
-    mask_x, mask_e = input.masks()
-    nodes_kl = (__kl_div(input.nodes, target.nodes, base) * mask_x).sum(axis=1)
-    edges_kl = (__kl_div(input.edges, target.edges, base) * mask_e).sum(axis=(1, 2))
+def __normalize(x: Array):
+    x += 1e-7
+    x /= np.sum(x, axis=-1, keepdims=True)
+    return x
+
+
+def normalize(g: GraphDistribution):
+    return GraphDistribution.create(
+        nodes=__normalize(g.nodes),
+        edges=__normalize(g.edges),
+        nodes_counts=g.nodes_counts,
+        edges_counts=g.edges_counts,
+    )
+
+
+def normalize_and_mask(g: GraphDistribution):
+    mask_x, mask_e = g.masks()
+    new_nodes = __normalize(g.nodes)
+    new_nodes = np.where(mask_x[..., None], new_nodes, 1 / new_nodes.shape[-1])
+    new_edges = __normalize(g.edges)
+    new_edges = np.where(mask_e[..., None], new_edges, 1 / new_edges.shape[-1])
+    return GraphDistribution.create(
+        nodes=new_nodes,
+        edges=new_edges,
+        nodes_counts=g.nodes_counts,
+        edges_counts=g.edges_counts,
+    )
+
+
+@typed
+def kl_div(input: GraphDistribution, target: GraphDistribution) -> Float[Array, "b"]:
+    uba = __kl_div(input.nodes, target.nodes)
+    nodes_kl = (uba).sum(axis=1)
+    alla = __kl_div(input.edges, target.edges)
+    edges_kl = (alla).sum(axis=(1, 2))
     result = nodes_kl + edges_kl
     return result
 

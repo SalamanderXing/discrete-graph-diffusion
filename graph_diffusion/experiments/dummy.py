@@ -12,11 +12,7 @@ data_key = jax.random.PRNGKey(
     0
 )  # has to be done at the beginning to allow JAX to take control of the GPU memory.
 
-
-gpu = False
-if not gpu:
-    jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
-
+jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 # jax.config.update("jax_log_compiles", True)
 jax.config.update("jax_debug_nans", True)
 
@@ -50,14 +46,14 @@ from rich import print
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
 
 print(f"Using device: [yellow]{xla_bridge.get_backend().platform} [/yellow]")
-batch_size = 32
+batch_size = 5
 
 ds_name = "QM9"  # "PTC_MR"# "MUTAG"
 dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
 )
-diffusion_steps = 100
+diffusion_steps = 500
 rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
 model, params = GraphTransformerGraphDistribution.initialize(
     key=rngs["params"],
@@ -87,11 +83,11 @@ trainer = Trainer(
     bits_per_edge=False,
     diffusion_steps=diffusion_steps,
     noise_schedule_type="cosine",
-    learning_rate=1e-4,
+    learning_rate=1e-3,
     log_every_steps=4,
     max_num_nodes=dataset.n,
     num_node_features=dataset.max_node_feature,
     num_edge_features=dataset.max_edge_feature,
 )
 mate.bind(trainer)
-# mate.result({f"{ds_name} best_val_loss": best_val_loss})
+

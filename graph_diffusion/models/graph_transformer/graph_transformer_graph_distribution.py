@@ -91,11 +91,11 @@ class GraphTransformerGraphDistribution(nn.Module):
         # )
         mask = g.node_mask()
 
-        # spec_nodes, spec_edges = compute_spectral_features(g.edges)
+        spec_nodes, spec_edges = compute_spectral_features(g.edges)
         # spec_nodes = nn.sigmoid(nn.Dense(5)(spec_nodes))
         # spec_edges = nn.sigmoid(nn.Dense(5)(spec_edges))
         # conv_features = Conv()(g.edges, deterministic)
-        spec_nodes, spec_edges = np.empty(g.nodes.shape), np.empty(g.edges.shape)
+        # spec_nodes, spec_edges = np.empty(g.nodes.shape), np.empty(g.edges.shape)
         conv_features = np.empty(g.edges.shape)
         nodes = np.concatenate([g.nodes, nodes_embedding, spec_nodes], axis=-1)
         edges = np.concatenate(

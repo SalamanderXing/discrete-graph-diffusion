@@ -94,6 +94,22 @@ class TransitionModel:
 
     @classmethod
     @typed
+    def from_dict(cls, d: dict):
+        return cls(
+            diffusion_steps=d["diffusion_steps"],
+            qs=Q(nodes=d["qs"]["nodes"], edges=d["qs"]["edges"]),
+            q_bars=Q(nodes=d["q_bars"]["nodes"], edges=d["q_bars"]["edges"]),
+            temporal_embeddings=np.zeros(128),
+            limit_dist=GraphDistribution.create(
+                nodes=d["limit_dist"]["nodes"],
+                edges=d["limit_dist"]["edges"],
+                nodes_counts=d["limit_dist"]["nodes_counts"],
+                edges_counts=d["limit_dist"]["edges_counts"],
+            ),
+        )
+
+    @classmethod
+    @typed
     def from_torch(cls, torch_transition_model, torch_noise_schedule):
         import torch as t
 

@@ -1,6 +1,7 @@
 """
 A lot of functions related to diffusion models. But which do not depend on the on the model itself.
 """
+from operator import ipow
 import ipdb
 from collections.abc import Callable
 import jax
@@ -134,7 +135,6 @@ def posterior_distribution(
     q_t = transition_model.qs[t]
     q_t_bar = transition_model.q_bars[t]
     q_s_bar = transition_model.q_bars[t - 1]
-
     prob_x = __compute_posterior_distribution_nodes(
         nodes=g.nodes,
         nodes_t=g_t.nodes,
@@ -151,6 +151,8 @@ def posterior_distribution(
     )
     # prob_x = prob_x / prob_x.sum(-1, keepdims=True)
     # prob_e = prob_e / prob_e.sum(-1, keepdims=True)
+    # prob_x = np.clip(prob_x, 0, 1)
+    # prob_e = np.clip(prob_e, 0, 1)
     return GraphDistribution.create(
         nodes=prob_x,
         edges=prob_e,
@@ -165,7 +167,6 @@ def posterior_distribution(
 #     rng: Key,
 
 
-
 @typed
 def compute_lt(
     get_probability: GetProbabilityType,
@@ -174,10 +175,27 @@ def compute_lt(
     rng: Key,
 ):
     t = random.randint(rng, (g.batch_size,), 1, transition_model.diffusion_steps + 1)
-    g_t: GraphDistribution = g @ transition_model.q_bars[t]
+    g_t: GraphDistribution = (g @ transition_model.q_bars[t]).sample_one_hot(rng)
     g_pred: GraphDistribution = get_probability(g_t, t)
     # Compute distributions to compare with KL
     # bs, n, d = X.shape
+    return _compute_lt(
+        t=t,
+        g=g,
+        g_t=g_t,
+        g_pred=g_pred,
+        transition_model=transition_model,
+    )
+
+
+@typed
+def _compute_lt(
+    t: Int[Array, "b"],
+    g: GraphDistribution,
+    g_t: GraphDistribution,
+    g_pred: GraphDistribution,
+    transition_model: TransitionModel,
+):
     prob_true = posterior_distribution(
         g=g,
         g_t=g_t,
@@ -190,7 +208,10 @@ def compute_lt(
         transition_model=transition_model,
         t=t,
     )
-    return transition_model.diffusion_steps * gd.kl_div(prob_true.mask(), prob_pred.mask())
+    prob_true_masked = gd.normalize_and_mask(prob_true)
+    prob_pred_masked = gd.normalize_and_mask(prob_pred)
+    kl_div = gd.kl_div(prob_true_masked, prob_pred_masked)
+    return transition_model.diffusion_steps * kl_div
 
 
 @typed
@@ -203,52 +224,21 @@ def compute_reconstruction_logp(
 ):
     t = np.zeros(g.batch_size, dtype=int)
     q_t = transition_model.qs[t]
-    g_t = (g @ q_t).sample_one_hot(rng_key)
-    g_t_probs = get_probability(g_t, t)
-    result = g_t_probs.logprobs_at(g)
+    tmp = g @ q_t
+    g_t = (tmp).sample_one_hot(rng_key)
+    g_pred = get_probability(g_t, t)
+    return _compute_reconstruction_logp(
+        g=g,
+        g_pred=g_pred,
+    )
+
+
+def _compute_reconstruction_logp(
+    g: GraphDistribution,
+    g_pred: GraphDistribution,
+) -> Float[Array, "batch_size"]:
+    result = g_pred.logprobs_at(g)
     return result
-
-
-@typed
-def apply_random_noise(
-    *,
-    rng: Key,
-    graph: GraphDistribution,
-    diffusion_steps: SInt,
-    transition_model: TransitionModel,
-    test: SBool,
-) -> tuple[Int[Array, "batch_size"], GraphDistribution]:
-    lowest_t = np.array(test).astype(np.int32)
-    bs = graph.nodes.shape[0]
-    t = jax.random.randint(  # sample t_int from U[lowest_t, T]
-        rng, (bs,), lowest_t, diffusion_steps + 1
-    )
-    return t, apply_noise(
-        rng=rng,
-        graph=graph,
-        transition_model=transition_model,
-        t=t,
-    )
-
-
-@typed
-def apply_noise(
-    *,
-    rng: Key,
-    graph: GraphDistribution,
-    transition_model: TransitionModel,
-    t: Int[Array, "batch_size"],
-) -> GraphDistribution:
-    """Sample noise and apply it to the data."""
-
-    # get the transition matrix
-    Qt_bar = transition_model.q_bars[t]
-
-    # Compute transition probabilities
-    prob_graph = graph @ Qt_bar
-
-    # sampling returns an 1-hot encoded graph, so still a disctrete distribution
-    return prob_graph.sample_one_hot(rng_key=rng)
 
 
 @typed
@@ -263,7 +253,7 @@ def compute_kl_prior(
     compute it so that you see it when you've made a mistake in your noise schedule.
     """
     # Compute the last alpha value, alpha_T.
-    qt_bar_T = transition_model.q_bars[np.array(-1)[None]]
+    qt_bar_T = transition_model.q_bars[np.array([-1])]
 
     # Compute transition probabilities
     transition_probs = target @ qt_bar_T
@@ -283,10 +273,10 @@ def compute_val_loss(
     nodes_dist: Array,
     rng_key: Key,
 ) -> dict[str, Float[Array, "batch_size"]]:
-    #base = jax.lax.select(bits_per_edge, 2.0, np.e)
+    # base = jax.lax.select(bits_per_edge, 2.0, np.e)
 
     # 1.  log_prob of the target graph under the nodes distribution (based on # of nodes)
-    log_pn = np.log(nodes_dist[target.nodes_counts]) # / np.log(base)
+    log_pn = np.log(nodes_dist[target.nodes_counts])  # / np.log(base)
 
     # 2. The KL between q(z_T | x) and p(z_T) = (simply an Empirical prior). Should be close to zero.
     kl_prior = compute_kl_prior(
@@ -308,7 +298,7 @@ def compute_val_loss(
         g=target,
         transition_model=transition_model,
         get_probability=get_probability,
-    )
+    ).mean()
     # edges_counts = jax.lax.select(
     #     bits_per_edge, target.edges_counts * 2, np.ones(len(target.edges_counts), int)
     # )
@@ -357,3 +347,63 @@ def compute_val_loss(
 #     result = gd.kl_div(q, p)
 #     return result * diffusion_steps
 #
+
+
+def tests():
+    jax.config.update("jax_debug_nans", True)
+    import numpy as npo
+
+    def to_jax(x):
+        if isinstance(x, (list, tuple)):
+            return [to_jax(y) for y in x]
+        if isinstance(x, dict):
+            if "type" in x and x["type"] == "graph_dist":
+                return GraphDistribution.from_mask(
+                    to_jax(x["X"]),
+                    to_jax(x["E"]),
+                    to_jax(x["node_mask"]),
+                )
+            return {k: to_jax(v) for k, v in x.items()}
+        if isinstance(x, npo.ndarray):
+            return np.array(x)
+        return x
+
+    import pickle
+
+    re_logp_in_out = to_jax(pickle.load(open("in_out_tests/rec_lopg.pt", "rb")))
+
+    g = re_logp_in_out["input"]["g"]  # type: GraphDistribution
+    g_0 = re_logp_in_out["input"]["prob0"]  # type: GraphDistribution
+    target_output = re_logp_in_out["output"]["loss_term_0"]  # type: Array
+    pred_output = _compute_reconstruction_logp(g, g_0).mean()
+    assert np.allclose(pred_output, target_output), ipdb.set_trace()
+    lt_in_out = to_jax(pickle.load(open("in_out_tests/lt.pt", "rb")))
+    g = lt_in_out["input"]["g"]  # type: GraphDistribution
+    pred_prob = lt_in_out["input"]["prob"]  # type: GraphDistribution
+    pred_prob = GraphDistribution.create(
+        jax.nn.softmax(pred_prob.nodes),
+        jax.nn.softmax(pred_prob.edges),
+        nodes_counts=g.nodes_counts,
+        edges_counts=g.edges_counts,
+    )
+    noisy_data = lt_in_out["input"]["noisy_data"]  # type: dict[str, Array]
+    g_t = GraphDistribution.from_mask(
+        noisy_data["X_t"].astype(np.float32),
+        noisy_data["E_t"].astype(np.float32),
+        noisy_data["node_mask"],
+    )
+    transition_model = TransitionModel.from_dict(lt_in_out["input"]["transition_model"])
+    t = (
+        np.round(noisy_data["t"] * transition_model.diffusion_steps)
+        .astype(int)
+        .squeeze(-1)
+    )  # type: Array
+    target_output = lt_in_out["output"]["loss_all_t"]  # type: Array
+    pred_output = _compute_lt(
+        t=t, g=g, g_pred=pred_prob, g_t=g_t, transition_model=transition_model
+    ).mean()
+    assert np.allclose(pred_output, target_output), ipdb.set_trace()
+
+
+if __name__ == "__main__":
+    tests()

@@ -5,12 +5,14 @@ import optax
 from jax.experimental.checkify import check
 from rich import print
 import ipdb
-import jax_dataclasses as jdc
+from flax.struct import dataclass
 from mate.jax import SFloat, SInt, typed, SBool, Key
 from jaxtyping import Float, Bool, Int
 from typing import Sequence
 from jax.scipy.special import logit
-import einops as e
+
+# import einops as e
+from einop import einop
 import wandb
 
 # from .geometric import to_dense
@@ -42,8 +44,8 @@ def pseudo_assert(condition: SBool):
     return np.where(condition, 0, np.nan)
 
 
-@jdc.pytree_dataclass
-class GraphDistribution(jdc.EnforcedAnnotationsMixin):
+@dataclass
+class GraphDistribution:
     nodes: NodeDistribution
     edges: EdgeDistribution
     edges_counts: EdgeCountType
@@ -75,6 +77,19 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
     @classmethod
     @typed
+    def from_mask(
+        cls, nodes: NodeDistribution, edges: EdgeDistribution, mask: MaskType
+    ):
+        return cls(
+            nodes=nodes,
+            edges=edges,
+            edges_counts=mask.sum(-1),
+            nodes_counts=mask.sum(-1),
+            _created_internally=True,
+        )
+
+    @classmethod
+    @typed
     def create(
         cls,
         nodes: NodeDistribution,
@@ -103,10 +118,10 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
     @staticmethod
     def to_symmetric(edges: EdgeDistribution) -> EdgeDistribution:
-        upper = e.rearrange(
+        upper = einop(
             np.triu(np.ones((edges.shape[1], edges.shape[2]))), "n1 n2 -> 1 n1 n2 1"
         )
-        return np.where(upper, edges, edges.transpose((0, 2, 1, 3)))
+        return np.where(upper, edges, einop(edges, "b n1 n2 ee -> b n2 n1 ee"))
 
     def __str__(self):
         def arr_str(arr: Array):
@@ -211,13 +226,19 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         return GraphDistribution(**new_vals)
 
     def masks(self) -> tuple[MaskType, MaskType]:
-        n_range = np.arange(self.n)
-        mask_x = n_range[None].repeat(self.batch_size, 0) < self.nodes_counts[:, None]
-        e_ranges = mask_x[:, :, None].repeat(self.n, -1)
-        mask_e = e_ranges & e_ranges.transpose(0, 2, 1)
+        bs = self.batch_size
+        n = self.n
+        n_range = np.arange(n)
+        mask_x = einop(n_range, "n -> bs n", bs=bs) < einop(
+            self.nodes_counts, "bs -> bs n", n=n
+        )
+        e_ranges = einop(mask_x, "bs n -> bs n n1", n1=n)
+        e_diag = einop(np.eye(n, dtype=bool), "n1 n2 -> 1 n1 n2")
+        mask_e = e_ranges & einop(e_ranges, "bs n n1 -> bs n1 n") & ~e_diag
         return mask_x, mask_e
 
-    def logprobs_at(self, one_hot: "GraphDistribution") -> SFloat:
+    @typed
+    def logprobs_at(self, one_hot: "GraphDistribution") -> Float[Array, "batch_size"]:
         """Returns the probability of the given one-hot vector."""
         probs_at_vector = self.__mul__(one_hot, _safe=False)
         mask_x, mask_e = self.masks()
@@ -267,24 +288,25 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
         # probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
         prob_x = np.clip(prob_x, epsilon, 1 - epsilon)
         # Flatten the probability tensor to sample with categorical distribution
-        prob_x = prob_x.reshape(bs * n, ne)  # (bs * n, dx_out)
-
-        # Sample X
+        prob_x = einop(prob_x, "bs n ne -> (bs n) ne")  # (bs * n, dx_out)
+        logit_x = logit(prob_x)
         rng_key, subkey = random.split(rng_key)
-        x_t = random.categorical(subkey, logit(prob_x), axis=-1)  # (bs * n,)
-        x_t = x_t.reshape(bs, n)  # (bs, n)
+        x_t = random.categorical(subkey, logit_x, axis=-1)  # (bs * n,)
 
-        prob_e = prob_e.reshape(bs * n * n, ee)  # (bs * n * n, de_out)
-        # # Sample E
+        x_t = einop(x_t, "(bs n) -> bs n", n=n)  # (bs, n)
+
+        prob_e = einop(
+            prob_e,
+            "bs n1 n2 ee -> (bs n1 n2) ee",
+        )  # (bs * n * n, de_out)
+        logit_e = logit(prob_e)
         rng_key, subkey = random.split(rng_key)
-        e_t = random.categorical(subkey, logit(prob_e), axis=-1)  # (bs * n * n,)
-        e_t = e_t.reshape(bs, n, n)  # (bs, n, n)
-        e_t = np.triu(e_t, k=1)
-        e_t = e_t + np.transpose(e_t, (0, 2, 1))
-        # return Q(x=X_t, e=E_t, y=np.zeros((bs, 0), dtype=X_t.dtype))
+        e_t = random.categorical(subkey, logit_e, axis=-1)
+        e_t = einop(e_t, "(bs n1 n2) -> bs n1 n2", n1=n, n2=n)
         embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
         embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
-        # symmetrize e (while preseving the fact that they're one hot encoded)
+        embedded_e = GraphDistribution.to_symmetric(embedded_e)
+
         return self.__class__.create(
             nodes=embedded_x,
             edges=embedded_e,
@@ -329,6 +351,17 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
 
     __rsub__ = __sub__
 
+    def mask(self) -> "GraphDistribution":
+        node_mask, edge_mask = self.masks()
+        nodes = np.where(node_mask[..., None], self.nodes, np.eye(self.nodes.shape[-1])[0])
+        edges = np.where(edge_mask[..., None], self.edges, np.eye(self.edges.shape[-1])[0])
+        return GraphDistribution.create(
+            nodes=nodes,
+            edges=edges,
+            nodes_counts=self.nodes_counts,
+            edges_counts=self.edges_counts,
+        )
+
     @typed
     def sum(self) -> Array:
         node_mask, edge_mask = self.masks()
@@ -339,14 +372,14 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
     def __matmul__(self, q: Q) -> "GraphDistribution":
         x = self.nodes @ q.nodes
         e = self.edges @ q.edges[:, None]
-        # x = x / x.sum(-1, keepdims=True)
-        # e = e / e.sum(-1, keepdims=True)
+        x = x / x.sum(-1, keepdims=True)
+        e = e / e.sum(-1, keepdims=True)
         return GraphDistribution.create(
             nodes=x,
             edges=e,
             edges_counts=self.edges_counts,
             nodes_counts=self.nodes_counts,
-        )  # mask=self.mask,
+        ).mask()  # mask=self.mask,
 
     def __pow__(self, n: int) -> "GraphDistribution":
         return self.__class__.create(
@@ -356,21 +389,21 @@ class GraphDistribution(jdc.EnforcedAnnotationsMixin):
             edges_counts=self.edges_counts,
         )
 
-    def mask(self) -> "GraphDistribution":
-        nodes = np.where(
-            (self.nodes.sum(-1) > 0)[..., None], self.nodes, 1 / self.nodes.shape[-1]
-        )
-        nodes = nodes / nodes.sum(-1, keepdims=True)
-        edges = np.where(
-            (self.edges.sum(-1) > 0)[..., None], self.edges, 1 / self.edges.shape[-1]
-        )
-        edges = edges / edges.sum(-1, keepdims=True)
-        return GraphDistribution.create(
-            nodes=nodes,
-            edges=edges,
-            nodes_counts=self.nodes_counts,
-            edges_counts=self.edges_counts,
-        )
+    # def mask(self) -> "GraphDistribution":
+    #     nodes = np.where(
+    #         (self.nodes.sum(-1) > 0)[..., None], self.nodes, 1 / self.nodes.shape[-1]
+    #     )
+    #     # nodes = nodes / nodes.sum(-1, keepdims=True)
+    #     edges = np.where(
+    #         (self.edges.sum(-1) > 0)[..., None], self.edges, 1 / self.edges.shape[-1]
+    #     )
+    #     # edges = edges / edges.sum(-1, keepdims=True)
+    #     return GraphDistribution.create(
+    #         nodes=nodes,
+    #         edges=edges,
+    #         nodes_counts=self.nodes_counts,
+    #         edges_counts=self.edges_counts,
+    #     )
 
     def argmax(self) -> "GraphDistribution":
         id_nodes = np.eye(self.nodes.shape[-1])

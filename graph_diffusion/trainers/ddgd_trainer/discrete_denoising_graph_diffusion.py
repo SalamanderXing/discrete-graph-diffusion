@@ -116,7 +116,7 @@ def compute_train_loss(
     # print(pred_graph.nodes.argmax(-1)[0])
     # print(pred_graph.edges.argmax(-1)[0])
     target = z if stepwise else g
-    loss_type = "mse"
+    loss_type = "ce"
     if loss_type == "mse":
         mse_nodes = (target.nodes - pred_graph.nodes) ** 2
         mse_edges = (target.edges - pred_graph.edges) ** 2
@@ -133,9 +133,6 @@ def compute_train_loss(
         raise ValueError(f"Unknown loss type: {loss_type}")
 
     return loss
-
-
-
 
 
 def print_gradient_analysis(grads: FrozenDict):
@@ -240,7 +237,7 @@ class Trainer:
     num_node_features: int
     match_edges: bool = True
     do_restart: bool = False
-    plot_every_steps: int = 2
+    plot_every_steps: int = 1
     temporal_embedding_dim: int = 128
     n_val_steps: int = 30
     grad_clip: float = -1.0
@@ -268,6 +265,7 @@ class Trainer:
             temporal_embedding_dim=self.temporal_embedding_dim,
             n=self.n,
         )
+        ipdb.set_trace()
         self.plot_path = os.path.join(self.save_path, "plots")
         os.system(f"rm -rf {self.plot_path}")
         os.makedirs(self.plot_path, exist_ok=True)
@@ -330,7 +328,7 @@ class Trainer:
         posterior_samples = (g @ q_bars).sample_one_hot(rng)
         timesteps = np.arange(len(self.transition_model.q_bars))
         model_probs = model(posterior_samples, timesteps)
-        val_losses = compute_val_loss(
+        val_losses = df.compute_val_loss(
             target=posterior_samples,
             transition_model=self.transition_model,
             get_probability=model,
@@ -368,19 +366,21 @@ class Trainer:
         else:
             print("[yellow]No checkpoint found, starting from scratch[/yellow]")
 
-    #@typed
+    # @typed
     def restart(self):
         self.do_restart = True
         self.train()
 
     def __get_optimizer(self):
         components = []
-        if self.grad_clip > 0: 
+        if self.grad_clip > 0:
             components.append(optax.clip_by_global_norm(10.0))
-        components.append(optax.adamw(learning_rate=self.learning_rate, weight_decay=self.weight_decay))
-        return optax.chain(
-            *components
-        ) if len(components) > 1 else components[0]
+        components.append(
+            optax.adamw(
+                learning_rate=self.learning_rate, weight_decay=self.weight_decay
+            )
+        )
+        return optax.chain(*components) if len(components) > 1 else components[0]
 
     @typed
     def train(
@@ -443,12 +443,12 @@ class Trainer:
             train_losses.append(train_loss)
 
             wandb.log({"train_loss": train_loss, "val_loss": val_loss}, epoch_idx)
-
+            print(
+                f"[red underline]Train[/red underline]\nloss={train_loss:.5f} best={min(train_losses):.5f} time={train_time:.4f}"
+            )
             if avg_loss < self.state.last_loss:
                 self.state = self.state.replace(last_loss=avg_loss)
-                print(
-                    f"[red underline]Train[/red underline]\nloss={train_loss:.5f} best={min(train_losses):.5f} time={train_time:.4f}"
-                )
+
                 print(f"[yellow] Saving checkpoint[/yellow]")
                 self.checkpoint_manager.save(epoch_idx, self.state)
                 print(
@@ -462,12 +462,12 @@ class Trainer:
                         ),
                         load_from_disk=False,
                     )
-                    self.sample(
-                        restore_checkpoint=False,
-                        save_to=os.path.join(
-                            self.plot_path, f"{epoch_idx}_samples.png"
-                        ),
-                    )
+                    # self.sample(
+                    #     restore_checkpoint=False,
+                    #     save_to=os.path.join(
+                    #         self.plot_path, f"{epoch_idx}_samples.png"
+                    #     ),
+                    # )
 
         rng, _ = jax.random.split(self.rngs["params"])
         val_loss, val_time = self.__val_epoch(
@@ -581,10 +581,11 @@ def prettify(val: dict[str, Float[Array, ""]]) -> dict[str, float]:
     return {k: float(f"{v.tolist():.4f}") for k, v in val.items()}
 
 
-
 def save_stuff():
     pass
 
+def pseudo_val_loss():
+    pass
 
 @typed
 def val_step(
@@ -602,11 +603,10 @@ def val_step(
     get_probability = GetProbabilityFromState(
         state=state, dropout_rng=dropout_test_key, transition_model=transition_model
     )
-    return compute_val_loss(
+    return df.compute_val_loss(
         target=dense_data,
         transition_model=transition_model,
         rng_key=rng,
         get_probability=get_probability,
         nodes_dist=nodes_dist,
-        bits_per_edge=bits_per_edge,
     )
