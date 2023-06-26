@@ -57,8 +57,13 @@ dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
 )
-diffusion_steps = 100
-rngs = {"params": random.PRNGKey(0), "dropout": random.PRNGKey(1)}
+diffusion_steps = 500
+import random as pyrandom
+
+rngs = {
+    "params": random.PRNGKey(pyrandom.randint(0, 10000)),
+    "dropout": random.PRNGKey(pyrandom.randint(0, 10000)),
+}
 model, params = GraphTransformerGraphDistribution.initialize(
     key=rngs["params"],
     in_node_features=dataset.node_prior.shape[-1],

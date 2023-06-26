@@ -176,7 +176,7 @@ def compute_lt(
 ):
     t = random.randint(rng, (g.batch_size,), 1, transition_model.diffusion_steps + 1)
     g_t: GraphDistribution = (g @ transition_model.q_bars[t]).sample_one_hot(rng)
-    g_pred: GraphDistribution = get_probability(g_t, t)
+    g_pred: GraphDistribution = get_probability(g_t, t).softmax()
     # Compute distributions to compare with KL
     # bs, n, d = X.shape
     return _compute_lt(
@@ -224,9 +224,8 @@ def compute_reconstruction_logp(
 ):
     t = np.zeros(g.batch_size, dtype=int)
     q_t = transition_model.qs[t]
-    tmp = g @ q_t
-    g_t = (tmp).sample_one_hot(rng_key)
-    g_pred = get_probability(g_t, t)
+    g_t = (g @ q_t).sample_one_hot(rng_key)
+    g_pred = get_probability(g_t, t).softmax()
     return _compute_reconstruction_logp(
         g=g,
         g_pred=g_pred,
@@ -260,6 +259,39 @@ def compute_kl_prior(
 
     limit_dist = transition_model.limit_dist.repeat(len(target))
     return gd.kl_div(transition_probs, limit_dist)
+
+
+@typed
+def compute_train_loss(
+    *,
+    target: GraphDistribution,
+    transition_model: TransitionModel,
+    get_probability: Callable[
+        [GraphDistribution, Int[Array, "batch_size"]], GraphDistribution
+    ],
+    nodes_dist: Array,
+    rng_key: Key,
+) -> Float[Array, "batch_size"]:
+    # 3. Diffusion loss
+    loss_all_t = compute_lt(
+        rng=rng_key,
+        g=target,
+        transition_model=transition_model,
+        get_probability=get_probability,
+    )
+    # 4. Reconstruction loss
+    # Compute L0 term : -log p (X, E, y | z_0) = reconstruction loss
+    reconstruction_logp = compute_reconstruction_logp(
+        rng_key=rng_key,
+        g=target,
+        transition_model=transition_model,
+        get_probability=get_probability,
+    ).mean()
+    # edges_counts = jax.lax.select(
+    #     bits_per_edge, target.edges_counts * 2, np.ones(len(target.edges_counts), int)
+    # )
+    tot_loss = loss_all_t - reconstruction_logp
+    return tot_loss
 
 
 @typed

@@ -225,6 +225,14 @@ class GraphDistribution:
         }
         return GraphDistribution(**new_vals)
 
+    def softmax(self) -> "GraphDistribution":
+        return GraphDistribution.create(
+            nodes=jax.nn.softmax(self.nodes),
+            edges=jax.nn.softmax(self.edges),
+            nodes_counts=self.nodes_counts,
+            edges_counts=self.edges_counts,
+        )
+
     def masks(self) -> tuple[MaskType, MaskType]:
         bs = self.batch_size
         n = self.n
@@ -242,8 +250,12 @@ class GraphDistribution:
         """Returns the probability of the given one-hot vector."""
         probs_at_vector = self.__mul__(one_hot, _safe=False)
         mask_x, mask_e = self.masks()
-        nodes_logprob = np.log(probs_at_vector.nodes.sum(-1)) * mask_x
-        edges_logprob = np.log(probs_at_vector.edges.sum(-1)) * mask_e
+        nodes_logprob = (
+            np.log(np.where(mask_x, probs_at_vector.nodes.sum(-1), 1)) * mask_x
+        )
+        edges_logprob = (
+            np.log(np.where(mask_e, probs_at_vector.edges.sum(-1), 1)) * mask_e
+        )
         res = nodes_logprob.sum(-1) + edges_logprob.sum((-1, -2))
         return res
 
@@ -286,33 +298,41 @@ class GraphDistribution:
         # Noise X
         # The masked rows should define probability distributions as well
         # probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
-        prob_x = np.clip(prob_x, epsilon, 1 - epsilon)
+        # prob_x = np.clip(prob_x, epsilon, 1 - epsilon)
         # Flatten the probability tensor to sample with categorical distribution
-        prob_x = einop(prob_x, "bs n ne -> (bs n) ne")  # (bs * n, dx_out)
-        logit_x = logit(prob_x)
+        # prob_x = einop(prob_x, "bs n ne -> (bs n) ne")  # (bs * n, dx_out)
+        # try:
+        # prob_x = prob_x / prob_x.sum(-1, keepdims=True)
+        # logit_x = logit(prob_x)
+        # except:
+        #     ipdb.set_trace()
         rng_key, subkey = random.split(rng_key)
-        x_t = random.categorical(subkey, logit_x, axis=-1)  # (bs * n,)
+        x_t = random.categorical(subkey, prob_x, axis=-1)  # (bs * n,)
 
-        x_t = einop(x_t, "(bs n) -> bs n", n=n)  # (bs, n)
+        # x_t = einop(x_t, "(bs n) -> bs n", n=n)  # (bs, n)
 
-        prob_e = einop(
-            prob_e,
-            "bs n1 n2 ee -> (bs n1 n2) ee",
-        )  # (bs * n * n, de_out)
-        logit_e = logit(prob_e)
+        # prob_e = einop(
+        #     prob_e,
+        #     "bs n1 n2 ee -> (bs n1 n2) ee",
+        # )  # (bs * n * n, de_out)
+        # try:
+        # prob_e = prob_e / prob_e.sum(-1, keepdims=True)
+        # logit_e = logit(prob_e)
+        # except:
+        #     ipdb.set_trace()
         rng_key, subkey = random.split(rng_key)
-        e_t = random.categorical(subkey, logit_e, axis=-1)
-        e_t = einop(e_t, "(bs n1 n2) -> bs n1 n2", n1=n, n2=n)
+        e_t = random.categorical(subkey, prob_e, axis=-1)
+        # e_t = einop(e_t, "(bs n1 n2) -> bs n1 n2", n1=n, n2=n)
         embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
         embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
         embedded_e = GraphDistribution.to_symmetric(embedded_e)
 
-        return self.__class__.create(
+        return GraphDistribution.create(
             nodes=embedded_x,
             edges=embedded_e,
             nodes_counts=self.nodes_counts,
             edges_counts=self.edges_counts,
-        )  # , mask=self.mask)
+        ).mask()
 
     # overrides te addition operator
     def __add__(self, other) -> "GraphDistribution":
@@ -353,8 +373,8 @@ class GraphDistribution:
 
     def mask(self) -> "GraphDistribution":
         node_mask, edge_mask = self.masks()
-        nodes = np.where(node_mask[..., None], self.nodes, np.eye(self.nodes.shape[-1])[0])
-        edges = np.where(edge_mask[..., None], self.edges, np.eye(self.edges.shape[-1])[0])
+        nodes = np.where(node_mask[..., None], self.nodes, 0)
+        edges = np.where(edge_mask[..., None], self.edges, 0)
         return GraphDistribution.create(
             nodes=nodes,
             edges=edges,
@@ -372,8 +392,8 @@ class GraphDistribution:
     def __matmul__(self, q: Q) -> "GraphDistribution":
         x = self.nodes @ q.nodes
         e = self.edges @ q.edges[:, None]
-        x = x / x.sum(-1, keepdims=True)
-        e = e / e.sum(-1, keepdims=True)
+        # x = x / x.sum(-1, keepdims=True)
+        # e = e / e.sum(-1, keepdims=True)
         return GraphDistribution.create(
             nodes=x,
             edges=e,

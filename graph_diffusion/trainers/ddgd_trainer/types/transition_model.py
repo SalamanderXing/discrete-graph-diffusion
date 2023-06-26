@@ -35,7 +35,7 @@ def compute_noise_schedule(
     schedule_type: str = "cosine",
 ) -> tuple[Float[Array, "n"], Float[Array, "n"], Float[Array, "n"]]:
     beta_functions = {
-        "cosine": lambda: cosine_beta_schedule_discrete(diffusion_steps, 0.1),
+        "cosine": lambda: cosine_beta_schedule_discrete(diffusion_steps),
         "linear": lambda: np.linspace(0.0, 1.0, diffusion_steps),
     }
     assert (
@@ -167,6 +167,7 @@ class TransitionModel:
         temporal_embedding_dim: int,
         n: SInt,
         schedule_type: str = "linear",
+        adjust_prior=False,
     ) -> "TransitionModel":
         import matplotlib.pyplot as plt
 
@@ -175,39 +176,43 @@ class TransitionModel:
         # plt.plot(x_priors)
         # plt.show()
         # e_priors = jax.nn.softmax(e_priors + 1e-6)
-        prior_type = "custom"
+        prior_type = "reload"
         if prior_type == "uniform":
             x_priors = np.ones(x_priors.shape[0]) / x_priors.shape[0]
             e_priors = np.ones(e_priors.shape[0]) / e_priors.shape[0]
+        elif prior_type == "reload":
+            x_priors = np.array([0.7230, 0.1151, 0.1593, 0.0026])
+            e_priors = np.array([0.7261, 0.2384, 0.0274, 0.0081, 0.0000])
 
-        x_prior_adj = np.where(x_priors > 0, x_priors, 1e-6)
-        x_priors = x_prior_adj / x_prior_adj.sum()
-        e_prior_adj = np.where(e_priors > 0, e_priors, 1e-6)
-        e_priors = e_prior_adj / e_prior_adj.sum()
+        if adjust_prior:
+            x_prior_adj = np.where(x_priors > 0, x_priors, 1e-6)
+            x_priors = x_prior_adj / x_prior_adj.sum()
+            e_prior_adj = np.where(e_priors > 0, e_priors, 1e-6)
+            e_priors = e_prior_adj / e_prior_adj.sum()
         prior = Distribution(x=x_priors, e=e_priors)
 
-        x_classes = len(x_priors)
-        e_classes = len(e_priors)
+        node_types = len(x_priors)
+        edge_types = len(e_priors)
         # u_x = np.broadcast_to(x_priors[None, None], (1, x_classes, x_priors.shape[0]))
         # u_e = np.broadcast_to(e_priors[None, None], (1, e_classes, e_priors.shape[0]))
-        u_x = e.repeat(x_priors, "p -> 1 x_classes p", x_classes=x_classes)
-        u_e = e.repeat(e_priors, "p -> 1 e_classes p", e_classes=e_classes)
+        u_x = e.repeat(x_priors, "p -> 1 x_classes p", x_classes=node_types)
+        u_e = e.repeat(e_priors, "p -> 1 e_classes p", e_classes=edge_types)
         # u_y = np.ones((1, y_classes, y_classes)) / (y_classes if y_classes > 0 else 1)
         # noise_schedule = NoiseSchedule.create(0, diffusion_steps)  # 0 is cosine
         betas, _, alphas_bar = compute_noise_schedule(diffusion_steps, schedule_type)
         betas = betas[:, None, None]
-        q_xs = betas * u_x + (1 - betas) * np.eye(x_classes)[None]
-        q_es = (
-            betas * u_e
-            + (1 - betas)
-            * np.eye(
-                e_classes,
-            )[None]
-        )
+        Ie = np.eye(
+            edge_types,
+        )[None]
+        In = np.eye(
+            node_types,
+        )[None]
+        q_xs = betas * u_x + (1 - betas) * In
+        q_es = betas * u_e + (1 - betas) * Ie
         qs = Q(nodes=q_xs, edges=q_es)
-        alpha_bars = alphas_bar[:, None, None]
-        q_bar_xs = alpha_bars * np.eye(x_classes)[None] + (1 - alpha_bars) * u_x
-        q_bar_es = alpha_bars * np.eye(e_classes)[None] + (1 - alpha_bars) * u_e
+        betas_bar = 1 - alphas_bar[:, None, None]
+        q_bar_xs = betas_bar * u_x / node_types + (1 - betas_bar) * In
+        q_bar_es = betas_bar * u_e / edge_types + (1 - betas_bar) * Ie
         q_bars = Q(nodes=q_bar_xs, edges=q_bar_es)
         # q_bars = qs.cumulative_matmul()
 

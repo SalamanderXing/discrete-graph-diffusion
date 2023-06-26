@@ -116,7 +116,8 @@ def compute_train_loss(
     # print(pred_graph.nodes.argmax(-1)[0])
     # print(pred_graph.edges.argmax(-1)[0])
     target = z if stepwise else g
-    loss_type = "ce"
+    loss_type = "kl"
+    # ipdb.set_trace()
     if loss_type == "mse":
         mse_nodes = (target.nodes - pred_graph.nodes) ** 2
         mse_edges = (target.edges - pred_graph.edges) ** 2
@@ -129,6 +130,15 @@ def compute_train_loss(
         loss = weighted_mse_nodes.mean() + mse_edges.mean() + match_edges * count_diff
     elif loss_type == "ce":
         loss = gd.cross_entropy(pred_graph, target).mean()
+    elif loss_type == "mse+ce":
+        count_diff = (
+            (target.edges.argmax(-1) != 0).sum()
+            - (pred_graph.edges.argmax(-1) != 0).sum()
+        ) ** 2
+
+        loss = gd.cross_entropy(pred_graph, target).mean() + count_diff
+    elif loss_type == "kl":
+        loss = gd.softmax_kl_div(pred_graph, target).mean()
     else:
         raise ValueError(f"Unknown loss type: {loss_type}")
 
@@ -158,16 +168,25 @@ def print_gradient_analysis(grads: FrozenDict):
 def train_step(
     *,
     g: GraphDistribution,
-    i: SInt,
     state: TrainState,
     rng: Key,
-    diffusion_steps: SInt,
     transition_model: TransitionModel,
     nodes_dist: Array,
-    bits_per_edge: bool = True,
-    match_edges: bool = True,
 ):  # -> tuple[TrainState, Float[Array, "batch_size"]]:
     dropout_train_key = jax.random.fold_in(key=rng, data=state.step)
+
+    # get_probability = GetProbabilityFromParams(
+    #     state=state,
+    #     params=state.params,
+    #     transition_model=transition_model,
+    #     dropout_rng=dropout_train_key,
+    # )
+    # losses = compute_train_loss(
+    #     g=g,
+    #     transition_model=transition_model,
+    #     rng=rng,
+    #     get_probability=get_probability,
+    # )
 
     def loss_fn(params: FrozenDict):
         get_probability = GetProbabilityFromParams(
@@ -176,23 +195,20 @@ def train_step(
             transition_model=transition_model,
             dropout_rng=dropout_train_key,
         )
-        # losses = compute_val_loss(
-        #     target=g,
-        #     diffusion_steps=diffusion_steps,
-        #     transition_model=transition_model,
-        #     rng_key=rng,
-        #     get_probability=get_probability,
-        #     nodes_dist=nodes_dist,
-        #     full=False,
-        #     bits_per_edge=bits_per_edge,
-        # )
-        losses = compute_train_loss(
-            g=g,
+        losses = df.compute_val_loss(
+            target=g,
             transition_model=transition_model,
-            rng=rng,
+            rng_key=rng,
             get_probability=get_probability,
-            match_edges=match_edges,
-        )
+            nodes_dist=nodes_dist,
+        )["nll"].mean()
+        # losses = compute_train_loss(
+        #     g=g,
+        #     transition_model=transition_model,
+        #     rng=rng,
+        #     get_probability=get_probability,
+        #     match_edges=match_edges,
+        # )
 
         # jprint("loss {loss}", loss=loss)
         # return losses["bpe"].mean(), None
@@ -265,7 +281,6 @@ class Trainer:
             temporal_embedding_dim=self.temporal_embedding_dim,
             n=self.n,
         )
-        ipdb.set_trace()
         self.plot_path = os.path.join(self.save_path, "plots")
         os.system(f"rm -rf {self.plot_path}")
         os.makedirs(self.plot_path, exist_ok=True)
@@ -274,7 +289,7 @@ class Trainer:
         self.checkpoint_manager = checkpoint.CheckpointManager(
             self.save_path, orbax_checkpointer, options
         )
-        # return best_val_loss
+        ipdb.set_trace()
 
     @typed
     def __val_epoch(
@@ -507,7 +522,7 @@ class Trainer:
             # posterior_samples = (g @ q_bars).sample_one_hot(rng)
             timesteps = np.array([t] * len(g))
             g_t = g.sample_one_hot(rng)
-            model_probs = model(g_t, timesteps)
+            model_probs = model(g_t, timesteps).softmax()
             # ipdb.set_trace()
             # g = model_probs.argmax()
             g = df.posterior_distribution(
@@ -540,14 +555,10 @@ class Trainer:
             graph_dist = next(self.train_loader)
             state, loss = train_step(
                 g=graph_dist,
-                i=epoch,
                 state=self.state,
-                diffusion_steps=self.diffusion_steps,
                 rng=rng,
                 transition_model=self.transition_model,
                 nodes_dist=self.nodes_dist,
-                bits_per_edge=self.bits_per_edge,
-                match_edges=self.match_edges,
             )
             self.state = state
             run_losses.append(loss)
@@ -584,8 +595,10 @@ def prettify(val: dict[str, Float[Array, ""]]) -> dict[str, float]:
 def save_stuff():
     pass
 
+
 def pseudo_val_loss():
     pass
+
 
 @typed
 def val_step(

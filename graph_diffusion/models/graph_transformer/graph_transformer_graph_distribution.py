@@ -123,14 +123,14 @@ class GraphTransformerGraphDistribution(nn.Module):
         # symmetrize the edges
         # new_edges = (new_edges + np.transpose(new_edges, (0, 2, 1, 3))) / 2
         new_edges = GraphDistribution.to_symmetric(new_edges)
-        new_nodes = jax.nn.softmax(new_nodes, axis=-1)
-        new_edges = jax.nn.softmax(new_edges, axis=-1)
+        # new_nodes = jax.nn.softmax(new_nodes, axis=-1)
+        # new_edges = jax.nn.softmax(new_edges, axis=-1)
         return GraphDistribution.create(
             nodes=new_nodes,
             edges=new_edges,
             edges_counts=g.edges_counts,
             nodes_counts=g.nodes_counts,
-        )
+        ).mask()
 
     @classmethod
     @typed

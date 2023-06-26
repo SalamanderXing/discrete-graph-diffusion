@@ -66,15 +66,16 @@ def to_dense_numpy(dataloader):
     es[np.where(es.sum(-1) == 0)] = np.eye(es.shape[-1])[0]
     nodes_counts = np.concatenate(nodes_counts, axis=0)
 
-    zero_node = np.zeros_like(xs)[..., 0][..., None]
+    # zero_node = np.zeros_like(xs)[..., 0][..., None]
     # zero_edge = np.zeros_like(es)[..., 0][..., None]
-    xs_ = np.concatenate([zero_node, xs], axis=-1)
+    # xs_ = np.concatenate([zero_node, xs], axis=-1)
     # es_ = np.concatenate([zero_edge, es], axis=-1)
-    xs_[np.where(xs.sum(-1) == 0)] = np.eye(xs_.shape[-1])[0]
+    # xs_[np.where(xs.sum(-1) == 0)] = np.eye(xs_.shape[-1])[0]
     # es_[np.where(es.sum(-1) == 0)] = np.eye(es_.shape[-1])[0]
-    assert np.all(xs_.sum(-1) == 1)
+    # assert np.all(xs_.sum(-1) == 1)
     # assert np.all(es_.sum(-1) == 1)
-    return xs_, es, nodes_counts
+    # return xs_, es, nodes_counts
+    return xs, es, nodes_counts
 
 
 def create_graph(nodes, edges, edges_counts, nodes_counts, onehot: bool, train=False):

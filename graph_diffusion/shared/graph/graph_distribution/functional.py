@@ -31,28 +31,34 @@ def concatenate(items: Sequence[GraphDistribution]) -> GraphDistribution:
 
 
 @typed
+def __cross_entropy(p: Array, q: Array) -> Array:
+    q *= 10
+    p *= 10
+    q = jax.nn.softmax(q, axis=-1)
+    p = jax.nn.softmax(p, axis=-1)
+    return -np.sum(p * np.log(q), axis=-1)
+
+
+def softmax_kl_div(p: GraphDistribution, q: GraphDistribution) -> Array:
+    # q *= np.array(10)
+    # p *= np.array(10)
+    q = q.softmax()
+    p = p.softmax()
+    return kl_div(p, q)
+
+
+@typed
 def cross_entropy(
     target: GraphDistribution, labels: GraphDistribution
 ) -> Float[Array, "b"]:
-    loss_fn = optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
-    n_node_types = labels.nodes.shape[-1]
-    n_edge_types = labels.edges.shape[-1]
-    n = labels.nodes.shape[1]
-
-    true_x = labels.nodes.reshape(-1, n_node_types)  # (bs*n, dx)
-    true_e = labels.edges.reshape(-1, n_edge_types)  # (bs*n*n, de)
-    pred_x = target.nodes.reshape(-1, n_node_types)  # (bs*n, dx)
-    pred_e = target.edges.reshape(-1, n_edge_types)  # (bs*n*n, de)
-
+    # loss_fn = optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
+    loss_fn = __cross_entropy
     # Remove masked rows
-    mask_x, mask_e = labels.masks()
+    mask_nodes, mask_edges = labels.masks()
 
-    uba = loss_fn(pred_x, true_x).reshape(labels.batch_size, n, -1).mean(-1)
-    alla = loss_fn(pred_e, true_e).reshape(labels.batch_size, n, n, -1).mean(-1)
-    loss_x = (uba * mask_x).sum(-1)
-    loss_e = (alla * mask_e).sum((-1, -2))
-    rec_loss = loss_x + loss_e
-    return rec_loss
+    nodes_loss = (loss_fn(target.nodes, labels.nodes) * mask_nodes).sum(axis=1)
+    edges_loss = (loss_fn(target.edges, target.edges) * mask_edges).sum(axis=(1, 2))
+    return nodes_loss + edges_loss
 
 
 @typed
