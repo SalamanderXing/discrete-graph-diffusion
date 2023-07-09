@@ -13,11 +13,13 @@ data_key = jax.random.PRNGKey(
 )  # has to be done at the beginning to allow JAX to take control of the GPU memory.
 
 
-gpu = False
+gpu = True 
+debug_compiles = False
+
 if not gpu:
     jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
-# jax.config.update("jax_log_compiles", True)
+jax.config.update("jax_log_compiles", debug_compiles)
 jax.config.update("jax_debug_nans", True)
 
 
@@ -28,7 +30,8 @@ from jax.lib import xla_bridge
 
 from mate import mate
 
-from ..data_loaders.qm92 import load_data
+#from ..data_loaders.qm92 import load_data
+from ..data_loaders.qm9_digress import load_data
 import os
 from ..models.graph_transformer import GraphTransformerGraphDistribution
 from ..trainers.ddgd_trainer import Trainer
@@ -50,7 +53,7 @@ from rich import print
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
 
 print(f"Using device: [yellow]{xla_bridge.get_backend().platform} [/yellow]")
-batch_size = 32
+batch_size = 100
 
 ds_name = "QM9"  # "PTC_MR"# "MUTAG"
 dataset = load_data(

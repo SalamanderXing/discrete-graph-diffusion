@@ -3,6 +3,7 @@ from ...shared.graph.graph_distribution import (
     EncodedGraphDistribution,
     VariationalGraphDistribution,
 )
+from ...shared.graph import graph_distribution as gd
 import ipdb
 import flax.linen as nn
 from jaxtyping import Float
@@ -10,7 +11,6 @@ import jax.numpy as np
 import jax
 from flax.core.frozen_dict import FrozenDict
 from mate.jax import typed, Key
-from jax import Array
 from rich import print
 import einops as e
 from jaxtyping import Float, Array
@@ -78,8 +78,6 @@ class GraphTransformerNew(nn.Module):
         nodes_embedding = e.repeat(nodes_embedding, "b ten -> b n ten", n=n)
         edges_embedding = e.repeat(edges_embedding, "b tee -> b n1 n2 tee", n1=n, n2=n)
 
-        mask = g.node_mask()
-
         spec_nodes, spec_edges = compute_spectral_features(g.edges)
         spec_nodes = nn.tanh(nn.Dense(5)(spec_nodes))
         spec_edges = nn.tanh(nn.Dense(5)(spec_edges))
@@ -99,22 +97,19 @@ class GraphTransformerNew(nn.Module):
         )(
             nodes,
             edges,
-            mask,
+            g.nodes_mask,
             edge_time_embedding=np.zeros((nodes.shape[0], n, n, 0)),
             node_time_embedding=np.zeros((nodes.shape[0], n, 0)),
             deterministic=deterministic,
         )
         new_nodes = nn.Dense(g.nodes.shape[-1])(new_nodes)
         new_edges = nn.Dense(g.edges.shape[-1])(new_edges)
-        # symmetrize the edges
-        new_edges = EncodedGraphDistribution.to_symmetric(new_edges)
-        new_nodes = jax.nn.softmax(new_nodes, axis=-1)
-        new_edges = jax.nn.softmax(new_edges, axis=-1)
+        new_edges = gd.to_symmetric(new_edges)
         return EncodedGraphDistribution.create(
-            nodes=(new_nodes * 2) - 1,
-            edges=(new_edges * 2) - 1,
-            edges_counts=g.edges_counts,
-            nodes_counts=g.nodes_counts,
+            nodes=new_nodes,
+            edges=new_edges,
+            edges_mask=g.edges_mask,
+            nodes_mask=g.nodes_mask,
         )
 
     @classmethod

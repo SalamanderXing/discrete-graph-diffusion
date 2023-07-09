@@ -223,7 +223,7 @@ class VDM(nn.Module):
         # z_0 = (
         #     jnp.sqrt(1.0 - var_0) * f + jnp.sqrt(var_0) * eps_0
         # )  # FIXME why is this not accessed??
-        z_0_rescaled = f + (jnp.exp(0.5 * g_0) * eps_0)
+        z_0_rescaled = f.add(eps_0.mul_scalar(jnp.exp(0.5 * g_0)))
         loss_recon = -x.logprob(z_0_rescaled, g_0)
 
         # 2. LATENT LOSS

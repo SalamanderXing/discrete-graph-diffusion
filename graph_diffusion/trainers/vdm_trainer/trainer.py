@@ -394,7 +394,7 @@ class Trainer:
             rngs=rngs,
             deterministic=not is_train,
         )
-        n_edges = inputs.edges_counts * 2
+        # n_edges = inputs.edges_counts * 2
         # n_edges = inputs["nodes"].shape[1] * (inputs["nodes"].shape[1] - 1)
         # rescale_to_bpd = 1.0 / (
         #     (np.prod(inputs["nodes"].shape[1:] + np.prod(inputs["edges"].shape[1:])))

@@ -101,8 +101,8 @@ vmd, vmd_params = VDM.create(
         edges=jnp.zeros(
             (2, dataset.n, dataset.n, dataset.edge_prior.shape[0]), dtype=float
         ),
-        nodes_counts=jnp.ones((2,), dtype=int),
-        edges_counts=jnp.ones((2,), dtype=int),
+        nodes_mask=jnp.ones((2, dataset.n), dtype=bool),
+        edges_mask=jnp.ones((2, dataset.n, dataset.n), dtype=bool),
         # edge_vocab_size=jnp.array(len(dataset.edge_prior)),
         # node_vocab_size=jnp.array(len(dataset.node_prior)),
     ),

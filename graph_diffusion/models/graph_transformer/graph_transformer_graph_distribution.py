@@ -67,10 +67,10 @@ class GraphTransformerGraphDistribution(nn.Module):
     @nn.compact
     def __call__(
         self,
-        g: GraphDistribution,
+        g: gd.OneHotGraph,
         embedding: Array,
         deterministic: bool = False,
-    ) -> GraphDistribution:
+    ) -> gd.DenseGraphDistribution:
         embedding_to_nodes = nn.Sequential((DDense(5), nn.sigmoid))
         embedding_to_edges = nn.Sequential((DDense(5), nn.sigmoid))
         if self.use_embeddings:
@@ -89,7 +89,7 @@ class GraphTransformerGraphDistribution(nn.Module):
         #     nodes_counts=g.nodes_counts,
         #     edges_counts=g.edges_counts,
         # )
-        mask = g.node_mask()
+        mask = g.nodes_mask
 
         spec_nodes, spec_edges = compute_spectral_features(g.edges)
         # spec_nodes = nn.sigmoid(nn.Dense(5)(spec_nodes))
@@ -122,15 +122,15 @@ class GraphTransformerGraphDistribution(nn.Module):
         new_edges = nn.Dense(g.edges.shape[-1])(new_edges)
         # symmetrize the edges
         # new_edges = (new_edges + np.transpose(new_edges, (0, 2, 1, 3))) / 2
-        new_edges = GraphDistribution.to_symmetric(new_edges)
+        new_edges = gd.to_symmetric(new_edges)
         # new_nodes = jax.nn.softmax(new_nodes, axis=-1)
         # new_edges = jax.nn.softmax(new_edges, axis=-1)
-        return GraphDistribution.create(
+        return gd.create_dense_and_mask(
             nodes=new_nodes,
             edges=new_edges,
-            edges_counts=g.edges_counts,
-            nodes_counts=g.nodes_counts,
-        ).mask()
+            nodes_mask=g.nodes_mask,
+            edges_mask=g.edges_mask,
+        )
 
     @classmethod
     @typed
@@ -161,11 +161,13 @@ class GraphTransformerGraphDistribution(nn.Module):
         edges_shape = (2, number_of_nodes, number_of_nodes, in_edge_features)
         nodes = jax.nn.softmax(jax.random.normal(key_nodes, nodes_shape))
         edges = jax.nn.softmax(jax.random.normal(key_edges, edges_shape))
-        dummy_graph = GraphDistribution.create(
-            nodes,
-            edges,
-            edges_counts=np.ones(nodes.shape[0], int),
-            nodes_counts=np.ones(nodes.shape[0], int),
+        dummy_graph = gd.sample_one_hot(
+            gd.create_dense_from_counts(
+                nodes,
+                edges,
+                nodes_counts=np.ones(nodes.shape[0], int),
+            ),
+            key,
         )
         print(f"[orange]Init nodes[/orange]: {nodes.shape}")
         print(f"Init edges: {edges.shape}")

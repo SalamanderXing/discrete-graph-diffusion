@@ -263,8 +263,8 @@ class EncodedGraph:
         return mask
 
     def sum(self) -> Float[Array, "b"]:
-        nodes = self.nodes * self.node_mask()
-        edges = self.edges * self.edge_mask()
+        nodes = self.nodes * self.nodes_mask
+        edges = self.edges * self.edges_mask
         return jnp.einsum("bn->b", nodes) + jnp.einsum("bjk->b", edges)
 
     __radd__ = __add__

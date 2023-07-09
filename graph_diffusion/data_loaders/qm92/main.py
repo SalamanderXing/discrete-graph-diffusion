@@ -107,10 +107,9 @@ def create_graph(nodes, edges, edges_counts, nodes_counts, onehot: bool, train=F
             edge_vocab_size=edges.shape[-1],
         )
         if not onehot
-        else GraphDistribution.create(
+        else gd.create_one_hot_from_counts(
             nodes=nodes,
             edges=edges,
-            edges_counts=edges_counts,
             nodes_counts=nodes_counts,
         )
     )

@@ -16,17 +16,29 @@ from einop import einop
 Q, GraphDistribution = gd.Q, gd.GraphDistribution
 
 
-@typed
-def cosine_beta_schedule_discrete(diffusion_steps: SInt, s=0.008) -> Float[Array, "n"]:
+# @typed
+# def cosine_beta_schedule_discrete(diffusion_steps: SInt, s=0.008) -> Float[Array, "n"]:
+#     """Cosine schedule as proposed in https://openreview.net/forum?id=-NEXDKk8gZ."""
+#     steps = diffusion_steps + 2
+#     x = np.linspace(0, steps, steps)
+#
+#     alphas_cumprod = np.cos(0.5 * np.pi * ((x / steps) + s) / (1 + s)) ** 2
+#     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+#     alphas = alphas_cumprod[1:] / alphas_cumprod[:-1]
+#     betas = 1 - alphas
+#     return betas.squeeze().astype(np.float32)
+
+
+def cosine_beta_schedule_discrete(timesteps, s=0.008):
     """Cosine schedule as proposed in https://openreview.net/forum?id=-NEXDKk8gZ."""
-    steps = diffusion_steps + 2
+    steps = timesteps + 2
     x = np.linspace(0, steps, steps)
 
     alphas_cumprod = np.cos(0.5 * np.pi * ((x / steps) + s) / (1 + s)) ** 2
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     alphas = alphas_cumprod[1:] / alphas_cumprod[:-1]
     betas = 1 - alphas
-    return betas.squeeze().astype(np.float32)
+    return betas.squeeze().astype(np.float32)[:timesteps]
 
 
 @typed
@@ -88,9 +100,10 @@ class TransitionModel:
     diffusion_steps: SInt
     qs: Q
     q_bars: Q
-    # alpha_bars: Float[Array, "n"]
+    betas: Float[Array, "T"]
+    alpha_bars: Float[Array, "T"]
     temporal_embeddings: Float[Array, "temporal_embedding_dim"]
-    limit_dist: GraphDistribution
+    limit_dist: gd.DenseGraphDistribution
 
     @classmethod
     @typed
@@ -100,11 +113,10 @@ class TransitionModel:
             qs=Q(nodes=d["qs"]["nodes"], edges=d["qs"]["edges"]),
             q_bars=Q(nodes=d["q_bars"]["nodes"], edges=d["q_bars"]["edges"]),
             temporal_embeddings=np.zeros(128),
-            limit_dist=GraphDistribution.create(
+            limit_dist=gd.create_dense_from_counts(
                 nodes=d["limit_dist"]["nodes"],
                 edges=d["limit_dist"]["edges"],
                 nodes_counts=d["limit_dist"]["nodes_counts"],
-                edges_counts=d["limit_dist"]["edges_counts"],
             ),
         )
 
@@ -114,26 +126,31 @@ class TransitionModel:
         import torch as t
 
         device = t.device("cpu")
-        qs_raw = [
-            torch_transition_model.get_Qt(beta_t[None], device)
-            for beta_t in torch_noise_schedule.betas
+        betas = [
+            torch_noise_schedule(t.tensor([i], device=device))
+            for i in range(len(torch_noise_schedule.betas + 1))
         ]
+        qs_raw = [
+            torch_transition_model.get_Qt(beta_t[None], device) for beta_t in betas
+        ]
+
+        ipdb.set_trace()
         q_bars_raw = [
             torch_transition_model.get_Qt_bar(beta_t[None], device)
             for beta_t in torch_noise_schedule.betas
         ]
-        q_nodes = einop([np.array(q.X.numpy()) for q in qs_raw], "* a b")[0]
-        q_bars_nodes = einop([np.array(q.X.numpy()) for q in q_bars_raw], "* a b")[0]
-        q_edges = einop([np.array(q.E.numpy()) for q in qs_raw], "* a b")[0]
-        q_bars_edges = einop([np.array(q.E.numpy()) for q in q_bars_raw], "* a b")[0]
-        q_nodes = q_nodes + 0.00001
-        q_nodes = q_nodes / q_nodes.sum(axis=-1, keepdims=True)
-        q_edges = q_edges + 0.00001
-        q_edges = q_edges / q_edges.sum(axis=-1, keepdims=True)
-        q_bars_nodes = q_bars_nodes + 0.00001
-        q_bars_nodes = q_bars_nodes / q_bars_nodes.sum(axis=-1, keepdims=True)
-        q_bars_edges = q_bars_edges + 0.00001
-        q_bars_edges = q_bars_edges / q_bars_edges.sum(axis=-1, keepdims=True)
+        q_nodes = einop([np.array(q.X.numpy()) for q in qs_raw], "* a b")
+        q_bars_nodes = einop([np.array(q.X.numpy()) for q in q_bars_raw], "* a b")
+        q_edges = einop([np.array(q.E.numpy()) for q in qs_raw], "* a b")
+        q_bars_edges = einop([np.array(q.E.numpy()) for q in q_bars_raw], "* a b")
+        # q_nodes = q_nodes + 0.00001
+        # q_nodes = q_nodes / q_nodes.sum(axis=-1, keepdims=True)
+        # q_edges = q_edges + 0.00001
+        # q_edges = q_edges / q_edges.sum(axis=-1, keepdims=True)
+        # q_bars_nodes = q_bars_nodes + 0.00001
+        # q_bars_nodes = q_bars_nodes / q_bars_nodes.sum(axis=-1, keepdims=True)
+        # q_bars_edges = q_bars_edges + 0.00001
+        # q_bars_edges = q_bars_edges / q_bars_edges.sum(axis=-1, keepdims=True)
         qs = Q(nodes=q_nodes, edges=q_edges)
         q_bars = Q(nodes=q_bars_nodes, edges=q_bars_edges)
         limit_edges = einop(
@@ -143,11 +160,10 @@ class TransitionModel:
             np.array(torch_transition_model.u_x[0, 0].numpy()), "en -> 1 n en", n=9
         )
         print(limit_edges.shape)
-        limit_dist = GraphDistribution.create(
+        limit_dist = gd.create_dense_from_counts(
             nodes=limit_nodes,
             edges=limit_edges,
-            nodes_counts=np.ones(1, int),
-            edges_counts=np.ones(1, int),
+            nodes_counts=np.ones(limit_nodes.shape[0], int),
         )
         return cls(
             diffusion_steps=torch_noise_schedule.timesteps,
@@ -200,6 +216,8 @@ class TransitionModel:
         # u_y = np.ones((1, y_classes, y_classes)) / (y_classes if y_classes > 0 else 1)
         # noise_schedule = NoiseSchedule.create(0, diffusion_steps)  # 0 is cosine
         betas, _, alphas_bar = compute_noise_schedule(diffusion_steps, schedule_type)
+        betas = np.concatenate([betas, np.ones(1)])
+        alphas_bar = np.concatenate([alphas_bar, np.zeros(1)])
         betas = betas[:, None, None]
         Ie = np.eye(
             edge_types,
@@ -211,8 +229,8 @@ class TransitionModel:
         q_es = betas * u_e + (1 - betas) * Ie
         qs = Q(nodes=q_xs, edges=q_es)
         betas_bar = 1 - alphas_bar[:, None, None]
-        q_bar_xs = betas_bar * u_x / node_types + (1 - betas_bar) * In
-        q_bar_es = betas_bar * u_e / edge_types + (1 - betas_bar) * Ie
+        q_bar_xs = betas_bar * u_x + (1 - betas_bar) * In
+        q_bar_es = betas_bar * u_e + (1 - betas_bar) * Ie
         q_bars = Q(nodes=q_bar_xs, edges=q_bar_es)
         # q_bars = qs.cumulative_matmul()
 
@@ -233,16 +251,17 @@ class TransitionModel:
         limit_E = np.broadcast_to(
             np.expand_dims(prior.e, (0, 1, 2)), (bs, n, n, prior.e.shape[-1])
         )
-        limit_dist = GraphDistribution.create(
+        limit_dist = gd.create_dense_from_counts(
             nodes=limit_X,
             edges=limit_E,
             nodes_counts=np.array([n]),
-            edges_counts=np.array([(n * (n - 1))]),
         )
         return cls(
             diffusion_steps=diffusion_steps,
             qs=qs,
             q_bars=q_bars,
+            betas=betas.squeeze(-1),  # these two are for debugging
+            alpha_bars=alphas_bar,
             # prior=prior,
             # alpha_bars=alphas_bar,
             temporal_embeddings=temporal_embeddings,
