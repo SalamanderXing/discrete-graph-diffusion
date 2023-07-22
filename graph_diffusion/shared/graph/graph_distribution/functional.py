@@ -11,7 +11,7 @@ import jax_dataclasses as jdc
 from mate.jax import SFloat, SInt, SBool, Key
 from jaxtyping import Float, Bool, Int, jaxtyped
 from typing import Sequence
-from jax.scipy.special import logit, kl_div as _kl_div, rel_entr
+from jax.scipy.special import kl_div as _kl_div, rel_entr
 from .graph_distribution import GraphDistribution, EdgeDistribution
 from .one_hot_graph_distribution import OneHotGraph
 from .dense_graph_distribution import DenseGraphDistribution
@@ -19,17 +19,43 @@ from einop import einop
 from beartype import beartype
 
 from typing import Sequence
-from jax.scipy.special import xlogy, entr
 from jax.scipy.special import xlogy
 
 # from .geometric import to_dense
 from jax import random
+from jax import lax
 from flax import linen as nn
 from .q import Q
 
 ## only used for testing ##
 import torch.nn.functional as F
 import torch as t
+
+
+def _kl_div(
+    p: Array,
+    q: Array,
+) -> Array:
+    both_gt_zero_mask = lax.bitwise_and(lax.gt(p, 0.0), lax.gt(q, 0.0))
+    one_zero_mask = lax.bitwise_and(lax.eq(p, 0.0), lax.ge(q, 0.0))
+
+    # one_filler = lax.full_like(p, 1.0)
+    # inf_filler = lax.full_like(p, np.inf)
+
+    # safe_p = lax.select(both_gt_zero_mask, p, one_filler)
+    # safe_q = lax.select(both_gt_zero_mask, q, one_filler)
+    safe_p = np.where(both_gt_zero_mask, p, 1)
+    safe_q = np.where(both_gt_zero_mask, q, 1)
+
+    log_val = lax.sub(
+        lax.add(
+            lax.sub(xlogy(safe_p, safe_p), xlogy(safe_p, safe_q)),
+            safe_q,
+        ),
+        safe_p,
+    )
+    result = np.where(both_gt_zero_mask, log_val, np.where(one_zero_mask, q, np.inf))
+    return result
 
 
 # optax.softmax_cross_entropy_with_integer_labels
@@ -217,7 +243,7 @@ def plot(
         _, axs = plt.subplots(
             lrows,
             lcolumn,
-            #figsize=(100, 10),
+            # figsize=(100, 10),
         )
     except Exception as e:
         ipdb.set_trace()
