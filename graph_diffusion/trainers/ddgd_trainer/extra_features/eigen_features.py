@@ -10,13 +10,11 @@ import mate as m
 from jax.scipy.stats import mode
 
 from . import GraphDistribution
-from mate.jax import typed
 import ipdb
 
 check = lambda x, y="": None
 
 
-@typed
 def get_eigenvectors_features(
     vectors: Array,
     node_mask: Array,
@@ -51,7 +49,6 @@ def get_eigenvectors_features(
     return not_lcc_indicator, first_k_ev
 
 
-@typed
 def get_eigenvalues_features(
     eigenvalues: Array,
     A: Array,
@@ -85,7 +82,6 @@ def get_eigenvalues_features(
     return n_connected_components[..., None], first_k_ev
 
 
-@typed
 def compute_laplacian(adjacency: Array, normalize: bool) -> Array:
     """
     adjacency : batched adjacency matrix (bs, n, n)
@@ -112,7 +108,6 @@ def compute_laplacian(adjacency: Array, normalize: bool) -> Array:
     return alla
 
 
-@typed
 def eigen_features(mode: str, graph: GraphDistribution) -> tuple[Array, ...]:
     E_t = graph.e
     mask = graph.mask

@@ -3,14 +3,12 @@ This file contains the code for computing the cycle features. These are hardcode
 """
 import jax.numpy as np
 from jax import Array
-from mate.jax import typed
 
 from . import GraphDistribution
 
 check = lambda x, y="": None
 
 
-@typed
 def batch_trace(X: Array) -> Array:
     """
     Expect a matrix of shape B N N, returns the trace in shape B
@@ -22,7 +20,6 @@ def batch_trace(X: Array) -> Array:
     return trace
 
 
-@typed
 def batch_diagonal(X: Array) -> Array:
     """
     Extracts the diagonal from the last two dims of a tensor
@@ -32,7 +29,6 @@ def batch_diagonal(X: Array) -> Array:
     return np.diagonal(X, axis1=-2, axis2=-1)
 
 
-@typed
 def k3_cycle(k3_matrix: Array) -> tuple[Array, Array]:
     c3 = batch_diagonal(k3_matrix)
     return (c3 / 2)[:, None].astype(np.float32), (np.sum(c3, axis=-1) / 6)[
@@ -40,7 +36,6 @@ def k3_cycle(k3_matrix: Array) -> tuple[Array, Array]:
     ].astype(np.float32)
 
 
-@typed
 def k4_cycle(adj_matrix: Array, k4_matrix: Array, d: Array) -> tuple[Array, Array]:
     diag_a4 = batch_diagonal(k4_matrix)
     last = (adj_matrix @ d[..., None]).sum(axis=-1)
@@ -51,7 +46,6 @@ def k4_cycle(adj_matrix: Array, k4_matrix: Array, d: Array) -> tuple[Array, Arra
     ].astype(np.float32)
 
 
-@typed
 def k5_cycle(
     k5_matrix: Array, k3_matrix: Array, adj_matrix: Array, d: Array
 ) -> tuple[Array, Array]:
@@ -69,7 +63,6 @@ def k5_cycle(
     )
 
 
-@typed
 def k6_cycle(
     k6_matrix: Array,
     k2_matrix: Array,
@@ -105,7 +98,6 @@ def k6_cycle(
     return None, (c6_t / 12)[:, None].astype(np.float32)
 
 
-@typed
 def k_cycles(adj_matrix: Array) -> tuple[Array, Array]:
     # Calculate k powers
     d = adj_matrix.sum(axis=-1)
@@ -139,7 +131,6 @@ def k_cycles(adj_matrix: Array) -> tuple[Array, Array]:
     return kcyclesx, kcyclesy
 
 
-@typed
 def node_cycle_features(graph: GraphDistribution) -> tuple[Array, Array]:
     adj_matrix = graph.e[..., 1:].sum(axis=-1).astype(float)
 

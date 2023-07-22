@@ -13,10 +13,15 @@ from .graph_distribution import (
     SBool,
     to_symmetric,
 )
-from mate.jax import typed, Key
+from mate.jax import Key
 import ipdb
 from beartype import beartype
 from jaxtyping import jaxtyped
+
+
+def typed(f):
+    return jaxtyped(beartype(f))
+
 
 # TODO: idea: make the absence of node/edge as a special case -- when model is too uncertain about any other class, that should be decoded as "no node/edge"
 

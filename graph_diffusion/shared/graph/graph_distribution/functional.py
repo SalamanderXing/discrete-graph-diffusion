@@ -1,5 +1,7 @@
 from jax import numpy as np, Array, jit
 import jax
+import matplotlib.pyplot as plt
+import numpy
 import networkx as nx
 import optax
 from jax.experimental.checkify import check
@@ -9,17 +11,26 @@ import jax_dataclasses as jdc
 from mate.jax import SFloat, SInt, SBool, Key
 from jaxtyping import Float, Bool, Int, jaxtyped
 from typing import Sequence
-from jax.scipy.special import logit, kl_div as _kl_div
+from jax.scipy.special import logit, kl_div as _kl_div, rel_entr
 from .graph_distribution import GraphDistribution, EdgeDistribution
 from .one_hot_graph_distribution import OneHotGraph
 from .dense_graph_distribution import DenseGraphDistribution
 from einop import einop
 from beartype import beartype
 
+from typing import Sequence
+from jax.scipy.special import xlogy, entr
+from jax.scipy.special import xlogy
+
 # from .geometric import to_dense
 from jax import random
 from flax import linen as nn
 from .q import Q
+
+## only used for testing ##
+import torch.nn.functional as F
+import torch as t
+
 
 # optax.softmax_cross_entropy_with_integer_labels
 
@@ -59,57 +70,71 @@ def concatenate(items: Sequence[GraphDistribution]) -> GraphDistribution:
 #
 
 
-@typed
-def softmax_kl_div(p: GraphDistribution, q: GraphDistribution) -> Array:
-    # q *= .array(10)
-    # p *= np.array(10)
-    q = softmax(q)
-    p = softmax(p)
-    return kl_div(p, q)
+# @typed
+# def softmax_kl_div(p: GraphDistribution, q: GraphDistribution) -> Array:
+#     # q *= .array(10)
+#     # p *= np.array(10)
+#     q = softmax(q)
+#     p = softmax(p)
+#     return kl_div(p, q)
+#
 
 
 @typed
 def cross_entropy(
-    target: DenseGraphDistribution, labels: OneHotGraph
+    target: DenseGraphDistribution,
+    labels: OneHotGraph,
+    weights: Float[Array, "2"] | None = None,
 ) -> Float[Array, "b"]:
+    if weights is None:
+        weights = np.array([1.0, 1.0])
+    assert weights is not None
+    assert weights.shape == (2,)
     loss_fn = optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
-    i1 = loss_fn(target.nodes, labels.nodes)
-    i2 = loss_fn(target.edges, labels.edges)
-    nodes_loss = (i1 * labels.nodes_mask).sum(axis=1)
-    edges_loss = (i2 * labels.edges_mask).sum(axis=(1, 2))
+    nodes_loss = loss_fn(target.nodes, labels.nodes).sum(-1) * weights[0]
+    edges_loss = loss_fn(target.edges, labels.edges).sum(axis=(1, 2)) * weights[1]
+    # ce_nodes = xlogy(labels.nodes, target.nodes + 1e-7).sum(-1)
+    # ce_edges = xlogy(labels.edges, target.edges + 1e-7).sum(-1)
+    # nodes_loss = (ce_nodes * labels.nodes_mask).sum(axis=1)
+    # edges_loss = (ce_edges * labels.edges_mask).sum(axis=(1, 2))
     return nodes_loss + edges_loss
 
 
-from jax import lax
-
-
 ArrayLike = Array
-# from jax._src.typing import Array, ArrayLike
 
 
-# from jax.scipy.special import xlogy
-#
-#
-def _test_kl_div(
-    p: ArrayLike,
-    q: ArrayLike,
-) -> Array:
-    """Calculates the Kullback-Leibler divergence between arrays p and q."""
-    # p, q = q, p
-    p = lax.log(p)
-    q = lax.log(q)
-    # p = lax.log(p)
-    # result = xlogy(q, q) - lax.mul(q, p)
-    # ipdb.set_trace()
-    result = lax.mul(lax.exp(q), lax.sub(q, p))
-    return result
+def check_same(a, b):
+    from scipy.special import kl_div as s_kl_div
+
+    first = np.array(s_kl_div(a, b))
+    second = _kl_div(a, b)
+    assert np.allclose(first, second, atol=1e-7), f"{a=} {b=} {first=} {second=}"
 
 
-@typed
+# kl_div_nodes = np.array(
+#     F.kl_div(
+#         t.tensor(input.nodes.tolist()).log(),
+#         t.tensor(target.nodes.tolist()),
+#         reduction="sum",
+#     )
+# )
+# kl_div_edges = np.array(
+#     F.kl_div(
+#         t.tensor(input.edges.tolist()).log(),
+#         t.tensor(target.edges.tolist()),
+#         reduction="sum",
+#     )
+# )
+
+
+# @typed
+# def __normalize(x: Array):
+#     x += 1e-11
+#     den = np.sum(x, axis=-1, keepdims=True)
+#     # x /= np.where(den > 0, den, 1)
+#     x /= den
+#     return x
 def __normalize(x: Array):
-    x += 1e-7
-    den = np.sum(x, axis=-1, keepdims=True)
-    x /= np.where(den > 0, den, 1)
     return x
 
 
@@ -127,178 +152,37 @@ def normalize(g: DenseGraphDistribution):
 def normalize_and_mask(g: DenseGraphDistribution):
     """Normalizes and then masks in a way that avoids distributions containing zeros (namely, a uniform distribution)"""
     mask_x, mask_e = g.nodes_mask, g.edges_mask
-    new_nodes = __normalize(g.nodes)
-    new_nodes = np.where(mask_x[..., None], new_nodes, 1 / new_nodes.shape[-1])
-    new_edges = __normalize(g.edges)
-    new_edges = np.where(mask_e[..., None], new_edges, 1 / new_edges.shape[-1])
+    nodes = g.nodes
+    edges = g.edges
+    nodes_masked = np.where(mask_x[..., None], nodes, 1 / nodes.shape[-1])
+    nodes_norm = __normalize(nodes_masked)
+    edges_masked = np.where(mask_e[..., None], edges, 1 / edges.shape[-1])
+    edges_norm = __normalize(edges_masked)
     return create_dense(
-        nodes=new_nodes,
-        edges=new_edges,
+        nodes=nodes_norm,
+        edges=edges_norm,
         nodes_mask=g.nodes_mask,
         edges_mask=g.edges_mask,
     )
-
-
-# def _kl_div(
-#     p: ArrayLike,
-#     q: ArrayLike,
-# ) -> Array:
-#     """Calculates the Kullback-Leibler divergence between arrays p and q."""
-#     both_gt_zero_mask = lax.bitwise_and(lax.gt(p, 0.0), lax.gt(q, 0.0))
-#     one_zero_mask = lax.bitwise_and(lax.eq(p, 0.0), lax.ge(q, 0.0))
-#
-#     one_filler = lax.full_like(p, 1.0)
-#     inf_filler = lax.full_like(p, np.inf)
-#
-#     safe_p = lax.select(both_gt_zero_mask, p, one_filler)
-#     safe_q = lax.select(both_gt_zero_mask, q, one_filler)
-#
-#     log_val = lax.add(
-#         lax.sub(lax.mul(safe_p, lax.log(lax.div(safe_p, safe_q))), safe_p), safe_q
-#     )
-#     result = lax.select(
-#         both_gt_zero_mask, log_val, lax.select(one_zero_mask, q, inf_filler)
-#     )
-#     return result
-
-from jax.scipy.special import xlogy, entr
-
-
-# def _kl_div(
-#     p: ArrayLike,
-#     q: ArrayLike,
-# ):
-#     both_gt_zero_mask = lax.bitwise_and(lax.gt(p, 0.0), lax.gt(q, 0.0))
-#     one_zero_mask = lax.bitwise_and(lax.eq(p, 0.0), lax.ge(q, 0.0))
-#     inf_filler = lax.full_like(p, np.inf)
-#     log_val = -xlogy(p, q) - entr(p)
-#     base_case= lax.select(
-#         both_gt_zero_mask, log_val, lax.select(one_zero_mask, q, inf_filler)
-#     )
-#     return result
-
-
-def check_same(a, b):
-    from scipy.special import kl_div as s_kl_div
-
-    first = np.array(s_kl_div(a, b))
-    second = _kl_div(a, b)
-    assert np.allclose(first, second, atol=1e-7), f"{a=} {b=} {first=} {second=}"
 
 
 # @jax.jit
 @typed
 def kl_div(
     input: DenseGraphDistribution, target: DenseGraphDistribution
-) -> Float[Array, "b"]:
-    # from scipy.special import kl_div as s_kl_div
-
-    # from torch.nn.functional import kl_div as t_kl_div
-    # import torch as t
-    # import numpy as npo
-
+):  # ->  Float[Array, "b"]:
     input = normalize_and_mask(input)
     target = normalize_and_mask(target)
-    # t_kl_div_nodes = np.array(
-    #     t_kl_div(
-    #         t.tensor(npo.array(input.nodes)), t.log(t.tensor(npo.array(target.nodes)))
-    #     ).numpy()
-    # )
-    # np_kl_div_nodes = np.array(s_kl_div(input.nodes, target.nodes)).sum(-1)
-    kl_div_nodes = _kl_div(input.nodes, target.nodes).sum(-1)
-    # kl_div_test = _test_kl_div(input.nodes, target.nodes).sum(-1)
-
-    # assert np.allclose(kl_div_nodes, np_kl_div_nodes, atol=1e-6), (
-    #     kl_div_nodes[0],
-    #     np_kl_div_nodes[0],
-    # )
-    # check_same(np.array([0.0, 1.0]), np.array([1.0, 0.0]))
-    # check_same(np.array([0.9, 0.1]), np.array([0.9, 0.1]))
-    # n1 = input.nodes
-    # n2 = target.nodes
-    # test2 = n1 * np.log(n1 / n2)
-    # test3 = n1 * np.log(n1 / n2) - n1 + n2
-    nodes_kl = kl_div_nodes.sum(axis=1)
-    kl_div_edges = _kl_div(input.edges, target.edges).sum(-1)
-    edges_kl = kl_div_edges.sum(axis=(1, 2))
-    # print(f"[green]{kl_div_nodes.sum()=}[/green]")
-    # print(f"[green]{kl_div_edges.sum()=}[/green]")
-    result = nodes_kl + edges_kl
-    return result
-
-
-from typing import Sequence
-
-
-@typed
-def plot_compare(rows: Sequence[GraphDistribution], location: str | None = None):
-    import matplotlib.pyplot as plt
-    import numpy
-    from tqdm import tqdm
-
-    _, axs = plt.subplots(
-        2,
-        len(rows[0]),
-        figsize=(100, 10),
-    )
-
-    cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1]))
-    cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1]))
-    cmap_edge[0, -1] = 0
-    cmap_node[0, -1] = 0
-    # cmap_edge[1, -1] = 0
-    # cmap_node[1, -1] = 0
-    node_size = 10.0
-    pos = None
-
-    for i, (row, ax_row) in enumerate(zip(rows, axs)):
-        xs = row.nodes.argmax(-1)
-        es = row.edges.argmax(-1)
-        n_nodes = row.nodes_counts[0]
-        for j in range(len(row)):
-            ax = ax_row[j]
-            x = xs[j]
-            e = es[j]
-
-            nodes = x[:n_nodes]
-            edges_features = e[:n_nodes, :n_nodes]
-            # c_values_nodes = np.array([cmap_node[0 if i == 0 else i + 10] for i in nodes])
-
-            indices = np.indices(edges_features.shape).reshape(2, -1).T
-            mask = edges_features.flatten() != 0
-            edges = indices[mask]
-
-            # c_values_edges = np.array([cmap_edge[i] for i in edges[:, -1]])
-
-            G = nx.Graph()
-            for i in range(n_nodes):
-                G.add_node(i)
-            for i in range(edges.shape[0]):
-                G.add_edge(edges[i, 0].tolist(), edges[i, 1].tolist())
-
-            if pos is None:
-                pos = nx.spring_layout(G)  # positions for all nodes
-
-            color_nodes = numpy.array([cmap_node[i] for i in nodes])
-            color_edges = numpy.array(
-                [cmap_edge[edges_features[i, j]] for (i, j) in G.edges]
-            )
-            nx.draw(
-                G,
-                pos,
-                node_size=node_size,
-                edge_color=color_edges,
-                node_color=color_nodes,
-                ax=ax,
-            )
-            ax.set_title(f"t={j}")
-            ax.set_aspect("equal")
-
-    plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
-    if location is None:
-        plt.show()
-    else:
-        plt.savefig(location)
+    kl_div_nodes = _kl_div(input.nodes, target.nodes)
+    # kl_div_nodes = np.log(input.nodes + 1e-7) - np.log(target.nodes + 1e-7)
+    kl_div_nodes = np.where(kl_div_nodes < np.inf, kl_div_nodes, 0)
+    summed_kl_div_nodes = kl_div_nodes.sum((1, 2))
+    kl_div_edges = _kl_div(input.edges, target.edges)
+    # kl_div_edges = np.log(input.edges + 1e-7) - np.log(target.edges + 1e-7)
+    kl_div_edges = np.where(kl_div_edges < np.inf, kl_div_edges, 0)
+    summed_kl_div_edges = kl_div_edges.sum((1, 2, 3))
+    res = summed_kl_div_nodes + summed_kl_div_edges
+    return res
 
 
 @jit
@@ -327,17 +211,16 @@ def plot(
     original_len = len(rows[0])
     skip = (len(rows[0]) // 15) if len(rows[0]) > 15 else 1
     rows = [concatenate((row[::skip], row[np.array([-1])])) for row in rows]
-
-    # assert 1 <= len(rows) <= 2, "can only plot 1 or 2 rows"
-    import matplotlib.pyplot as plt
-    import numpy
-    from tqdm import tqdm
-
-    fig, axs = plt.subplots(
-        len(rows),
-        len(rows[0]),
-        figsize=(100, 10),
-    )
+    lrows = len(rows)
+    lcolumn = len(rows[0])
+    try:
+        _, axs = plt.subplots(
+            lrows,
+            lcolumn,
+            #figsize=(100, 10),
+        )
+    except Exception as e:
+        ipdb.set_trace()
     if len(axs.shape) == 1:
         axs = axs[None, :]
 
@@ -497,66 +380,36 @@ def add_dense(
         edges_mask=g.edges_mask,
     )
 
-    #
-    # else:
-    #     return self.__class__.create(
-    #         nodes=self.nodes + other,
-    #         edges=self.edges + other,
-    #         nodes_mask=self.nodes_mask,
-    #         edges_mask=self.edges_mask,
-    #     )
 
-
-@typed
-def at(
-    g: DenseGraphDistribution,
-    other: OneHotGraph,
-) -> GraphDistribution:
-    return create_one_hot(
-        nodes=g.nodes * other.nodes,
-        edges=g.edges * other.edges,
-        nodes_mask=g.nodes_mask,
-        edges_mask=g.edges_mask,
-    )
-    # return self.__class__.create(
-    #     nodes=g.nodes * other[..., None, None],
-    #     edges=g.edges * other[..., None, None, None],
-    #     nodes_mask=g.nodes_mask,
-    #     edges_mask=g.edges_mask,
-    # )
-    if isinstance(other, Array):
-        return self.__class__.create(
-            nodes=self.nodes * other[..., None, None],
-            edges=self.edges * other[..., None, None, None],
-            nodes_mask=self.nodes_mask,
-            edges_mask=self.edges_mask,
-        )
-    elif isinstance(other, GraphDistribution):
-        return self.__class__.create(
-            nodes=self.nodes * other.nodes,
-            edges=self.edges * other.edges,
-            nodes_mask=self.nodes_mask,
-            edges_mask=self.edges_mask,
-            _safe=_safe,
-        )
+# @typed
+# def at(
+#     g: GraphDistribution,
+#     other: GraphDistribution,
+# ) -> GraphDistribution:
+#     return create_one_hot(
+#         nodes=g.nodes * other.nodes,
+#         edges=g.edges * other.edges,
+#         nodes_mask=g.nodes_mask,
+#         edges_mask=g.edges_mask,
+#     )
 
 
 @typed
 def logprobs_at(
-    g: DenseGraphDistribution, one_hot: OneHotGraph
+    g: GraphDistribution, one_hot: GraphDistribution
 ) -> Float[Array, "batch_size"]:
     """Returns the probability of the given one-hot vector."""
-    probs_at_vector = at(g, one_hot)
-    nodes_mask = g.nodes_mask
-    edges_mask = g.edges_mask
-    nodes_logprob = (
-        np.log(np.where(nodes_mask, probs_at_vector.nodes.sum(-1), 1)) * nodes_mask
+    probs = create_one_hot(
+        nodes=g.nodes * one_hot.nodes,
+        edges=g.edges * one_hot.edges,
+        nodes_mask=g.nodes_mask,
+        edges_mask=g.edges_mask,
     )
-    edges_logprob = (
-        np.log(np.where(edges_mask, probs_at_vector.edges.sum(-1), 1)) * edges_mask
-    )
-    res = nodes_logprob.sum(-1) + edges_logprob.sum((-1, -2))
-    return res
+    safe_probs_nodes = np.where(g.nodes_mask, probs.nodes.sum(-1), 1)
+    safe_probs_edges = np.where(g.edges_mask, probs.edges.sum(-1), 1)
+    nodes_logprob = np.log(safe_probs_nodes)
+    edges_logprob = np.log(safe_probs_edges)
+    return nodes_logprob.sum(1) + edges_logprob.sum((1, 2))
 
 
 @typed
@@ -568,52 +421,35 @@ def to_symmetric(edges: EdgeDistribution) -> EdgeDistribution:
 
 
 @typed
+def diag_to_zero(edges: EdgeDistribution) -> EdgeDistribution:
+    return np.where(np.eye(edges.shape[1])[None, :, :, None], 0, edges)
+
+
+import torch as t
+
+
+@typed
 def sample_one_hot(g: DenseGraphDistribution, rng_key: Key) -> OneHotGraph:
     """Sample features from multinomial distribution with given probabilities (probX, probE, proby)
     :param probX: bs, n, dx_out        node features
     :param probE: bs, n, n, de_out     edge features
     :param rng_key: random.PRNGKey     random key for JAX operations
     """
-    bs, n, ne = g.nodes.shape
+
+    rng_nodes, rng_edges = random.split(rng_key)
+    b, n, ne = g.nodes.shape
     _, _, _, ee = g.edges.shape
-    epsilon = 1e-8
     # mask = self.mask
     prob_x = g.nodes
     prob_e = g.edges
 
     # Noise X
-    # The masked rows should define probability distributions as well
-    # probX = probX.at[~node_mask].set(1 / probX.shape[-1])  # , probX)
-    # prob_x = np.clip(prob_x, epsilon, 1 - epsilon)
-    # Flatten the probability tensor to sample with categorical distribution
-    prob_x = np.where(g.nodes_mask[..., None], prob_x, 1 / prob_x.shape[-1])
-    prob_x = prob_x / prob_x.sum(-1, keepdims=True)
-    # prob_x = einop(prob_x, "bs n ne -> (bs n) ne")  # (bs * n, dx_out)
-    prob_x = logit(prob_x)
-    # try:
-
-    # logit_x = logit(prob_x)
-    # except:
-    #     ipdb.set_trace()
-    rng_key, subkey = random.split(rng_key)
-    x_t = random.categorical(subkey, prob_x, axis=-1)  # (bs * n,)
-
-    # x_t = einop(x_t, "(bs n) -> bs n", n=n)  # (bs, n)
-
-    prob_e = np.where(g.edges_mask[..., None], prob_e, 1 / prob_e.shape[-1])
-    prob_e = prob_e / prob_e.sum(-1, keepdims=True)
-    # prob_e = einop(
-    #     prob_e,
-    #     "bs n1 n2 ee -> (bs n1 n2) ee",
-    # )
-    prob_e = logit(prob_e)
-    rng_key, subkey = random.split(rng_key)
-    e_t = random.categorical(subkey, prob_e, axis=-1)
-    # e_t = einop(e_t, "(bs n1 n2) -> bs n1 n2", n1=n, n2=n)
+    prob_x = np.where(g.nodes_mask[..., None], prob_x, 1 / ne)
+    x_t = random.categorical(rng_nodes, np.log(prob_x), axis=-1)  # (bs * n,)
+    prob_e = np.where(g.edges_mask[..., None], prob_e, 1 / ee)
+    e_t = random.categorical(rng_edges, np.log(prob_e))
     embedded_x = jax.nn.one_hot(x_t, num_classes=ne)
     embedded_e = jax.nn.one_hot(e_t, num_classes=ee)
-    embedded_e = to_symmetric(embedded_e)
-
     return create_one_hot_and_mask(
         nodes=embedded_x,
         edges=embedded_e,
@@ -769,7 +605,7 @@ def create_one_hot_and_mask(
     edges_mask: EdgeMaskType,
 ):
     nodes = np.where(nodes_mask[..., None], nodes, 0)
-    edges = np.where(edges_mask[..., None], edges, 0)
+    edges = to_symmetric(np.where(edges_mask[..., None], edges, 0))
     return OneHotGraph(
         nodes=nodes,
         edges=edges,

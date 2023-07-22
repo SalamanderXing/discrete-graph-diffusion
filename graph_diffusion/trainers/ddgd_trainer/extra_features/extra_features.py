@@ -10,7 +10,6 @@ from mate.jax import typed
 import mate as m
 
 
-@typed
 def compute(
     graph: GraphDistribution, features_type="all", max_n_nodes=100
 ) -> GraphDistribution:

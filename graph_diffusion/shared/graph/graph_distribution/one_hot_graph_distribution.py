@@ -5,11 +5,13 @@ from .graph_distribution import (
     NodeMaskType,
     EdgeMaskType,
     get_masks,
+    to_symmetric,
 )
 from jaxtyping import jaxtyped
 from flax.struct import dataclass
 from beartype import beartype
 from jax import random
+from jax import numpy as np
 from mate.jax import Key
 
 
@@ -33,27 +35,27 @@ class OneHotGraph(GraphDistribution):
     @classmethod
     @jaxtyped
     @beartype
-    def noise(
+    def create(
         cls,
-        key: Key,
-        num_node_features: int,
-        num_edge_features: int,
-        num_nodes: int,
-    ) -> "OneHotGraph":
-        key, subkey = random.split(key)
-        batch_size = 2
-
-        edges = random.normal(
-            key, (batch_size, num_nodes, num_nodes, num_edge_features)
-        )
-        edges = to_symmetric(edges)
-        edges = np.where(np.eye(num_nodes)[None, :, :, None], 0, edges)
-        nodes = random.normal(subkey, (batch_size, num_nodes, num_node_features))
-        nodes_mask = np.ones(nodes.shape[:-1], bool)
-        edges_mask = np.ones(edges.shape[:-1], bool)
-        return cls.create(
+        nodes: NodeDistribution,
+        edges: EdgeDistribution,
+        nodes_mask: NodeMaskType,
+        edges_mask: EdgeMaskType,
+    ):
+        return cls(
             nodes=nodes,
             edges=edges,
             nodes_mask=nodes_mask,
             edges_mask=edges_mask,
+            _created_internally=True,
+        )
+
+    @jaxtyped
+    @beartype
+    def repeat(self, n: int):
+        return OneHotGraph.create(
+            nodes=np.repeat(self.nodes, n, axis=0),
+            edges=np.repeat(self.edges, n, axis=0),
+            nodes_mask=np.repeat(self.nodes_mask, n, axis=0),
+            edges_mask=np.repeat(self.edges_mask, n, axis=0),
         )

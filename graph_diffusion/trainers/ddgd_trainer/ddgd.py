@@ -39,6 +39,9 @@ from .types import (
 )
 from beartype import beartype
 
+enc = df.enc
+
+
 GraphDistribution = gd.GraphDistribution
 
 
@@ -63,6 +66,7 @@ class GetProbabilityFromState(jdc.EnforcedAnnotationsMixin):
         self, g: gd.OneHotGraph, t: Int[Array, "batch_size"]
     ) -> gd.DenseGraphDistribution:
         temporal_embeddings = self.transition_model.temporal_embeddings[t]
+        # temporal_embeddings = np.zeros((1, 129))  # FIXME just a test
         # print(f"[blue]Init nodes[/blue]: {g.x.shape}")
         # print(f"[orange]Init nodes[/orange]: {g.e.shape}")
         pred_graph = self.state.apply_fn(
@@ -88,6 +92,7 @@ class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
         self, g: gd.OneHotGraph, t: Int[Array, "batch_size"]
     ) -> gd.DenseGraphDistribution:
         temporal_embeddings = self.transition_model.temporal_embeddings[t]
+        # temporal_embeddings = np.zeros((1, 129))  # FIXME just a test
         pred_graph = self.state.apply_fn(
             self.params,
             g,
@@ -110,11 +115,13 @@ def compute_train_loss(
     ],
     match_edges: SBool = True,
 ):
+    rng_t = jax.random.fold_in(rng, enc("t"))
+    rng_z = jax.random.fold_in(rng, enc("z"))
     ce = optax.softmax_cross_entropy
-    t = jax.random.randint(rng, (g.nodes.shape[0],), 1, len(transition_model.q_bars))
+    t = jax.random.randint(rng_t, (g.nodes.shape[0],), 1, len(transition_model.q_bars))
     q_bars = transition_model.q_bars[t]
-    z = gd.sample_one_hot(gd.matmul(g, q_bars), rng)
-    pred_graph = get_probability(z, t)
+    z = gd.sample_one_hot(gd.matmul(g, q_bars), rng_z)
+    pred_graph = gd.softmax(get_probability(z, t))
     target = g
     loss_type = "ce"
     # jax.debug.breakpoint()
@@ -178,26 +185,27 @@ def train_step(
     transition_model: TransitionModel,
     nodes_dist: Array,
 ):  # -> tuple[TrainState, Float[Array, "batch_size"]]:
-    dropout_train_key = jax.random.fold_in(key=rng, data=state.step)
+    dropout_train_key = jax.random.fold_in(rng, enc("dropout"))
+    train_rng = jax.random.fold_in(rng, enc("train"))
 
-    get_probability = GetProbabilityFromParams(
-        state=state,
-        params=state.params,
-        transition_model=transition_model,
-        dropout_rng=dropout_train_key,
-    )
+    # get_probability = GetProbabilityFromParams(
+    #     state=state,
+    #     params=state.params,
+    #     transition_model=transition_model,
+    #     dropout_rng=dropout_train_key,
+    # )
     # # losses = df.compute_train_loss(
     # #     target=g,
     # #     transition_model=transition_model,
     # #     rng_key=rng,
     # #     get_probability=get_probability,
     # # ).mean()
-    losses = compute_train_loss(
-        g=g,
-        transition_model=transition_model,
-        get_probability=get_probability,
-        rng=rng,
-    )
+    # losses = compute_train_loss(
+    #     g=g,
+    #     transition_model=transition_model,
+    #     get_probability=get_probability,
+    #     rng=rng,
+    # )
 
     def loss_fn(params: FrozenDict):
         get_probability = GetProbabilityFromParams(
@@ -206,28 +214,18 @@ def train_step(
             transition_model=transition_model,
             dropout_rng=dropout_train_key,
         )
-        # losses = df.compute_train_loss(
-        #     target=g,
-        #     transition_model=transition_model,
-        #     rng_key=rng,
-        #     get_probability=get_probability,
-        # ).mean()
-        losses = compute_train_loss(
-            g=g,
+        losses = df.compute_train_loss(
+            target=g,
             transition_model=transition_model,
+            rng_key=train_rng,
             get_probability=get_probability,
-            rng=rng,
-        )
+        ).mean()
         # losses = compute_train_loss(
         #     g=g,
         #     transition_model=transition_model,
-        #     rng=rng,
         #     get_probability=get_probability,
-        #     match_edges=match_edges,
+        #     rng=train_rng,
         # )
-
-        # jprint("loss {loss}", loss=loss)
-        # return losses["bpe"].mean(), None
         return losses, None
 
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
@@ -239,6 +237,37 @@ def train_step(
     # state = state.replace()
     state = state.apply_gradients(grads=grads)
     return state, loss
+
+
+@jit
+@jaxtyped
+@beartype
+def val_step(
+    *,
+    data: gd.OneHotGraph,
+    state: TrainState,
+    rng: Key,
+    transition_model: TransitionModel,
+    nodes_dist: Array,
+) -> dict[str, Float[Array, "batch_size"]]:
+    dropout_test_key = jax.random.fold_in(rng, enc("dropout"))
+    val_rng = jax.random.fold_in(rng, enc("val"))
+    p = GetProbabilityFromState(
+        state=state, dropout_rng=dropout_test_key, transition_model=transition_model
+    )
+    # get_probability = lambda x, t: gd.create_dense(
+    #     data.nodes * 100.0,
+    #     data.edges * 100.0,
+    #     data.nodes_mask,
+    #     data.edges_mask,
+    # ) # this was a test, how does a cheating model perform?
+    return df.compute_val_loss(
+        target=data,
+        transition_model=transition_model,
+        rng_key=val_rng,
+        p=p,
+        nodes_dist=nodes_dist,
+    )
 
 
 from einop import einop
@@ -254,13 +283,20 @@ def _sample_step(
     rng,
 ):
     timesteps = einop(t, " -> b", b=len(g))
-    g_t = gd.sample_one_hot(g, rng)
-    model_probs = gd.softmax(model(g_t, timesteps))
-    g = df.posterior_distribution(
-        g=model_probs,
-        g_t=g_t,
+    # g_t = gd.sample_one_hot(g, rng)
+    # model_probs = gd.softmax(model(g_t, timesteps))
+    # g = df.posterior_distribution(
+    #     g=model_probs,
+    #     g_t=g_t,
+    #     t=timesteps,
+    #     transition_model=transition_model,
+    # )
+    g = df.sample_p_zs_given_zt(
+        p=model,
         t=timesteps,
+        g_t=g,
         transition_model=transition_model,
+        rng=rng,
     )
     return g
 
@@ -272,11 +308,21 @@ def _sample_steps(transition_model: TransitionModel, model, rng):
     _, rng_this_epoch = jax.random.split(rng)
     timesteps = np.arange(1, transition_model.diffusion_steps)[::-1]
     for t in timesteps:
-        rng, rng_this_epoch = jax.random.split(rng_this_epoch)  # TODO use that
+        rng = jax.random.fold_in(rng, enc(f"sample_{t}"))  # TODO use that
         # g = _sample_step(g, transition_model, model, t, rng)
+        # g = df.sample_p_zs_given_zt(
+        #     p=model,
+        #     t=t,
+        #     g_t=g,
+        #     transition_model=transition_model,
+        #     rng=rng,
+        # )
+        # g = _sample_step(g, transition_model, model, t, rng)
+
+        timesteps = einop(t, " -> b", b=len(g))
         g = df.sample_p_zs_given_zt(
-            get_probability=model,
-            t=t,
+            p=model,
+            t=timesteps,
             g_t=g,
             transition_model=transition_model,
             rng=rng,
@@ -288,23 +334,29 @@ def _sample_steps(transition_model: TransitionModel, model, rng):
 
 @typed
 def _sample(transition_model: TransitionModel, model, rng, n: SInt):
-    g = gd.sample_one_hot(gd.repeat_dense(transition_model.limit_dist, n), rng)
-    # ipdb.set_trace()
     _, rng_this_epoch = jax.random.split(rng)
-    import random
-
+    one_hot = gd.sample_one_hot(
+        gd.repeat_dense(transition_model.limit_dist, n), rng_this_epoch
+    )
+    # g = gd.create_dense(
+    #     nodes=one_hot.nodes,
+    #     edges=one_hot.edges,
+    #     nodes_mask=one_hot.nodes_mask,
+    #     edges_mask=one_hot.edges_mask,
+    # )
+    g = one_hot
+    # ipdb.set_trace()
     for t in tqdm(list(reversed(range(1, transition_model.diffusion_steps)))):
-        # rng, rng_this_epoch = jax.random.split(rng_this_epoch)
-        rng_this_epoch = jax.random.PRNGKey(random.randint(0, 1000000))
-        # g = _sample_step(g, transition_model, model, t, rng_this_epoch)
+        rng = jax.random.fold_in(rng, enc(f"sample_{t}"))
         t = np.array(t).repeat(n)
         g = df.sample_p_zs_given_zt(
-            get_probability=model,
+            p=model,
             t=t,
             g_t=g,
             transition_model=transition_model,
-            rng=rng_this_epoch,
+            rng=rng,
         )
+        # g = _sample_step(g, transition_model, model, t[0], rng)
     return g
 
 
@@ -353,13 +405,13 @@ class Trainer:
     temporal_embedding_dim: int = 128
     n_val_steps: int = 60
     grad_clip: float = -1.0
-    weight_decay: float = 0.0
+    weight_decay: float = 1e-12
     min_learning_rate: float = 1e-6
 
     def __post_init__(
         self,
     ):
-        self.n = 9 # FIXME: get it from the data
+        self.n = 9  # FIXME: get it from the data
         self.state = TrainState.create(
             apply_fn=self.model.apply,
             params=self.params,
@@ -378,8 +430,7 @@ class Trainer:
             n=self.n,
         )
         self.plot_path = os.path.join(self.save_path, "plots")
-        os.system(f"rm -rf {self.plot_path}")
-        os.makedirs(self.plot_path, exist_ok=True)
+
         orbax_checkpointer = checkpoint.PyTreeCheckpointer()
         options = checkpoint.CheckpointManagerOptions(max_to_keep=2, create=True)
         self.checkpoint_manager = checkpoint.CheckpointManager(
@@ -395,16 +446,16 @@ class Trainer:
     ) -> tuple[dict[str, Float[Array, ""]], float]:
         run_losses: list[dict[str, Float[Array, "batch_size"]]] = []
         t0 = time()
-        # n_val_steps = (
-        #     30  # 10 if not exhaustive else len(self.val_loader)  # type: ignore
-        # )
-        for x in tqdm(self.val_loader):
+        for i, x in enumerate(tqdm(self.val_loader)):
+            step_rng = jax.random.fold_in(rng, enc(f"val_step_{i}"))
             graph_dist = to_one_hot(x)  # type: ignore
+            # if i == 0:
+            #     print(f"val={graph_dist.nodes[0]}")
             self.a_val_batch = graph_dist
             losses = val_step(
-                dense_data=graph_dist,  # , mask.astype(bool)),
+                data=graph_dist,  # , mask.astype(bool)),
                 state=self.state,
-                rng=rng,
+                rng=step_rng,
                 transition_model=self.transition_model,
                 nodes_dist=self.nodes_dist,
             )
@@ -429,14 +480,19 @@ class Trainer:
         load_from_disk: bool = True,
         epoch: int = -1,
     ):
-        rng = jax.random.PRNGKey(0)
+        import random
+
+        rng = jax.random.PRNGKey(random.randint(0, 100000))
         if load_from_disk:
             self.__restore_checkpoint()
         model = GetProbabilityFromState(self.state, rng, self.transition_model)
-
         print(f"Plotting noised graphs to {plot_path}")
-        T = len(self.transition_model.q_bars)
-        g_batch = self.a_val_batch
+        for i, x in enumerate(tqdm(self.val_loader)):
+            g_batch = to_one_hot(x)
+            break
+
+        mean_loss, _ = self.__val_epoch(rng=jax.random.fold_in(rng, enc("val")))
+        print(f"{mean_loss=}")
         g = gd.repeat(g_batch[np.array([0])], len(self.transition_model.q_bars))
         q_bars = self.transition_model.q_bars  # [timesteps]
         posterior_samples = gd.sample_one_hot(gd.matmul(g, q_bars), rng)
@@ -445,13 +501,15 @@ class Trainer:
         val_losses = df.compute_val_loss(
             target=posterior_samples,
             transition_model=self.transition_model,
-            get_probability=model,
+            p=model,
             nodes_dist=self.nodes_dist,
-            rng_key=jax.random.PRNGKey(23),
+            rng_key=jax.random.PRNGKey(random.randint(0, 100000)),
         )["nll"]
         corr = np.corrcoef(val_losses, np.arange(len(self.transition_model.q_bars)))[
             0, 1
         ]
+        # ipdb.set_trace()
+        # corr = 0.5
         if epoch > -1:
             wandb.log({"corr_t_vs_elbo": corr}, step=epoch)
         model_samples = gd.argmax(model_probs)
@@ -459,7 +517,7 @@ class Trainer:
             [posterior_samples, model_samples],
             location=plot_path,
             shared_position="all",
-            title=f"Correlation: {corr:.3f}",
+            title=f"{round(mean_loss['nll'].tolist(), 2)} Correlation: {corr:.3f}",
         )
 
     def __restore_checkpoint(self):
@@ -525,17 +583,26 @@ class Trainer:
         components = []
         if self.grad_clip > 0:
             components.append(optax.clip_by_global_norm(10.0))
-        components.append(
-            optax.adamw(
-                learning_rate=self.learning_rate, weight_decay=self.weight_decay
-            )
+        # components.append(
+        #     optax.adamw(
+        #         learning_rate=self.learning_rate, weight_decay=self.weight_decay
+        #     )
+        # )
+        components.extend(
+            [
+                optax.amsgrad(learning_rate=self.learning_rate),
+                optax.add_decayed_weights(self.weight_decay),
+            ]
         )
+
         return optax.chain(*components) if len(components) > 1 else components[0]
 
     @typed
     def train(
         self,
     ):
+        os.system(f"rm -rf {self.plot_path}")
+        os.makedirs(self.plot_path, exist_ok=True)
         last_epoch = 0
         if self.do_restart:
             self.__restore_checkpoint()
@@ -547,51 +614,29 @@ class Trainer:
 
         val_losses = []
         train_losses = []
-        patience = 20
+        patience = 5
         current_patience = patience
         stopping_criterion = -5
         rng, _ = jax.random.split(self.rngs["params"])
         rng, rng_this_epoch = jax.random.split(rng)  # TODO use that
 
+        val_loss, val_time = self.__val_epoch(
+            rng=rng_this_epoch,
+        )
+        val_losses.append(val_loss)
+        print(
+            f"""[green underline]Validation[/green underline]
+            current={prettify(val_loss)}
+            best={prettify(min(val_losses, key=lambda x: x['nll']))}
+            time={val_time:.4f}"""
+        )
+        eval_every = 4
         for epoch_idx in range(last_epoch, self.num_epochs + 1):
-            rng, rng_this_epoch = jax.random.split(rng_this_epoch)  # TODO use that
-            print(
-                f"[green bold]Epoch[/green bold]: {epoch_idx} \n\n[underline]Validating[/underline]"
-            )
-            val_loss, val_time = self.__val_epoch(
-                rng=rng_this_epoch,
-            )
-            val_losses.append(val_loss)
-            print(
-                f"""[green underline]Validation[/green underline]
-                current={prettify(val_loss)}
-                best={prettify(min(val_losses, key=lambda x: x['nll']))}
-                time={val_time:.4f}"""
-            )
-            avg_loss = val_losses[-1]["nll"]
-            if self.state.last_loss < avg_loss:
-                if current_patience <= 0:
-                    new_lr = self.state.lr * 0.1
-                    if self.learning_rate >= self.min_learning_rate:
-                        self.learning_rate = new_lr
-                        print(
-                            f"[red] learning rate did not decrease. Reducing lr to {self.learning_rate} [/red]"
-                        )
-                        self.state = self.state.replace(
-                            lr=new_lr, tx=self.__get_optimizer(), last_loss=avg_loss
-                        )
-                        current_patience = patience
-                else:
-                    current_patience -= 1
-                    if current_patience <= stopping_criterion:
-                        print(
-                            f"[red] stopping criterion reached. Stopping training [/red]"
-                        )
-                        break
-
+            val_rng_epoch = jax.random.fold_in(rng, enc(f"val_rng_{epoch_idx}"))
+            train_rng_epoch = jax.random.fold_in(rng, enc(f"train_rng_{epoch_idx}"))
+            print(f"[green bold]Epoch[/green bold]: {epoch_idx}")
             train_loss, train_time = self.__train_epoch(
-                rng=rng,
-                epoch=epoch_idx,
+                key=train_rng_epoch,
             )
             train_losses.append(train_loss)
 
@@ -599,33 +644,68 @@ class Trainer:
             print(
                 f"[red underline]Train[/red underline]\nloss={train_loss:.5f} best={min(train_losses):.5f} time={train_time:.4f}"
             )
-            print(f"{current_patience=}")
-            if avg_loss < self.state.last_loss:
-                current_patience = patience
-                self.state = self.state.replace(last_loss=avg_loss)
-
-                print(f"[yellow] Saving checkpoint[/yellow]")
-                self.checkpoint_manager.save(epoch_idx, self.state)
-                print(
-                    f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
+            if epoch_idx % eval_every == 0:
+                print("[green underline]Validating[/green underline]")
+                val_loss, val_time = self.__val_epoch(
+                    rng=val_rng_epoch,
                 )
+                val_losses.append(val_loss)
+                print(
+                    f"""
+                    current={prettify(val_loss)}
+                    best={prettify(min(val_losses, key=lambda x: x['nll']))}
+                    time={val_time:.4f}"""
+                )
+                avg_loss = val_losses[-1]["nll"]
+                if self.state.last_loss < avg_loss:
+                    if current_patience <= 0:
+                        new_lr = self.state.lr * 0.1
+                        if self.learning_rate >= self.min_learning_rate:
+                            self.learning_rate = new_lr
+                            print(
+                                f"[red] learning rate did not decrease. Reducing lr to {self.learning_rate} [/red]"
+                            )
+                            self.state = self.state.replace(
+                                lr=new_lr, tx=self.__get_optimizer(), last_loss=avg_loss
+                            )
+                            current_patience = patience
+                    else:
+                        current_patience -= 1
+                        if current_patience <= stopping_criterion:
+                            print(
+                                f"[red] stopping criterion reached. Stopping training [/red]"
+                            )
+                            break
 
-                if epoch_idx % self.plot_every_steps == 0:
-                    self.__plot_targets(
-                        save_to=os.path.join(self.plot_path, f"{epoch_idx}_targets.png")
+                print(f"{current_patience=}")
+                if avg_loss < self.state.last_loss:
+                    current_patience = patience
+                    self.state = self.state.replace(last_loss=avg_loss)
+
+                    print(f"[yellow] Saving checkpoint[/yellow]")
+                    self.checkpoint_manager.save(epoch_idx, self.state)
+                    print(
+                        f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )
-                    self.plot_preds(
-                        plot_path=os.path.join(
-                            self.plot_path, f"{epoch_idx}_preds.png"
-                        ),
-                        load_from_disk=False,
-                    )
-                    self.sample(
-                        restore_checkpoint=False,
-                        save_to=os.path.join(
-                            self.plot_path, f"{epoch_idx}_samples.png"
-                        ),
-                    )
+                    if epoch_idx % self.plot_every_steps == 0:
+                        # self.__plot_targets(
+                        #     save_to=os.path.join(
+                        #         self.plot_path, f"{epoch_idx}_targets.png"
+                        #     )
+                        # )
+                        # self.plot_preds(
+                        #     plot_path=os.path.join(
+                        #         self.plot_path, f"{epoch_idx}_preds.png"
+                        #     ),
+                        #     load_from_disk=False,
+                        # )
+                        # self.sample(
+                        #     restore_checkpoint=False,
+                        #     save_to=os.path.join(
+                        #         self.plot_path, f"{epoch_idx}_samples.png"
+                        #     ),
+                        # )
+                        pass
 
         rng, _ = jax.random.split(self.rngs["params"])
         val_loss, val_time = self.__val_epoch(
@@ -716,20 +796,26 @@ class Trainer:
     def sample(
         self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 10
     ):
+        print(f"Saving samples to: {save_to}")
         if restore_checkpoint:
             self.__restore_checkpoint()
         import random
 
-        rng1 = jax.random.PRNGKey(random.randint(0, 1000000))
-        rng2 = jax.random.PRNGKey(random.randint(0, 1000000))
-        model = GetProbabilityFromState(self.state, rng1, self.transition_model)
-        model_samples = _sample(self.transition_model, model, rng2, n)
-        data_sample = self.a_val_batch[:n]
+        rng_model = jax.random.PRNGKey(random.randint(0, 1000000))
+        rng_sample = jax.random.fold_in(rng_model, enc("sample"))
+        model = GetProbabilityFromState(self.state, rng_model, self.transition_model)
+        model_samples = _sample(self.transition_model, model, rng_sample, n)
+
+        data_sample = None
+        for i, x in enumerate(tqdm(self.val_loader)):
+            data_sample = to_one_hot(x)[:n]
+            break
+        assert data_sample is not None
         prior_sample = gd.sample_one_hot(
-            gd.repeat_dense(self.transition_model.limit_dist, n), rng2
+            gd.repeat_dense(self.transition_model.limit_dist, n), rng_sample
         )
         gd.plot(
-            [model_samples, prior_sample, data_sample],  # prior_sample,
+            [data_sample, prior_sample, model_samples],  # prior_sample,
             shared_position=None,
             location=save_to,
         )
@@ -738,19 +824,20 @@ class Trainer:
     def __train_epoch(
         self,
         *,
-        epoch: int,
-        rng: Key,
+        key: Key,
     ):
         run_losses = []
         t0 = time()
-        n_train_steps = 100
-        print(f"[pink] {self.state.lr=} [/pink]")
-        for x in tqdm(self.train_loader):
+        print(f"[pink] LR={round(np.array(self.state.lr).tolist(), 7)} [/pink]")
+        for i, x in enumerate(tqdm(self.train_loader)):
+            step_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
             graph_dist = to_one_hot(x)
+            # if i == 0:
+            #     print(f"train={graph_dist.nodes[0]}")
             state, loss = train_step(
                 g=graph_dist,
                 state=self.state,
-                rng=rng,
+                rng=step_key,
                 transition_model=self.transition_model,
                 nodes_dist=self.nodes_dist,
             )
@@ -760,14 +847,6 @@ class Trainer:
         t1 = time()
         tot_time = t1 - t0
         return avg_loss, tot_time
-
-
-# def noise(transition_model, g, t, rng):
-#     q = transition_model.q_bars[np.array(t)[None]]
-#     probs = g @ q
-#     noised = probs.sample_one_hot(rng)
-#     return noised
-#
 
 
 @typed
@@ -788,28 +867,3 @@ def prettify(val: dict[str, Float[Array, ""]]) -> dict[str, float]:
 
 def save_stuff():
     pass
-
-
-@jit
-@jaxtyped
-@beartype
-def val_step(
-    *,
-    dense_data: gd.OneHotGraph,
-    state: TrainState,
-    rng: Key,
-    transition_model: TransitionModel,
-    nodes_dist: Array,
-) -> dict[str, Float[Array, "batch_size"]]:
-    dropout_test_key = jax.random.fold_in(key=rng, data=state.step)
-
-    get_probability = GetProbabilityFromState(
-        state=state, dropout_rng=dropout_test_key, transition_model=transition_model
-    )
-    return df.compute_val_loss(
-        target=dense_data,
-        transition_model=transition_model,
-        rng_key=rng,
-        get_probability=get_probability,
-        nodes_dist=nodes_dist,
-    )

@@ -13,7 +13,7 @@ data_key = jax.random.PRNGKey(
 )  # has to be done at the beginning to allow JAX to take control of the GPU memory.
 
 
-gpu = True 
+gpu = False 
 debug_compiles = False
 
 if not gpu:
@@ -30,10 +30,14 @@ from jax.lib import xla_bridge
 
 from mate import mate
 
-#from ..data_loaders.qm92 import load_data
+# from ..data_loaders.qm92 import load_data
 from ..data_loaders.qm9_digress import load_data
 import os
-from ..models.graph_transformer import GraphTransformerGraphDistribution
+
+# from ..models.graph_transformer import (
+#     GraphTransformerGraphDistribution as GraphTransformer,
+# )
+from ..models.gt_digress import GraphTransformer
 from ..trainers.ddgd_trainer import Trainer
 from jax import numpy as np
 from jax import random
@@ -52,8 +56,12 @@ from rich import print
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
 
-print(f"Using device: [yellow]{xla_bridge.get_backend().platform} [/yellow]")
-batch_size = 100
+device = xla_bridge.get_backend().platform
+print(f"Using device: [yellow]{device} [/yellow]")
+if device.lower() != "gpu":
+    print("[red]WARNING: :skull:[/red] Running on CPU. This will be slow.")
+
+batch_size = 512
 
 ds_name = "QM9"  # "PTC_MR"# "MUTAG"
 dataset = load_data(
@@ -67,7 +75,7 @@ rngs = {
     "params": random.PRNGKey(pyrandom.randint(0, 10000)),
     "dropout": random.PRNGKey(pyrandom.randint(0, 10000)),
 }
-model, params = GraphTransformerGraphDistribution.initialize(
+model, params = GraphTransformer.initialize(
     key=rngs["params"],
     in_node_features=dataset.node_prior.shape[-1],
     in_edge_features=dataset.edge_prior.shape[-1],
@@ -86,7 +94,7 @@ trainer = Trainer(
     rngs=rngs,
     train_loader=dataset.train_loader,
     val_loader=dataset.test_loader,
-    num_epochs=200,
+    num_epochs=300,
     match_edges=True,
     save_path=save_path,
     nodes_dist=dataset.nodes_dist,
@@ -95,7 +103,7 @@ trainer = Trainer(
     bits_per_edge=False,
     diffusion_steps=diffusion_steps,
     noise_schedule_type="cosine",
-    learning_rate=1e-4,
+    learning_rate=0.0002,
     log_every_steps=4,
     max_num_nodes=dataset.n,
     num_node_features=dataset.max_node_feature,

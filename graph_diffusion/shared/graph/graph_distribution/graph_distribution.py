@@ -6,9 +6,11 @@ from jax.experimental.checkify import check
 from rich import print
 import ipdb
 from flax.struct import dataclass
-from mate.jax import SFloat, SInt, typed, SBool, Key
+from mate.jax import SFloat, SInt, SBool, Key
 from jaxtyping import Float, Bool, Int
 from typing import Sequence
+from jaxtyping import jaxtyped
+from beartype import beartype
 from jax.scipy.special import logit
 
 # import einops as e
@@ -37,7 +39,8 @@ def safe_div(a: Array, b: Array):
     return np.where(mask, 0, a / np.where(mask, 1, b))
 
 
-@typed
+@jaxtyped
+@beartype
 def pseudo_assert(condition: SBool):
     """
     When debugging NaNs, the following function will raise an exception
@@ -45,7 +48,8 @@ def pseudo_assert(condition: SBool):
     return np.where(condition, 0, np.nan)
 
 
-@typed
+@jaxtyped
+@beartype
 def get_masks(
     nodes_counts: Int[Array, "bs"], n: SInt
 ) -> tuple[NodeMaskType, EdgeMaskType]:
@@ -58,7 +62,8 @@ def get_masks(
     return mask_x, mask_e
 
 
-@typed
+@jaxtyped
+@beartype
 def to_symmetric(edges: EdgeDistribution) -> EdgeDistribution:
     upper = einop(
         np.triu(np.ones((edges.shape[1], edges.shape[2]))), "n1 n2 -> 1 n1 n2 1"
@@ -86,7 +91,8 @@ class GraphDistribution:
     #     pseudo_assert(is_edges_dist)
 
     @classmethod
-    @typed
+    @jaxtyped
+    @beartype
     def from_mask(
         cls, nodes: NodeDistribution, edges: EdgeDistribution, mask: NodeMaskType
     ):
@@ -99,149 +105,54 @@ class GraphDistribution:
             _created_internally=True,
         )
 
-    # @classmethod
-    # @typed
-    # def create(
-    #     cls,
-    #     nodes: NodeDistribution,
-    #     edges: EdgeDistribution,
-    #     nodes_mask: NodeMaskType,
-    #     edges_mask: EdgeMaskType,
-    # ):
-    #     return cls(
-    #         nodes=nodes,
-    #         edges=edges,
-    #         nodes_mask=nodes_mask,
-    #         edges_mask=edges_mask,
-    #         _created_internally=True,
-    #     )
-    #
-    # @classmethod
-    # @typed
-    # def create_and_mask(
-    #     cls,
-    #     nodes: NodeDistribution,
-    #     edges: EdgeDistribution,
-    #     nodes_mask: NodeMaskType,
-    #     edges_mask: EdgeMaskType,
-    # ):
-    #     nodes = np.where(nodes_mask[..., None], nodes, 0)
-    #     edges = np.where(edges_mask[..., None], edges, 0)
-    #     return cls(
-    #         nodes=nodes,
-    #         edges=edges,
-    #         nodes_mask=nodes_mask,
-    #         edges_mask=edges_mask,
-    #         _created_internally=True,
-    #     )
-    #
-    # @classmethod
-    # @typed
-    # def create_from_counts(
-    #     cls,
-    #     nodes: NodeDistribution,
-    #     edges: EdgeDistribution,
-    #     nodes_counts: EdgeCountType,
-    #     _safe: SBool = True,
-    # ):
-    #     is_nodes_dist = np.logical_or(is_dist(nodes), (~_safe))
-    #     # if not is_nodes_dist:
-    #     #     ipdb.set_trace()
-    #     pseudo_assert(is_nodes_dist)
-    #     is_edges_dist = np.logical_or(is_dist(edges), (~_safe))
-    #     # if not is_edges_dist:
-    #     #     ipdb.set_trace()
-    #     pseudo_assert(is_edges_dist)
-    #     nodes_mask, edges_mask = get_masks(nodes_counts, nodes.shape[1])
-    #     return cls(
-    #         nodes=nodes,
-    #         edges=edges,
-    #         nodes_mask=nodes_mask,
-    #         edges_mask=edges_mask,
-    #         _created_internally=True,
-    #     )
+    @classmethod
+    @jaxtyped
+    @beartype
+    def create(
+        cls,
+        nodes: NodeDistribution,
+        edges: EdgeDistribution,
+        nodes_mask: NodeMaskType,
+        edges_mask: EdgeMaskType,
+    ):
+        return cls(
+            nodes=nodes,
+            edges=edges,
+            nodes_mask=nodes_mask,
+            edges_mask=edges_mask,
+            _created_internally=True,
+        )
 
-    # def __str__(self):
-    #     def arr_str(arr: Array):
-    #         return f"Array({arr.shape}, max={arr.max():.2f}, min={arr.min():.2f}, mean={arr.mean():.2f}, dtype={arr.dtype}, is_dist={is_dist(arr)})"
-    #
-    #     def self_arr(props: dict):
-    #         return ",\n ".join(
-    #             [
-    #                 f"{key}: {arr_str(val)}"
-    #                 for key, val in props.items()
-    #                 if not key.startswith("_")
-    #             ]
-    #         )
-    #
-    #     return f"{self.__class__.__name__}(\n {self_arr(self.__dict__)}\n)"
+    @classmethod
+    @jaxtyped
+    @beartype
+    def noise(
+        cls,
+        key: Key,
+        num_node_features: int,
+        num_edge_features: int,
+        num_nodes: int,
+    ):
+        rng_nodes, rng_edges = random.split(key)
+        batch_size = 1
 
-    # @property
-    # def shape(self) -> dict[str, tuple[int, ...]]:
-    #     return dict(
-    #         nodes=self.nodes.shape, edges=self.edges.shape
-    #     )  # , mask=self.mask.shape)
-    #
-    # @property
-    # def batch_size(self) -> int:
-    #     return self.nodes.shape[0]
-    #
-    # @property
-    # def n(self) -> int:
-    #     return self.nodes.shape[1]
-    #
-    # def __repr__(self):
-    #     return self.__str__()
-    #
-    # # def __rmul__(
-    # #     self, other: "GraphDistribution | SFloat | SInt"
-    # # ) -> "GraphDistribution":
-    # #     return self.__mul__(other)
-    #
-    # def set(
-    #     self,
-    #     key: str,
-    #     value: NodeDistribution | EdgeDistribution,
-    # ) -> "GraphDistribution":
-    #     """Sets the values of X, E, y."""
-    #     new_vals = {
-    #         k: v
-    #         for k, v in (self.__dict__.copy() | {key: value}).items()
-    #         if not k.startswith("__")
-    #     }
-    #     return GraphDistribution(**new_vals)
-    #
-    # # overrides te addition operator
-    #
-    # # def __sub__(self, other) -> "GraphDistribution":
-    # #     if isinstance(other, GraphDistribution):
-    # #         return self.__class__.create(
-    # #             nodes=self.nodes - other.nodes,
-    # #             edges=self.edges - other.edges,
-    # #             nodes_mask=self.nodes_mask,
-    # #             edges_mask=self.edges_mask,
-    # #         )
-    # #     elif isinstance(other, (int, float, Array)):
-    # #         return self.__class__.create(
-    # #             nodes=self.nodes - other,
-    # #             edges=self.edges - other,
-    # #             nodes_mask=self.nodes_mask,
-    # #             edges_mask=self.edges_mask,
-    # #         )
-    # #
-    # # __rsub__ = __sub__
-    #
-    # # def __matmul__(self, q: Q) -> "GraphDistribution":
-    #
-    # # def __pow__(self, n: int) -> "GraphDistribution":
-    # #     return self.__class__.create(
-    # #         nodes=self.nodes**n,
-    # #         edges=self.edges**n,
-    # #         nodes_mask=self.nodes_mask,
-    # #         edges_mask=self.edges_mask,
-    # #     )
-    # #
-    # # overrides the square bracket indexing
+        edges = random.normal(
+            rng_edges, (batch_size, num_nodes, num_nodes, num_edge_features)
+        )
+        edges = to_symmetric(edges)
+        edges = np.where(np.eye(num_nodes)[None, :, :, None], 0, edges)
+        nodes = random.normal(rng_nodes, (batch_size, num_nodes, num_node_features))
+        nodes_mask = np.ones(nodes.shape[:-1], bool)
+        edges_mask = np.ones(edges.shape[:-1], bool)
+        return cls.create(
+            nodes=nodes,
+            edges=edges,
+            nodes_mask=nodes_mask,
+            edges_mask=edges_mask,
+        )
+
+        # # overrides the square bracket indexing
+
     def __getitem__(self, key: Int[Array, "n"] | slice) -> "GraphDistribution":
         return self.__class__(
             nodes=self.nodes[key],
@@ -254,46 +165,6 @@ class GraphDistribution:
     #
     def __len__(self):
         return self.nodes.shape[0]
-
-    #
-    # @classmethod
-    # @typed
-    # def noise(
-    #     cls,
-    #     key: Key,
-    #     num_node_features: int,
-    #     num_edge_features: int,
-    #     num_nodes: int,
-    #     batch_size: int,
-    # ) -> "GraphDistribution":
-    #     nodes_counts = np.array(
-    #         [num_nodes] * batch_size
-    #     )  # jax.random.randint(key, shape=(batch_size,),   int)
-    #     # nodes_counts = jax.random.randint(
-    #     #     key, shape=(batch_size,), minval=8, maxval=num_nodes + 1
-    #     # )
-    #     edges = jax.nn.softmax(
-    #         random.normal(key, (batch_size, num_nodes, num_nodes, num_edge_features))
-    #     )
-    #     edges = to_symmetric(edges)
-    #     # sets the diagonal to 0
-    #
-    #     tmp = einop(
-    #         np.eye(edges.shape[-1])[0],
-    #         "f -> b n1 n2 f",
-    #         n1=num_nodes,
-    #         n2=num_nodes,
-    #         b=batch_size,
-    #     )
-    #     edges = np.where(np.eye(num_nodes)[None, :, :, None], tmp, edges)
-    #     return cls.create_from_counts(
-    #         nodes=jax.nn.softmax(
-    #             random.normal(key, (batch_size, num_nodes, num_node_features))
-    #         ),
-    #         edges=edges,
-    #         nodes_counts=nodes_counts,
-    #     )
-    #
 
 
 def is_dist(x):
