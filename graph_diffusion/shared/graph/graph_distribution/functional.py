@@ -243,7 +243,7 @@ def plot(
         _, axs = plt.subplots(
             lrows,
             lcolumn,
-            # figsize=(100, 10),
+            figsize=(100, 10),
         )
     except Exception as e:
         ipdb.set_trace()
