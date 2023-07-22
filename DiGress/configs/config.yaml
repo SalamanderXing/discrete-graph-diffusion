@@ -1,9 +1,0 @@
-defaults:
-    - general : general_default
-    - model : discrete
-    - train : train_default
-    - dataset : qm9
-
-
-
-

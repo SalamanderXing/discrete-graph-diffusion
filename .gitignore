@@ -3,6 +3,7 @@ pytorch/outputs/*
 .mate/*/venv
 .mate/tmp
 results/*
+results_working_full_epochs/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

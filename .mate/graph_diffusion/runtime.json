@@ -1,1 +1,1 @@
-{"command": "train", "save_dir": "/home/bluesk/Documents/discrete-graph-diffusion/results/experiments/ddgd_tr_QM9", "project_name": "graph_diffusion", "auto_wandb": true}
+{"command": "sample", "save_dir": "/home/bluesk/Documents/discrete-graph-diffusion/results/experiments/ddgd_tr_QM9", "project_name": "graph_diffusion", "auto_wandb": true}

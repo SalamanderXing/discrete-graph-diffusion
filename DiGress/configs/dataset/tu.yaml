@@ -1,5 +1,0 @@
-name: 'tu'            # qm9, qm9_positional
-datadir: 'data/tu/'
-remove_h: True
-random_subset: null
-pin_memory: False
