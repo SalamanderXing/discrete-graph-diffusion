@@ -11,7 +11,6 @@ import jax_dataclasses as jdc
 from mate.jax import SFloat, SInt, SBool, Key
 from jaxtyping import Float, Bool, Int, jaxtyped
 from typing import Sequence
-from jax.scipy.special import kl_div as _kl_div, rel_entr
 from .graph_distribution import GraphDistribution, EdgeDistribution
 from .one_hot_graph_distribution import OneHotGraph
 from .dense_graph_distribution import DenseGraphDistribution
