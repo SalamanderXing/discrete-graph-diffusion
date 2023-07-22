@@ -33,23 +33,23 @@ GetProbabilityType = Callable[
 
 import sys
 
-sys.path.insert(0, "/home/bluesk/Documents/tmp/digress-copy/")
-
+# sys.path.insert(0, "/home/bluesk/Documents/tmp/digress-copy/")
+#
+# # from src.diffusion import diffusion_utils
+# from src import diffusion_model_discrete
 # from src.diffusion import diffusion_utils
-from src import diffusion_model_discrete
-from src.diffusion import diffusion_utils
-
-digress = diffusion_model_discrete.DiscreteDenoisingDiffusion(
-    cfg=None,
-    dataset_infos=None,
-    train_metrics=None,
-    sampling_metrics=None,
-    visualization_tools=None,
-    extra_features=None,
-    domain_features=None,
-    reload=True,
-)
-
+#
+# digress = diffusion_model_discrete.DiscreteDenoisingDiffusion(
+#     cfg=None,
+#     dataset_infos=None,
+#     train_metrics=None,
+#     sampling_metrics=None,
+#     visualization_tools=None,
+#     extra_features=None,
+#     domain_features=None,
+#     reload=True,
+# )
+#
 
 ### TMP TORCH STUFF
 
