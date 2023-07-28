@@ -18,7 +18,7 @@ from jaxtyping import Int, Float, Bool, jaxtyped
 import hashlib
 from orbax.checkpoint.pytree_checkpoint_handler import Transform
 from ...shared.graph import graph_distribution as gd
-from .transition_model import TransitionModel
+from .types import TransitionModel
 import ipdb
 import einops as e
 
@@ -50,9 +50,19 @@ GetProbabilityType = Callable[
 # )
 #
 
+### TMP TORCH STUFF
+
+
+## END TMP TORCH STUFF
+
 
 def enc(x: str):
     return int(hashlib.md5(x.encode()).hexdigest()[:8], base=16)
+
+
+# def typed(f):
+#     return jaxtyped(beartype(f))
+#
 
 
 def summarize(name, node_mask, x):
@@ -68,6 +78,7 @@ def summarize(name, node_mask, x):
     _summarize("edges", es, 1)
 
 
+# @typed
 def pseudo_assert(condition: SBool):
     """
     When debugging NaNs, the following
@@ -76,12 +87,13 @@ def pseudo_assert(condition: SBool):
     return np.where(condition, 0, np.nan)
 
 
+# @typed
 def __compute_posterior_distribution_edges(
     edges: EdgeDistribution,
     edges_t: EdgeDistribution,
-    q_t: Float[Array, "bs e e"],
-    q_s_bar: Float[Array, "bs e e"],
-    q_t_bar: Float[Array, "bs e e"],
+    q_t: Array,
+    q_s_bar: Array,
+    q_t_bar: Array,
 ):
     q_t_e_transposed = e.repeat(
         q_t, "bs e1 e2 -> bs n1 n2 e2 e1", n1=edges.shape[1], n2=edges.shape[2]
@@ -92,18 +104,19 @@ def __compute_posterior_distribution_edges(
     right_term = e.einsum(edges, q_s_bar, "bs n1 n2 de, bs de e1 -> bs n1 n2 e1")
     product = left_term * right_term
     denom = e.einsum(edges, q_t_bar, "bs n1 n2 de, bs de e1 -> bs n1 n2 e1")
-    denom = e.reduce(denom * edges_t, "bs n1 n2 e -> bs n1 n2", "sum")
+    denom = e.rearrange(denom * edges_t, "bs n1 n2 e -> bs n1 n2", reduction="sum")
     denom = np.where(denom == 0, 1, denom)
     prob = product / denom[..., None]
     return prob
 
 
+# @typed
 def __compute_posterior_distribution_nodes(
     nodes: NodeDistribution,
     nodes_t: NodeDistribution,
-    q_t: Float[Array, "bs e e"],
-    q_s_bar: Float[Array, "bs e e"],
-    q_t_bar: Float[Array, "bs e e"],
+    q_t: Array,
+    q_s_bar: Array,
+    q_t_bar: Array,
 ):
     q_t_T = e.repeat(q_t, "bs e1 e2 -> bs n e2 e1", n=nodes.shape[1])
     left_term = e.einsum(nodes_t, q_t_T, "bs n de, bs n de e1 -> bs n e1")
@@ -118,6 +131,8 @@ def __compute_posterior_distribution_nodes(
     return prob
 
 
+
+# @typed
 def posterior_distribution(
     g: gd.GraphDistribution,
     g_t: gd.OneHotGraph,
@@ -174,6 +189,7 @@ def predict_from_random_timesteps(
     return t, g_t, g_pred
 
 
+# @typed
 def _compute_lt(
     t: Int[Array, "b"],
     g: gd.OneHotGraph,
@@ -199,6 +215,7 @@ def _compute_lt(
     return result
 
 
+# @typed
 def compute_reconstruction_logp(
     *,
     rng_key: Key,
@@ -218,13 +235,16 @@ def compute_reconstruction_logp(
     )
 
 
+# @typed
 def _compute_reconstruction_logp(
     g: gd.OneHotGraph,
     g_pred: gd.DenseGraphDistribution,
 ) -> Float[Array, "batch_size"]:
+    # g_pred = gd.softmax(g_pred)
     return gd.logprobs_at(g, g_pred)  # gd.logprobs_at(g_pred, g)
 
 
+# @typed
 def compute_kl_prior(
     *,
     target: gd.OneHotGraph,
@@ -244,6 +264,7 @@ def compute_kl_prior(
     return gd.kl_div(transition_probs, limit_dist)
 
 
+# @typed
 def compute_train_loss(
     *,
     target: gd.OneHotGraph,
@@ -283,6 +304,8 @@ def compute_train_loss(
     return tot_loss
 
 
+# @jaxtyped
+# @beartype
 def compute_val_loss(
     *,
     target: gd.OneHotGraph,
@@ -388,11 +411,9 @@ def __compute_batched_over0_posterior_distribution_edges(edges_t, q_t, q_s_b, q_
     return out
 
 
-# @jaxtyped
-# @beartype
-
-
 @jax.jit
+@jaxtyped
+@beartype
 def sample_p_zs_given_zt(
     p: GetProbabilityType,
     t: Int[Array, "batch"],

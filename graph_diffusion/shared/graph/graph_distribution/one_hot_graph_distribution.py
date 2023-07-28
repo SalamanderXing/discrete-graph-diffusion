@@ -59,3 +59,16 @@ class OneHotGraph(GraphDistribution):
             nodes_mask=np.repeat(self.nodes_mask, n, axis=0),
             edges_mask=np.repeat(self.edges_mask, n, axis=0),
         )
+
+    @jaxtyped
+    @beartype
+    def mask(self) -> "OneHotGraph":
+        g = self
+        nodes = np.where(g.nodes_mask[..., None], g.nodes, 0)
+        edges = np.where(g.edges_mask[..., None], g.edges, 0)
+        return OneHotGraph.create(
+            nodes=nodes,
+            edges=edges,
+            nodes_mask=g.nodes_mask,
+            edges_mask=g.edges_mask,
+        )

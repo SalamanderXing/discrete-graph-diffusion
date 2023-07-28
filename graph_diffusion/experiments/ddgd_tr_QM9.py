@@ -4,16 +4,15 @@ tags:
 - rocket 
 ```
 """
-
+from jax import random
 
 import jax
 
-data_key = jax.random.PRNGKey(
-    0
-)  # has to be done at the beginning to allow JAX to take control of the GPU memory.
+# has to be done at the beginning to allow JAX to take control of the GPU memory.
+data_key = jax.random.PRNGKey(0)
 
 
-gpu = False 
+gpu = True
 debug_compiles = False
 
 if not gpu:
@@ -68,6 +67,7 @@ dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
 )
+
 diffusion_steps = 500
 import random as pyrandom
 
@@ -75,31 +75,31 @@ rngs = {
     "params": random.PRNGKey(pyrandom.randint(0, 10000)),
     "dropout": random.PRNGKey(pyrandom.randint(0, 10000)),
 }
-model, params = GraphTransformer.initialize(
-    key=rngs["params"],
-    in_node_features=dataset.node_prior.shape[-1],
-    in_edge_features=dataset.edge_prior.shape[-1],
-    number_of_nodes=dataset.n,
-    num_layers=5,
-)
+# model, params = GraphTransformer.initialize(
+#     key=rngs["params"],
+#     in_node_features=dataset.node_prior.shape[-1],
+#     in_edge_features=dataset.edge_prior.shape[-1],
+#     number_of_nodes=dataset.n,
+#     num_layers=5,
+# )
+model = GraphTransformer(n_layers=5)
 save_path = os.path.join(mate.save_dir, f"{diffusion_steps}_diffusion_steps")
 os.makedirs(save_path, exist_ok=True)
 os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)
 
-# import ipdb;
-# ipdb.set_trace()
 trainer = Trainer(
     model=model,
-    params=params,
     rngs=rngs,
     train_loader=dataset.train_loader,
     val_loader=dataset.test_loader,
     num_epochs=300,
     match_edges=True,
+    extra_features=False,
     save_path=save_path,
     nodes_dist=dataset.nodes_dist,
     nodes_prior=dataset.node_prior,
     edges_prior=dataset.edge_prior,
+    dataset_infos=dataset.infos,
     bits_per_edge=False,
     diffusion_steps=diffusion_steps,
     noise_schedule_type="cosine",
@@ -108,6 +108,7 @@ trainer = Trainer(
     max_num_nodes=dataset.n,
     num_node_features=dataset.max_node_feature,
     num_edge_features=dataset.max_edge_feature,
+    train_smiles=dataset.train_smiles,
 )
 mate.bind(trainer)
 # mate.result({f"{ds_name} best_val_loss": best_val_loss})

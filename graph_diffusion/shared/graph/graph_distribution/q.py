@@ -5,17 +5,15 @@ from jax import numpy as np
 import ipdb
 from jaxtyping import Float, Bool, Int, jaxtyped
 from flax.struct import dataclass
+from beartype import beartype
+from typing import Union
 
 
-# def safe_div(a: Array, b: Array) -> Array:
-#     mask = b == 0
-#     return np.where(mask, 0, a / np.where(mask, 1, b))
-
-
+@beartype
 @dataclass
 class Q:
-    nodes: Float[Array, "b n"]
-    edges: Float[Array, "b n n"]
+    nodes: Float[Array, "t en en"]
+    edges: Float[Array, "t ee ee"]
 
     # overrides the square bracket indexing
     def __getitem__(self, key: Int[Array, "n"]) -> "Q":
@@ -25,7 +23,7 @@ class Q:
     def shape(self) -> dict[str, tuple[int, ...]]:
         return dict(x=self.nodes.shape, edges=self.edges.shape)
 
-    def __truediv__(self, other: "Float[Array, ' '] | Q") -> "Q":
+    def __truediv__(self, other: Union[Float[Array, " "], "Q"]) -> "Q":
         if isinstance(other, Q):
             return Q(nodes=self.nodes / other.nodes, edges=self.edges / other.edges)
         else:

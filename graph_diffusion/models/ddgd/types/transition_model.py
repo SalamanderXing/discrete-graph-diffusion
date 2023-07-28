@@ -100,78 +100,10 @@ class TransitionModel:
     diffusion_steps: SInt
     qs: Q
     q_bars: Q
-    betas: Float[Array, "T"]
+    betas: Float[Array, "T 1"]
     alpha_bars: Float[Array, "T"]
-    temporal_embeddings: Float[Array, "temporal_embedding_dim"]
+    temporal_embeddings: Float[Array, "T temporal_embedding_dim"]
     limit_dist: gd.DenseGraphDistribution
-
-    @classmethod
-    @typed
-    def from_dict(cls, d: dict):
-        return cls(
-            diffusion_steps=d["diffusion_steps"],
-            qs=Q(nodes=d["qs"]["nodes"], edges=d["qs"]["edges"]),
-            q_bars=Q(nodes=d["q_bars"]["nodes"], edges=d["q_bars"]["edges"]),
-            temporal_embeddings=np.zeros(128),
-            limit_dist=gd.create_dense_from_counts(
-                nodes=d["limit_dist"]["nodes"],
-                edges=d["limit_dist"]["edges"],
-                nodes_counts=d["limit_dist"]["nodes_counts"],
-            ),
-        )
-
-    @classmethod
-    @typed
-    def from_torch(cls, torch_transition_model, torch_noise_schedule):
-        import torch as t
-
-        device = t.device("cpu")
-        betas = [
-            torch_noise_schedule(t.tensor([i], device=device))
-            for i in range(len(torch_noise_schedule.betas + 1))
-        ]
-        qs_raw = [
-            torch_transition_model.get_Qt(beta_t[None], device) for beta_t in betas
-        ]
-
-        ipdb.set_trace()
-        q_bars_raw = [
-            torch_transition_model.get_Qt_bar(beta_t[None], device)
-            for beta_t in torch_noise_schedule.betas
-        ]
-        q_nodes = einop([np.array(q.X.numpy()) for q in qs_raw], "* a b")
-        q_bars_nodes = einop([np.array(q.X.numpy()) for q in q_bars_raw], "* a b")
-        q_edges = einop([np.array(q.E.numpy()) for q in qs_raw], "* a b")
-        q_bars_edges = einop([np.array(q.E.numpy()) for q in q_bars_raw], "* a b")
-        # q_nodes = q_nodes + 0.00001
-        # q_nodes = q_nodes / q_nodes.sum(axis=-1, keepdims=True)
-        # q_edges = q_edges + 0.00001
-        # q_edges = q_edges / q_edges.sum(axis=-1, keepdims=True)
-        # q_bars_nodes = q_bars_nodes + 0.00001
-        # q_bars_nodes = q_bars_nodes / q_bars_nodes.sum(axis=-1, keepdims=True)
-        # q_bars_edges = q_bars_edges + 0.00001
-        # q_bars_edges = q_bars_edges / q_bars_edges.sum(axis=-1, keepdims=True)
-        qs = Q(nodes=q_nodes, edges=q_edges)
-        q_bars = Q(nodes=q_bars_nodes, edges=q_bars_edges)
-        limit_edges = einop(
-            np.array(torch_transition_model.u_e[0, 0]), "ee -> 1 n1 n2 ee", n1=9, n2=9
-        )  # FIXME: get te actual nodes counts
-        limit_nodes = einop(
-            np.array(torch_transition_model.u_x[0, 0].numpy()), "en -> 1 n en", n=9
-        )
-        print(limit_edges.shape)
-        limit_dist = gd.create_dense_from_counts(
-            nodes=limit_nodes,
-            edges=limit_edges,
-            nodes_counts=np.ones(limit_nodes.shape[0], int),
-        )
-        return cls(
-            diffusion_steps=torch_noise_schedule.timesteps,
-            qs=qs,
-            q_bars=q_bars,
-            temporal_embeddings=np.zeros(128),
-            limit_dist=limit_dist,
-        )
 
     @classmethod
     @typed
@@ -256,6 +188,7 @@ class TransitionModel:
             edges=limit_E,
             nodes_counts=np.array([n]),
         )
+        print(f"{temporal_embeddings.shape=}")
         return cls(
             diffusion_steps=diffusion_steps,
             qs=qs,

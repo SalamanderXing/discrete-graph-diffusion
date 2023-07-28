@@ -52,10 +52,12 @@ class QM9Dataset:
     nodes_dist: Float[Array, "k"]
     node_prior: Float[Array, "m"]
     edge_prior: Float[Array, "l"]
+    infos: qm9_dataset.QM9infos
     mean_edge_count: SFloat = 0.0
     mean_node_count: SFloat = 0.0
     var_edge_count: SFloat = 0.0
     var_node_count: SFloat = 0.0
+    train_smiles: Iterable[str] = None
 
 
 def load_data(save_dir: str, batch_size: int):
@@ -83,6 +85,12 @@ def load_data(save_dir: str, batch_size: int):
     # )
     nodes_dist = np.array(dataset_infos.n_nodes.numpy())
     datamodule.__dict__["nodes_dist"] = nodes_dist
+    train_smiles = qm9_dataset.get_train_smiles(
+        cfg=cfg,
+        train_dataloader=datamodule.train_dataloader(),
+        dataset_infos=dataset_infos,
+        evaluate_dataset=False,
+    )
 
     return QM9Dataset(
         train_loader=datamodule.dataloaders["train"],
@@ -93,8 +101,10 @@ def load_data(save_dir: str, batch_size: int):
         nodes_dist=nodes_dist,
         node_prior=np.array(dataset_infos.node_types.numpy()),
         edge_prior=np.array(dataset_infos.edge_types.numpy()),
-        mean_edge_count=0,
-        mean_node_count=0,
-        var_edge_count=0,
-        var_node_count=0,
+        mean_edge_count=0.0,
+        mean_node_count=0.0,
+        var_edge_count=0.0,
+        var_node_count=0.0,
+        train_smiles=train_smiles,
+        infos=dataset_infos,
     )

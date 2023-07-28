@@ -12,16 +12,12 @@ from typing import Sequence
 from jaxtyping import jaxtyped
 from beartype import beartype
 from jax.scipy.special import logit
-
-# import einops as e
-from einop import einop
-import wandb
-
-# from .geometric import to_dense
 from jax import random
 
 # from .data_batch import DataBatch
 from .q import Q
+
+from einops import rearrange, reduce, repeat
 
 # from ..graph import SimpleGraphDist
 
@@ -55,20 +51,22 @@ def get_masks(
 ) -> tuple[NodeMaskType, EdgeMaskType]:
     n_range = np.arange(n)
     bs = nodes_counts.shape[0]
-    mask_x = einop(n_range, "n -> bs n", bs=bs) < einop(nodes_counts, "bs -> bs n", n=n)
-    e_ranges = einop(mask_x, "bs n -> bs n n1", n1=n)
-    e_diag = einop(np.eye(n, dtype=bool), "n1 n2 -> 1 n1 n2")
-    mask_e = e_ranges & einop(e_ranges, "bs n n1 -> bs n1 n") & ~e_diag
+    mask_x = repeat(n_range, "n -> bs n", bs=bs) < repeat(
+        nodes_counts, "bs -> bs n", n=n
+    )
+    e_ranges = repeat(mask_x, "bs n -> bs n n1", n1=n)
+    e_diag = rearrange(np.eye(n, dtype=bool), "n1 n2 -> 1 n1 n2")
+    mask_e = e_ranges & rearrange(e_ranges, "bs n n1 -> bs n1 n") & ~e_diag
     return mask_x, mask_e
 
 
 @jaxtyped
 @beartype
 def to_symmetric(edges: EdgeDistribution) -> EdgeDistribution:
-    upper = einop(
+    upper = rearrange(
         np.triu(np.ones((edges.shape[1], edges.shape[2]))), "n1 n2 -> 1 n1 n2 1"
     )
-    return np.where(upper, edges, einop(edges, "b n1 n2 ee -> b n2 n1 ee"))
+    return np.where(upper, edges, rearrange(edges, "b n1 n2 ee -> b n2 n1 ee"))
 
 
 @dataclass
@@ -79,6 +77,10 @@ class GraphDistribution:
     edges_mask: EdgeMaskType
     # mask: MaskType
     _created_internally: SBool  # trick to prevent users from creating this class directly
+
+    @property
+    def batch_size(self):
+        return self.nodes.shape[0]
 
     @property
     def nodes_counts(self):
@@ -165,6 +167,72 @@ class GraphDistribution:
     #
     def __len__(self):
         return self.nodes.shape[0]
+
+    @classmethod
+    @jaxtyped
+    @beartype
+    def create_and_mask(
+        cls,
+        nodes: NodeDistribution,
+        edges: EdgeDistribution,
+        nodes_mask: NodeMaskType,
+        edges_mask: EdgeMaskType,
+    ):
+        nodes = np.where(nodes_mask[..., None], nodes, 0)
+        edges = to_symmetric(np.where(edges_mask[..., None], edges, 0))
+        return cls(
+            nodes=nodes,
+            edges=edges,
+            nodes_mask=nodes_mask,
+            edges_mask=edges_mask,
+            _created_internally=True,
+        )
+
+    @classmethod
+    @jaxtyped
+    @beartype
+    def create_from_counts(
+        cls,
+        nodes: NodeDistribution,
+        edges: EdgeDistribution,
+        nodes_counts: EdgeCountType,
+    ):
+        nodes_mask, edges_mask = get_masks(nodes_counts, nodes.shape[1])
+        return cls(
+            nodes=nodes,
+            edges=edges,
+            nodes_mask=nodes_mask,
+            edges_mask=edges_mask,
+            _created_internally=True,
+        )
+
+    @classmethod
+    @jaxtyped
+    @beartype
+    def create_minimal(
+        cls,
+        nodes: NodeDistribution,
+        edges: EdgeDistribution,
+        nodes_mask: NodeMaskType,
+    ):
+        _, edges_mask = get_masks(nodes_mask.sum(-1), edges.shape[1])
+        return cls(
+            nodes=nodes,
+            edges=edges,
+            nodes_mask=nodes_mask,
+            edges_mask=edges_mask,
+            _created_internally=True,
+        )
+
+    @jaxtyped
+    @beartype
+    def repeat(self, n: int):
+        return GraphDistribution.create(
+            nodes=np.repeat(self.nodes, n, axis=0),
+            edges=np.repeat(self.edges, n, axis=0),
+            nodes_mask=np.repeat(self.nodes_mask, n, axis=0),
+            edges_mask=np.repeat(self.edges_mask, n, axis=0),
+        )
 
 
 def is_dist(x):

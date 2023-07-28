@@ -1,20 +1,22 @@
 from flax import linen as nn
 from flax.struct import dataclass
 from jax import numpy as np
-from jaxtyping import jaxtyped
-from beartype import beartype
+from typing import no_type_check
 from mate.jax import Key
 import jax
 from ...shared.graph import graph_distribution as gd
 from einops import rearrange, repeat
 import ipdb
+from jaxtyping import jaxtyped
+from beartype import beartype
+from typing import no_type_check
 
 
 class Xtoy(nn.Module):
     dy: int
 
     @nn.compact
-    def __call__(self, X):
+    def __call__(self, X: gd.NodeDistribution):
         """Map node features to global features"""
         m = X.mean(axis=1)
         mi = X.min(axis=1)
@@ -36,7 +38,7 @@ class Etoy(nn.Module):
     dy: int
 
     @nn.compact
-    def __call__(self, E):
+    def __call__(self, E: gd.EdgeDistribution):
         """Map edge features to global features."""
         super().__init__()
         m = E.mean(axis=(1, 2))
@@ -231,7 +233,9 @@ class NodeEdgeBlock(nn.Module):
         # .flatten(start_axis=3)  # bs, n, n, dx
         ye1 = rearrange(y_e_add(y), "bs de -> bs 1 1 de")
         # .unsqueeze(1).unsqueeze(1)  # bs, 1, 1, de
-        ye2 = rearrange(y_e_mul(y), "bs de -> bs 1 1 de")  # .unsqueeze(1).unsqueeze(1)
+        ye2 = rearrange(
+            y_e_mul(y), "bs de -> bs 1 1 de"
+        )  # .unsqueeze(1).unsqueeze(1)
         newE = ye1 + (ye2 + 1) * newE
 
         # Output E
@@ -293,6 +297,7 @@ class HiddenDims:
     dim_ffy: int
 
 
+@no_type_check
 class GraphTransformer(nn.Module):
     n_layers: int
     hidden_mlp_dims: Dims = Dims(x=128, e=128, y=128)
@@ -331,7 +336,7 @@ class GraphTransformer(nn.Module):
     @jaxtyped
     @beartype
     @nn.compact
-    def __call__(self, g: gd.OneHotGraph, y, deterministic: bool):
+    def __call__(self, g: gd.GraphDistribution, y, deterministic: bool):
         act_fn_in = nn.relu
         act_fn_out = nn.relu
         X = g.nodes

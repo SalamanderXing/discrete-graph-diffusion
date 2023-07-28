@@ -1,77 +1,80 @@
-"""
-Entrypoint of the discrete denoising diffusion model.
-The function `train_model` is the main entrypoint.
-"""
-import sys
-from memory_profiler import profile
 import os
 from . import torch_utils
-from typing import Callable, cast
+import ipdb
 from jax import numpy as np, Array
 from flax.training import train_state
 import matplotlib.pyplot as plt
 import flax.linen as nn
-from jax.debug import print as jprint  # type: ignore
 from jaxtyping import Float, Int, Bool
 from time import time
-import jax_dataclasses as jdc
 from jaxtyping import jaxtyped
+from flax.struct import dataclass as flax_dataclass
 import jax
+from jax import jit
 import optax
 import wandb
-from typing import Iterable, cast
-import ipdb
+from typing import Iterable
+from dataclasses import dataclass
 
-
+from .metrics import SamplingMolecularMetrics
 from rich import print as print
 from tqdm import tqdm
 from flax.core.frozen_dict import FrozenDict
-from mate.jax import SFloat, SInt, SBool, SUInt, Key  # , jit
-from jax import jit
+from mate.jax import SFloat, SInt, SBool, Key
 from orbax import checkpoint
-
-
-# from ...shared.graph import SimpleGraphDist
+from einops import rearrange, reduce, repeat
+from beartype import beartype
+from .extra_features.extra_features import compute as compute_extra_features
 from ...shared.graph import graph_distribution as gd
 from . import diffusion_functions as df
-from .types import (
+from .transition_model import (
     TransitionModel,
 )
-from beartype import beartype
+from functools import partial
 
 enc = df.enc
 
-
+DataLoader = Iterable[gd.OneHotGraph]
 GraphDistribution = gd.GraphDistribution
 
 
-def typed(f):
-    return jaxtyped(beartype(f))
-
-
 class TrainState(train_state.TrainState):
-    key: jax.random.KeyArray  # type: ignore
+    key: jax.random.PRNGKey
     lr: SFloat
     last_loss: SFloat
 
 
-@jdc.pytree_dataclass
-class GetProbabilityFromState(jdc.EnforcedAnnotationsMixin):
+def get_model_input(g, t: Int[Array, "bs"], extra_features, transition_model):
+    if extra_features:
+        extra_features = compute_extra_features(g, g.nodes.shape[1])
+        g = gd.GraphDistribution.create(
+            nodes=np.concatenate([g.nodes, extra_features.nodes], axis=-1),
+            edges=np.concatenate([g.edges, extra_features.edges], axis=-1),
+            nodes_mask=g.nodes_mask,
+            edges_mask=g.edges_mask,
+        )
+        temporal_embeddings = extra_features.y
+    else:
+        temporal_embeddings = transition_model.temporal_embeddings[t]
+    return g, temporal_embeddings
+
+
+@flax_dataclass
+class GetProbabilityFromState:
     state: TrainState
     dropout_rng: Key
     transition_model: TransitionModel
+    extra_features: SBool = False
 
-    @typed
     def __call__(
         self, g: gd.OneHotGraph, t: Int[Array, "batch_size"]
     ) -> gd.DenseGraphDistribution:
-        temporal_embeddings = self.transition_model.temporal_embeddings[t]
-        # temporal_embeddings = np.zeros((1, 129))  # FIXME just a test
-        # print(f"[blue]Init nodes[/blue]: {g.x.shape}")
-        # print(f"[orange]Init nodes[/orange]: {g.e.shape}")
+        g_input, temporal_embeddings = get_model_input(
+            g, t, self.extra_features, self.transition_model
+        )
         pred_graph = self.state.apply_fn(
             self.state.params,
-            g,
+            g_input,
             temporal_embeddings,
             deterministic=True,
             rngs={"dropout": self.dropout_rng},
@@ -79,23 +82,24 @@ class GetProbabilityFromState(jdc.EnforcedAnnotationsMixin):
         return pred_graph
 
 
-@jdc.pytree_dataclass
-class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
+@flax_dataclass
+class GetProbabilityFromParams:
     params: FrozenDict
     state: TrainState
     dropout_rng: Key
     transition_model: TransitionModel
     deterministic: SBool = False
+    extra_features: SBool = False
 
-    @typed
     def __call__(
         self, g: gd.OneHotGraph, t: Int[Array, "batch_size"]
     ) -> gd.DenseGraphDistribution:
-        temporal_embeddings = self.transition_model.temporal_embeddings[t]
-        # temporal_embeddings = np.zeros((1, 129))  # FIXME just a test
+        g_input, temporal_embeddings = get_model_input(
+            g, t, self.extra_features, self.transition_model
+        )
         pred_graph = self.state.apply_fn(
             self.params,
-            g,
+            g_input,
             temporal_embeddings,
             deterministic=False,
             rngs={"dropout": self.dropout_rng},
@@ -104,108 +108,17 @@ class GetProbabilityFromParams(jdc.EnforcedAnnotationsMixin):
         return pred_graph
 
 
-@jit
-@typed
-def compute_train_loss(
-    g: gd.OneHotGraph,
-    rng: Key,
-    transition_model: TransitionModel,
-    get_probability: Callable[
-        [gd.OneHotGraph, Int[Array, "batch_size"]], gd.DenseGraphDistribution
-    ],
-    match_edges: SBool = True,
-):
-    rng_t = jax.random.fold_in(rng, enc("t"))
-    rng_z = jax.random.fold_in(rng, enc("z"))
-    ce = optax.softmax_cross_entropy
-    t = jax.random.randint(rng_t, (g.nodes.shape[0],), 1, len(transition_model.q_bars))
-    q_bars = transition_model.q_bars[t]
-    z = gd.sample_one_hot(gd.matmul(g, q_bars), rng_z)
-    pred_graph = gd.softmax(get_probability(z, t))
-    target = g
-    loss_type = "ce"
-    # jax.debug.breakpoint()
-    if loss_type == "mse":
-        mse_nodes = (target.nodes - pred_graph.nodes) ** 2
-        mse_edges = (target.edges - pred_graph.edges) ** 2
-        weight = 1
-        weighted_mse_nodes = np.where(z.nodes != 1, weight, 1) * mse_nodes
-        count_diff = (
-            (target.edges.argmax(-1) != 0).sum()
-            - (pred_graph.edges.argmax(-1) != 0).sum()
-        ) ** 2
-        loss = np.array(
-            [weighted_mse_nodes.mean(), mse_edges.mean(), match_edges * count_diff]
-        ).mean()
-    elif loss_type == "ce":
-        loss = gd.cross_entropy(pred_graph, target).mean()
-        # jax.debug.breakpoint()
-    elif loss_type == "mse+ce":
-        count_diff = (
-            (target.edges.argmax(-1) != 0).sum()
-            - (pred_graph.edges.argmax(-1) != 0).sum()
-        ) ** 2
-
-        loss = gd.cross_entropy(pred_graph, target).mean() + count_diff
-    elif loss_type == "kl":
-        loss = gd.softmax_kl_div(pred_graph, target).mean()
-    else:
-        raise ValueError(f"Unknown loss type: {loss_type}")
-
-    return loss
-
-
-def print_gradient_analysis(grads: FrozenDict):
-    there_are_nan = np.any(
-        np.array([np.any(np.isnan(v)) for v in jax.tree_util.tree_flatten(grads)[0]])
-    )
-    max_value = np.max(
-        np.array([np.max(v) for v in jax.tree_util.tree_flatten(grads)[0]])
-    )
-    min_value = np.min(
-        np.array([np.min(v) for v in jax.tree_util.tree_flatten(grads)[0]])
-    )
-    jprint("gradient analysis")
-    jprint(
-        "max_val={max_value} min_val={min_value}",
-        max_value=max_value,
-        min_value=min_value,
-    )
-    jprint("there are nans: {there_are_nan}", there_are_nan=there_are_nan)
-
-
-@jit
-@jaxtyped
-@beartype
+@partial(jit, static_argnames=["extra_features"])
 def train_step(
     *,
     g: gd.OneHotGraph,
     state: TrainState,
     rng: Key,
     transition_model: TransitionModel,
-    nodes_dist: Array,
-):  # -> tuple[TrainState, Float[Array, "batch_size"]]:
+    extra_features: SBool,
+):
     dropout_train_key = jax.random.fold_in(rng, enc("dropout"))
     train_rng = jax.random.fold_in(rng, enc("train"))
-
-    # get_probability = GetProbabilityFromParams(
-    #     state=state,
-    #     params=state.params,
-    #     transition_model=transition_model,
-    #     dropout_rng=dropout_train_key,
-    # )
-    # # losses = df.compute_train_loss(
-    # #     target=g,
-    # #     transition_model=transition_model,
-    # #     rng_key=rng,
-    # #     get_probability=get_probability,
-    # # ).mean()
-    # losses = compute_train_loss(
-    #     g=g,
-    #     transition_model=transition_model,
-    #     get_probability=get_probability,
-    #     rng=rng,
-    # )
 
     def loss_fn(params: FrozenDict):
         get_probability = GetProbabilityFromParams(
@@ -213,6 +126,7 @@ def train_step(
             params=params,
             transition_model=transition_model,
             dropout_rng=dropout_train_key,
+            extra_features=extra_features,
         )
         losses = df.compute_train_loss(
             target=g,
@@ -220,28 +134,15 @@ def train_step(
             rng_key=train_rng,
             get_probability=get_probability,
         ).mean()
-        # losses = compute_train_loss(
-        #     g=g,
-        #     transition_model=transition_model,
-        #     get_probability=get_probability,
-        #     rng=train_rng,
-        # )
         return losses, None
 
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
-    # print_gradient_analysis(grads)
-    # grads = jax.tree_map(
-    #     lambda x: np.where(np.isnan(x), 0.0, x), grads
-    # )  # remove the nans :(
-    # state = state.replace()
     state = state.apply_gradients(grads=grads)
     return state, loss
 
 
-@jit
-@jaxtyped
-@beartype
+@partial(jit, static_argnames=["extra_features"])
 def val_step(
     *,
     data: gd.OneHotGraph,
@@ -249,18 +150,16 @@ def val_step(
     rng: Key,
     transition_model: TransitionModel,
     nodes_dist: Array,
+    extra_features: SBool,
 ) -> dict[str, Float[Array, "batch_size"]]:
     dropout_test_key = jax.random.fold_in(rng, enc("dropout"))
     val_rng = jax.random.fold_in(rng, enc("val"))
     p = GetProbabilityFromState(
-        state=state, dropout_rng=dropout_test_key, transition_model=transition_model
+        state=state,
+        dropout_rng=dropout_test_key,
+        transition_model=transition_model,
+        extra_features=extra_features,
     )
-    # get_probability = lambda x, t: gd.create_dense(
-    #     data.nodes * 100.0,
-    #     data.edges * 100.0,
-    #     data.nodes_mask,
-    #     data.edges_mask,
-    # ) # this was a test, how does a cheating model perform?
     return df.compute_val_loss(
         target=data,
         transition_model=transition_model,
@@ -270,38 +169,6 @@ def val_step(
     )
 
 
-from einop import einop
-
-
-@jit
-@typed
-def _sample_step(
-    g: gd.DenseGraphDistribution,
-    transition_model: TransitionModel,
-    model,
-    t: Int[Array, ""],
-    rng,
-):
-    timesteps = einop(t, " -> b", b=len(g))
-    # g_t = gd.sample_one_hot(g, rng)
-    # model_probs = gd.softmax(model(g_t, timesteps))
-    # g = df.posterior_distribution(
-    #     g=model_probs,
-    #     g_t=g_t,
-    #     t=timesteps,
-    #     transition_model=transition_model,
-    # )
-    g = df.sample_p_zs_given_zt(
-        p=model,
-        t=timesteps,
-        g_t=g,
-        transition_model=transition_model,
-        rng=rng,
-    )
-    return g
-
-
-@typed
 def _sample_steps(transition_model: TransitionModel, model, rng):
     g = gd.sample_one_hot(transition_model.limit_dist, rng)
     gs = [g]
@@ -309,17 +176,7 @@ def _sample_steps(transition_model: TransitionModel, model, rng):
     timesteps = np.arange(1, transition_model.diffusion_steps)[::-1]
     for t in timesteps:
         rng = jax.random.fold_in(rng, enc(f"sample_{t}"))  # TODO use that
-        # g = _sample_step(g, transition_model, model, t, rng)
-        # g = df.sample_p_zs_given_zt(
-        #     p=model,
-        #     t=t,
-        #     g_t=g,
-        #     transition_model=transition_model,
-        #     rng=rng,
-        # )
-        # g = _sample_step(g, transition_model, model, t, rng)
-
-        timesteps = einop(t, " -> b", b=len(g))
+        timesteps = repeat(t, " -> b", b=len(g))
         g = df.sample_p_zs_given_zt(
             p=model,
             t=timesteps,
@@ -332,31 +189,19 @@ def _sample_steps(transition_model: TransitionModel, model, rng):
     return model_samples
 
 
-@typed
 def _sample(transition_model: TransitionModel, model, rng, n: SInt):
     _, rng_this_epoch = jax.random.split(rng)
-    one_hot = gd.sample_one_hot(
-        gd.repeat_dense(transition_model.limit_dist, n), rng_this_epoch
-    )
-    # g = gd.create_dense(
-    #     nodes=one_hot.nodes,
-    #     edges=one_hot.edges,
-    #     nodes_mask=one_hot.nodes_mask,
-    #     edges_mask=one_hot.edges_mask,
-    # )
-    g = one_hot
-    # ipdb.set_trace()
+    g = gd.sample_one_hot(transition_model.limit_dist.repeat(n), rng_this_epoch)
     for t in tqdm(list(reversed(range(1, transition_model.diffusion_steps)))):
         rng = jax.random.fold_in(rng, enc(f"sample_{t}"))
         t = np.array(t).repeat(n)
-        g = df.sample_p_zs_given_zt(
+        g = df.sample_step(
             p=model,
             t=t,
             g_t=g,
             transition_model=transition_model,
             rng=rng,
         )
-        # g = _sample_step(g, transition_model, model, t[0], rng)
     return g
 
 
@@ -366,17 +211,11 @@ def to_one_hot(x):
     edges = np.asarray(dense_data.E.numpy())
     nodes_mask = np.asarray(mask.numpy())
 
-    return gd.create_one_hot_minimal(
+    return gd.OneHotGraph.create_minimal(
         nodes=nodes,
         edges=edges,
         nodes_mask=nodes_mask,
     )
-
-
-DataLoader = Iterable[gd.OneHotGraph]
-
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -384,7 +223,6 @@ class Trainer:
     model: nn.Module
     train_loader: DataLoader
     val_loader: DataLoader
-    params: FrozenDict
     num_epochs: int
     rngs: dict[str, Key]
     learning_rate: float
@@ -399,6 +237,8 @@ class Trainer:
     max_num_nodes: int
     num_edge_features: int
     num_node_features: int
+    dataset_infos: object
+    train_smiles: Iterable[str]
     match_edges: bool = True
     do_restart: bool = False
     plot_every_steps: int = 1
@@ -407,19 +247,12 @@ class Trainer:
     grad_clip: float = -1.0
     weight_decay: float = 1e-12
     min_learning_rate: float = 1e-6
+    extra_features: bool = False
 
     def __post_init__(
         self,
     ):
         self.n = 9  # FIXME: get it from the data
-        self.state = TrainState.create(
-            apply_fn=self.model.apply,
-            params=self.params,
-            tx=self.__get_optimizer(),
-            key=self.rngs["dropout"],
-            last_loss=1000000,
-            lr=self.learning_rate,
-        )
 
         self.transition_model = TransitionModel.create(
             schedule_type=self.noise_schedule_type,
@@ -437,8 +270,34 @@ class Trainer:
             self.save_path, orbax_checkpointer, options
         )
         self.a_val_batch = None
+        self.sampling_metric = SamplingMolecularMetrics(
+            self.dataset_infos,
+            self.train_smiles,
+        )
+        raw_dummy = to_one_hot(next(iter(self.val_loader)))
 
-    @typed
+        dummy, global_features = get_model_input(
+            raw_dummy,
+            t=np.array([10]),
+            extra_features=self.extra_features,
+            transition_model=self.transition_model,
+        )
+        params = self.model.init(
+            self.rngs["params"],
+            dummy,
+            global_features,
+            deterministic=True,
+        )
+        self.params = params
+        self.state = TrainState.create(
+            apply_fn=self.model.apply,
+            params=FrozenDict(self.params),
+            tx=self.__get_optimizer(),
+            key=self.rngs["dropout"],
+            last_loss=1000000,
+            lr=self.learning_rate,
+        )
+
     def __val_epoch(
         self,
         *,
@@ -449,15 +308,14 @@ class Trainer:
         for i, x in enumerate(tqdm(self.val_loader)):
             step_rng = jax.random.fold_in(rng, enc(f"val_step_{i}"))
             graph_dist = to_one_hot(x)  # type: ignore
-            # if i == 0:
-            #     print(f"val={graph_dist.nodes[0]}")
             self.a_val_batch = graph_dist
             losses = val_step(
-                data=graph_dist,  # , mask.astype(bool)),
+                data=graph_dist,
                 state=self.state,
                 rng=step_rng,
                 transition_model=self.transition_model,
                 nodes_dist=self.nodes_dist,
+                extra_features=self.extra_features,
             )
             run_losses.append(losses)
         t1 = time()
@@ -469,11 +327,8 @@ class Trainer:
             for k in run_losses[0].keys()
             if k != "kl_prior"
         }
-        # avg_loss = np.mean(np.array(run_loss)).tolist()
-        # ipdb.set_trace()
         return avg_losses, total_time
 
-    @typed
     def plot_preds(
         self,
         plot_path: str | None = None,
@@ -485,15 +340,17 @@ class Trainer:
         rng = jax.random.PRNGKey(random.randint(0, 100000))
         if load_from_disk:
             self.__restore_checkpoint()
-        model = GetProbabilityFromState(self.state, rng, self.transition_model)
+        model = GetProbabilityFromState(
+            self.state, rng, self.transition_model, extra_features=self.extra_features
+        )
         print(f"Plotting noised graphs to {plot_path}")
+        g_batch = None
         for i, x in enumerate(tqdm(self.val_loader)):
             g_batch = to_one_hot(x)
             break
-
+        assert not g_batch is None
         mean_loss, _ = self.__val_epoch(rng=jax.random.fold_in(rng, enc("val")))
-        print(f"{mean_loss=}")
-        g = gd.repeat(g_batch[np.array([0])], len(self.transition_model.q_bars))
+        g = g_batch[np.array([0])].repeat(len(self.transition_model.q_bars))
         q_bars = self.transition_model.q_bars  # [timesteps]
         posterior_samples = gd.sample_one_hot(gd.matmul(g, q_bars), rng)
         timesteps = np.arange(len(self.transition_model.q_bars))
@@ -512,7 +369,7 @@ class Trainer:
         # corr = 0.5
         if epoch > -1:
             wandb.log({"corr_t_vs_elbo": corr}, step=epoch)
-        model_samples = gd.argmax(model_probs)
+        model_samples = model_probs.argmax()
         gd.plot(
             [posterior_samples, model_samples],
             location=plot_path,
@@ -539,10 +396,12 @@ class Trainer:
             print("[yellow]No checkpoint found, starting from scratch[/yellow]")
 
     def trivial_test(self):
+        """
+        Useful for debugging.
+        """
         run_losses: list[dict[str, Float[Array, "batch_size"]]] = []
         t0 = time()
         rng = jax.random.PRNGKey(0)
-        from flax.struct import dataclass
 
         @dataclass
         class Dummy:
@@ -574,7 +433,6 @@ class Trainer:
         # avg_loss = np.mean(np.array(run_loss)).tolist()
         print(avg_losses)
 
-    # @typed
     def restart(self):
         self.do_restart = True
         self.train()
@@ -583,11 +441,6 @@ class Trainer:
         components = []
         if self.grad_clip > 0:
             components.append(optax.clip_by_global_norm(10.0))
-        # components.append(
-        #     optax.adamw(
-        #         learning_rate=self.learning_rate, weight_decay=self.weight_decay
-        #     )
-        # )
         components.extend(
             [
                 optax.amsgrad(learning_rate=self.learning_rate),
@@ -597,12 +450,13 @@ class Trainer:
 
         return optax.chain(*components) if len(components) > 1 else components[0]
 
-    @typed
+    # @typed
     def train(
         self,
     ):
         os.system(f"rm -rf {self.plot_path}")
         os.makedirs(self.plot_path, exist_ok=True)
+
         last_epoch = 0
         if self.do_restart:
             self.__restore_checkpoint()
@@ -688,40 +542,38 @@ class Trainer:
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )
                     if epoch_idx % self.plot_every_steps == 0:
-                        # self.__plot_targets(
-                        #     save_to=os.path.join(
-                        #         self.plot_path, f"{epoch_idx}_targets.png"
-                        #     )
-                        # )
-                        # self.plot_preds(
-                        #     plot_path=os.path.join(
-                        #         self.plot_path, f"{epoch_idx}_preds.png"
-                        #     ),
-                        #     load_from_disk=False,
-                        # )
-                        # self.sample(
-                        #     restore_checkpoint=False,
-                        #     save_to=os.path.join(
-                        #         self.plot_path, f"{epoch_idx}_samples.png"
-                        #     ),
-                        # )
-                        pass
+                        self.plot_preds(
+                            plot_path=os.path.join(
+                                self.plot_path, f"{epoch_idx}_preds.png"
+                            ),
+                            load_from_disk=False,
+                        )
+                        self.sample(
+                            restore_checkpoint=False,
+                            save_to=os.path.join(
+                                self.plot_path, f"{epoch_idx}_samples"
+                            ),
+                        )
 
         rng, _ = jax.random.split(self.rngs["params"])
         val_loss, val_time = self.__val_epoch(
             rng=rng,
-            exhaustive=True,
         )
         print(
             f"Final loss: {val_loss:.4f} best={min(val_losses):.5f} time: {val_time:.4f}"
         )
 
     def __plot_targets(self, save_to: str | None = None):
+        """
+        This function was useful for debugging.
+        """
         batch = self.a_val_batch
         import random
 
         rng = jax.random.PRNGKey(random.randint(0, 1000000))
-        model = GetProbabilityFromState(self.state, rng, self.transition_model)
+        model = GetProbabilityFromState(
+            self.state, rng, self.transition_model, extra_features=self.extra_features
+        )
         t = np.array([400] * batch.nodes.shape[0])
         q_bars = self.transition_model.q_bars[t]
         noisy_batch = gd.sample_one_hot(gd.matmul(batch, q_bars), rng)
@@ -789,12 +641,14 @@ class Trainer:
         import random
 
         rng = jax.random.PRNGKey(random.randint(0, 1000000))
-        model = GetProbabilityFromState(self.state, rng, self.transition_model)
+        model = GetProbabilityFromState(
+            self.state, rng, self.transition_model, extra_features=self.extra_features
+        )
         model_samples = _sample_steps(self.transition_model, model, rng)
         gd.plot([model_samples], shared_position="row", location=save_to)
 
     def sample(
-        self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 10
+        self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 500
     ):
         print(f"Saving samples to: {save_to}")
         if restore_checkpoint:
@@ -803,24 +657,35 @@ class Trainer:
 
         rng_model = jax.random.PRNGKey(random.randint(0, 1000000))
         rng_sample = jax.random.fold_in(rng_model, enc("sample"))
-        model = GetProbabilityFromState(self.state, rng_model, self.transition_model)
+        model = GetProbabilityFromState(
+            self.state,
+            rng_model,
+            self.transition_model,
+            extra_features=self.extra_features,
+        )
         model_samples = _sample(self.transition_model, model, rng_sample, n)
-
         data_sample = None
-        for i, x in enumerate(tqdm(self.val_loader)):
-            data_sample = to_one_hot(x)[:n]
-            break
+        rnd_i = random.randint(0, len(self.val_loader) - 1)
+        for i, x in enumerate(self.val_loader):
+            if i == rnd_i:
+                data_sample = to_one_hot(x)[:n]
+                break
         assert data_sample is not None
         prior_sample = gd.sample_one_hot(
             gd.repeat_dense(self.transition_model.limit_dist, n), rng_sample
+        )
+        metrics = self.sampling_metric(model_samples)
+        print(
+            f"Relaxed validity: {metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
         )
         gd.plot(
             [data_sample, prior_sample, model_samples],  # prior_sample,
             shared_position=None,
             location=save_to,
+            title=f"{metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}",
         )
 
-    @typed
+    # @typed
     def __train_epoch(
         self,
         *,
@@ -832,14 +697,12 @@ class Trainer:
         for i, x in enumerate(tqdm(self.train_loader)):
             step_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
             graph_dist = to_one_hot(x)
-            # if i == 0:
-            #     print(f"train={graph_dist.nodes[0]}")
             state, loss = train_step(
                 g=graph_dist,
                 state=self.state,
                 rng=step_key,
                 transition_model=self.transition_model,
-                nodes_dist=self.nodes_dist,
+                extra_features=self.extra_features,
             )
             self.state = state
             run_losses.append(loss)
@@ -849,7 +712,7 @@ class Trainer:
         return avg_loss, tot_time
 
 
-@typed
+# @typed
 def plot_noised_graphs(train_loader, transition_model: TransitionModel, save_path: str):
     print(f"Plotting noised graphs to {save_path}")
     T = len(transition_model.q_bars)
