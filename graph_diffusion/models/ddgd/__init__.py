@@ -1,2 +1,1 @@
-from .ddgd import Trainer
-from .config import TrainingConfig
+from .ddgd import DDGD, SimpleDDGD

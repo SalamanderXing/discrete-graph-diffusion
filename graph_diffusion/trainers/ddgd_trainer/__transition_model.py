@@ -1,14 +1,13 @@
 import jax.numpy as np
 from jax import Array
 from jaxtyping import Float, Int
-from mate.jax import SFloat, SInt, typed
+from mate.jax import SFloat, SInt
 from flax.struct import dataclass
 import jax
 import ipdb
 
 import einops as e
-from ....shared.graph import graph_distribution as gd
-from .distribution import Distribution
+from ...shared.graph import graph_distribution as gd
 
 Q, GraphDistribution = gd.Q, gd.GraphDistribution
 
@@ -25,7 +24,6 @@ def cosine_beta_schedule_discrete(timesteps, s=0.008):
     return betas.squeeze().astype(np.float32)[:timesteps]
 
 
-@typed
 def compute_noise_schedule(
     diffusion_steps: SInt,
     schedule_type: str = "cosine",
@@ -79,7 +77,6 @@ class TransitionModel:
     limit_dist: gd.DenseGraphDistribution
 
     @classmethod
-    @typed
     def create(
         cls,
         x_priors: Float[Array, "n"],
@@ -87,7 +84,7 @@ class TransitionModel:
         diffusion_steps: int,
         temporal_embedding_dim: int,
         n: SInt,
-        schedule_type: str = "linear",
+        schedule_type: str = "cosine",
         adjust_prior=False,
     ) -> "TransitionModel":
         prior_type = "reload"

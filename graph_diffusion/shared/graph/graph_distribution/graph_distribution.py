@@ -35,8 +35,6 @@ def safe_div(a: Array, b: Array):
     return np.where(mask, 0, a / np.where(mask, 1, b))
 
 
-@jaxtyped
-@beartype
 def pseudo_assert(condition: SBool):
     """
     When debugging NaNs, the following function will raise an exception
@@ -44,8 +42,6 @@ def pseudo_assert(condition: SBool):
     return np.where(condition, 0, np.nan)
 
 
-@jaxtyped
-@beartype
 def get_masks(
     nodes_counts: Int[Array, "bs"], n: SInt
 ) -> tuple[NodeMaskType, EdgeMaskType]:
@@ -60,8 +56,6 @@ def get_masks(
     return mask_x, mask_e
 
 
-@jaxtyped
-@beartype
 def to_symmetric(edges: EdgeDistribution) -> EdgeDistribution:
     upper = rearrange(
         np.triu(np.ones((edges.shape[1], edges.shape[2]))), "n1 n2 -> 1 n1 n2 1"
@@ -93,8 +87,6 @@ class GraphDistribution:
     #     pseudo_assert(is_edges_dist)
 
     @classmethod
-    @jaxtyped
-    @beartype
     def from_mask(
         cls, nodes: NodeDistribution, edges: EdgeDistribution, mask: NodeMaskType
     ):
@@ -108,8 +100,6 @@ class GraphDistribution:
         )
 
     @classmethod
-    @jaxtyped
-    @beartype
     def create(
         cls,
         nodes: NodeDistribution,
@@ -126,8 +116,6 @@ class GraphDistribution:
         )
 
     @classmethod
-    @jaxtyped
-    @beartype
     def noise(
         cls,
         key: Key,
@@ -155,7 +143,7 @@ class GraphDistribution:
 
         # # overrides the square bracket indexing
 
-    def __getitem__(self, key: Int[Array, "n"] | slice) -> "GraphDistribution":
+    def __getitem__(self, key) -> "GraphDistribution":
         return self.__class__(
             nodes=self.nodes[key],
             edges=self.edges[key],
@@ -169,8 +157,6 @@ class GraphDistribution:
         return self.nodes.shape[0]
 
     @classmethod
-    @jaxtyped
-    @beartype
     def create_and_mask(
         cls,
         nodes: NodeDistribution,
@@ -189,8 +175,6 @@ class GraphDistribution:
         )
 
     @classmethod
-    @jaxtyped
-    @beartype
     def create_from_counts(
         cls,
         nodes: NodeDistribution,
@@ -207,8 +191,6 @@ class GraphDistribution:
         )
 
     @classmethod
-    @jaxtyped
-    @beartype
     def create_minimal(
         cls,
         nodes: NodeDistribution,
@@ -224,8 +206,6 @@ class GraphDistribution:
             _created_internally=True,
         )
 
-    @jaxtyped
-    @beartype
     def repeat(self, n: int):
         return GraphDistribution.create(
             nodes=np.repeat(self.nodes, n, axis=0),

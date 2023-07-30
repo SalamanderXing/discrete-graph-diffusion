@@ -192,7 +192,7 @@ def plot(
     )
     original_len = len(rows[0])
     skip = (len(rows[0]) // 15) if len(rows[0]) > 15 else 1
-    rows = [concatenate((row[::skip], row[np.array(-1)])) for row in rows]
+    rows = [concatenate((row[::skip], row[np.array([-1])])) for row in rows]
     lrows = len(rows)
     lcolumn = len(rows[0])
     try:

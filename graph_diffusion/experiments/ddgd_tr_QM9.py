@@ -29,8 +29,9 @@ from jax.lib import xla_bridge
 
 from mate import mate
 
-# from ..data_loaders.qm92 import load_data
-from ..data_loaders.qm9_digress import load_data
+from ..data_loaders.qm92 import load_data
+
+# from ..data_loaders.qm9_digress import load_data
 import os
 
 # from ..models.graph_transformer import (
@@ -94,7 +95,7 @@ trainer = Trainer(
     val_loader=dataset.test_loader,
     num_epochs=300,
     match_edges=True,
-    extra_features=False,
+    use_extra_features=False,
     save_path=save_path,
     nodes_dist=dataset.nodes_dist,
     nodes_prior=dataset.node_prior,

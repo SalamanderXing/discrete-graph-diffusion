@@ -151,11 +151,6 @@ def posterior_distribution(
     )
 
 
-def rng_to_seed(rng):
-    a, b = rng.tolist()
-    return int(f"{a}{b}")
-
-
 def predict_from_random_timesteps(
     p: GetProbabilityType,
     g: gd.OneHotGraph,
