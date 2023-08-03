@@ -9,16 +9,11 @@ import numpy as np
 from scipy.signal import savgol_filter
 from jax import numpy as jnp
 from jaxtyping import Int, Float
-from ...shared.graph import Graph, SimpleGraphDist
+from tensorflow.data import Dataset
+from typing import Iterable
+import tensorflow as tf
 
-# @dataclass(frozen=True)
-# class DatasetInfo:
-#     num_node_features: int
-#     num_edge_features: int
-#     max_num_nodes: int
-#     nodes_dist: np.ndarray
-#     edges_prior: np.ndarray
-#     nodes_prior: np.ndarray
+tf.config.experimental.set_visible_devices([], "GPU")
 
 
 def __to_dense(x, edge_index, edge_attr, batch):
@@ -66,7 +61,7 @@ def compute_distribution(
     norm_dist_smooth_2 = np.convolve(norm_dist_smooth, np.ones(3) / 3, mode="same")
     norm_dist_smooth_3 = np.convolve(norm_dist_smooth_2, np.ones(5) / 5, mode="same")
     norm_dist_smooth_3 = norm_dist_smooth_3 / np.sum(norm_dist_smooth_3)
-    return norm_dist_smooth_3
+    return jnp.array(norm_dist_smooth_3)
 
 
 def save_cache(cache_location, test_dataset, train_dataset, freqs):
@@ -89,52 +84,85 @@ def load_cache(
 # def compute_priors(nodes:Float[], edges):
 
 
-def create_graph(nodes, edges, edges_counts, nodes_counts, train=False):
-    nodes = np.asarray(nodes)
-    edges = np.asarray(edges)
-    nodes_counts = np.asarray(nodes_counts)
-    edges_counts = np.asarray(edges_counts)
-    assert nodes_counts.shape == edges_counts.shape and len(nodes_counts.shape) == 1
-    if len(nodes.shape) > 3:
-        nodes = nodes.squeeze(-1)
-    if train:
-        batch_size, n, _ = nodes.shape
+# def create_graph(nodes, edges, edges_counts, nodes_counts, train=False):
+#     nodes = np.asarray(nodes)
+#     edges = np.asarray(edges)
+#     nodes_counts = np.asarray(nodes_counts)
+#     edges_counts = np.asarray(edges_counts)
+#     assert nodes_counts.shape == edges_counts.shape and len(nodes_counts.shape) == 1
+#     if len(nodes.shape) > 3:
+#         nodes = nodes.squeeze(-1)
+#     if train:
+#         batch_size, n, _ = nodes.shape
+#
+#         # if np.random.rand() < 0.5:
+#         #     # takes a subgraph
+#         #     max_n = np.max(nodes_counts)
+#         #     new_nodes_counts = np.random.randint(1, max_n, size=batch_size)
+#         #     # ipdb.set_trace()
+#         #     for i in range(batch_size):
+#         #         nodes[i, new_nodes_counts[i] :] = np.eye(nodes.shape[-1])[0]
+#         #         edges[i, new_nodes_counts[i] :, new_nodes_counts[i] :] = np.eye(
+#         #             edges.shape[-1]
+#         #         )[0]
+#         # pass
+#
+#     nodes = jnp.asarray(nodes)
+#
+#     edges = jnp.asarray(edges)
+#     edges_counts = jnp.asarray(edges_counts)
+#     # assert len(nodes_counts.shape) == 1
+#     nodes_counts = jnp.asarray(nodes_counts)
+#     # assert len(nodes_counts.shape) == 1
+#     return (
+#         Graph.create(
+#             nodes=nodes,
+#             edges=edges,
+#             edges_counts=edges_counts,
+#             nodes_counts=nodes_counts,
+#         )
+#         if len(edges.shape) < 4
+#         else GraphDistribution.create_from_counts(
+#             nodes=nodes,
+#             edges=edges,
+#             nodes_counts=nodes_counts,
+#         )
+#     )
+#
+#
 
-        # if np.random.rand() < 0.5:
-        #     # takes a subgraph
-        #     max_n = np.max(nodes_counts)
-        #     new_nodes_counts = np.random.randint(1, max_n, size=batch_size)
-        #     # ipdb.set_trace()
-        #     for i in range(batch_size):
-        #         nodes[i, new_nodes_counts[i] :] = np.eye(nodes.shape[-1])[0]
-        #         edges[i, new_nodes_counts[i] :, new_nodes_counts[i] :] = np.eye(
-        #             edges.shape[-1]
-        #         )[0]
-        # pass
 
-    nodes = jnp.asarray(nodes)
+# @dataclass(frozen=True)
+# class QM9Dataset:
+#     train_loader: Iterable
+#     test_loader: Iterable
+#     max_node_feature: int
+#     max_edge_feature: int
+#     n: int
+#     nodes_dist: Float[Array, "k"]
+#     feature_node_prior: Float[Array, "m"]
+#     feature_edge_prior: Float[Array, "l"]
+#     structure_node_prior: Float[Array, "k"]
+#     structure_edge_prior: Float[Array, "k"]
+#     infos: QM9infos
+#     train_smiles: Iterable[str]
+#     mean_edge_count: SFloat = 0.0
+#     mean_node_count: SFloat = 0.0
+#     var_edge_count: SFloat = 0.0
+#     var_node_count: SFloat = 0.0
+#
 
-    edges = jnp.asarray(edges)
-    edges_counts = jnp.asarray(edges_counts)
-    # assert len(nodes_counts.shape) == 1
-    nodes_counts = jnp.asarray(nodes_counts)
-    # assert len(nodes_counts.shape) == 1
-    return (
-        Graph.create(
-            nodes=nodes,
-            edges=edges,
-            edges_counts=edges_counts,
-            nodes_counts=nodes_counts,
-        )
-        if len(edges.shape) < 4
-        else SimpleGraphDist.create(
-            nodes=nodes,
-            edges=edges,
-            edges_counts=edges_counts,
-            nodes_counts=nodes_counts,
-            # node_masks=jnp.ones_like(nodes_counts),
-        )
-    )
+
+@dataclass(frozen=True)
+class TUDataset:
+    train_loader: Iterable
+    test_loader: Iterable
+    max_node_feature: int
+    max_edge_feature: int
+    n: int
+    nodes_dist: Float[Array, "k"]
+    feature_node_prior: Float[Array, "m"]
+    feature_edge_prior: Float[Array, "l"]
 
 
 def split_dataset(
@@ -147,6 +175,7 @@ def split_dataset(
     batch_size: int,
     edges_counts: np.ndarray,
     node_masks: np.ndarray,
+    filter_graphs_by_max_node_count: int | None = None,
 ):
     edges_counts = np.array(edges_counts)
     train_nodes = nodes[train_indices]
@@ -170,61 +199,69 @@ def split_dataset(
     # freqs = (
     #     compute_distribution(train_node_masks, margin=10) if do_dist else np.array(-1)
     # )
-    import tensorflow as tf
+    train_nodes = train_nodes.squeeze(-1)
+    test_nodes = test_nodes.squeeze(-1)
 
-    tf.config.experimental.set_visible_devices([], "GPU")
-    from tensorflow.data import Dataset
-    from typing import Iterable
+    if filter_graphs_by_max_node_count is not None:
+        print(f"Filtering graphs by max node count {filter_graphs_by_max_node_count}")
+        len_before_filtering = len(train_nodes)
+        train_mask = train_nodes_counts <= filter_graphs_by_max_node_count
+        test_mask = test_nodes_counts <= filter_graphs_by_max_node_count
+        train_nodes = train_nodes[train_mask, :filter_graphs_by_max_node_count]
+        train_edges = train_edges[
+            train_mask,
+            :filter_graphs_by_max_node_count,
+            :filter_graphs_by_max_node_count,
+        ]
+        train_nodes_counts = train_nodes_counts[train_mask]
+        train_edges_counts = train_edges_counts[train_mask]
+        test_nodes = test_nodes[test_mask, :filter_graphs_by_max_node_count]
+        test_edges = test_edges[
+            test_mask,
+            :filter_graphs_by_max_node_count,
+            :filter_graphs_by_max_node_count,
+        ]
+        test_nodes_counts = test_nodes_counts[test_mask]
+        test_edges_counts = test_edges_counts[test_mask]
+        train_masks = train_masks[train_mask, :filter_graphs_by_max_node_count]
+        len_after_filtering = len(train_nodes)
+        # prints the relative number of graphs that were filtered out
+        print(
+            f"Filtered out {(1 - len_after_filtering/len_before_filtering)} of graphs due to max node count"
+        )
 
-    @dataclass(frozen=True)
-    class TUDataset:
-        train_loader: Iterable
-        test_loader: Iterable
-        max_node_feature: int
-        max_edge_feature: int
-        n: int
-        nodes_dist: Float[Array, "k"]
-        node_prior: Float[Array, "m"]
-        edge_prior: Float[Array, "l"]
-
-    indices_train = jnp.arange(len(train_indices))
-    indices_test = jnp.arange(len(test_indices))
-    train_dataset = (
-        Dataset.zip(
-            (
-                # Dataset.from_tensor_slices(indices_train),
-                Dataset.from_tensor_slices(train_nodes),
-                Dataset.from_tensor_slices(train_edges),
-                Dataset.from_tensor_slices(train_edges_counts),
-                Dataset.from_tensor_slices(train_nodes_counts),
+    train_dataset = Dataset.zip(
+        tuple(
+            map(
+                Dataset.from_tensor_slices,
+                (
+                    train_nodes,
+                    train_edges,
+                    train_edges_counts,
+                    train_nodes_counts,
+                ),
             )
         )
-        .shuffle(1000)
-        .repeat()
-    )
+    ).shuffle(1000)
     test_dataset = Dataset.zip(
-        (
-            # Dataset.from_tensor_slices(indices_train),
-            Dataset.from_tensor_slices(test_nodes),
-            Dataset.from_tensor_slices(test_edges),
-            Dataset.from_tensor_slices(test_edges_counts),
-            Dataset.from_tensor_slices(test_nodes_counts),
+        tuple(
+            map(
+                Dataset.from_tensor_slices,
+                (
+                    test_nodes,
+                    test_edges,
+                    test_edges_counts,
+                    test_nodes_counts,
+                ),
+            )
         )
-    ).repeat()
+    )
 
     # return train_dataset, test_dataset
     train_loader = train_dataset.batch(batch_size)
 
     test_loader = test_dataset.batch(batch_size)
-    train_loader = map(
-        lambda x: create_graph(*x, train=True),
-        train_loader,
-    )
-    test_loader = map(
-        lambda x: create_graph(*x),
-        test_loader,
-    )
-    nodes_dist = compute_distribution(train_masks, margin=5)
+    nodes_dist = compute_distribution(jnp.array(train_masks), margin=5)
     nodes_prior = jnp.array(train_nodes.mean(axis=(0, 1)).squeeze())
     edges_prior = jnp.array(train_edges.mean(axis=(0, 1, 2)).squeeze())
     return TUDataset(
@@ -234,8 +271,8 @@ def split_dataset(
         max_edge_feature=int(np.max(train_edges)),
         n=int(max_n),
         nodes_dist=nodes_dist,
-        node_prior=nodes_prior,
-        edge_prior=edges_prior,
+        feature_node_prior=nodes_prior,
+        feature_edge_prior=edges_prior,
     )
 
 
@@ -245,7 +282,8 @@ def load_data(
     train_size: float = 0.8,
     seed,
     batch_size: int,
-    name: str = "MUTAG",
+    name: str = "PTC_MR",
+    filter_graphs_by_max_node_count: int | None = None,
     verbose: bool = True,
     cache: bool = False,
     one_hot: bool = False,
@@ -254,12 +292,7 @@ def load_data(
     # ipdb.set_trace()
     # os.environ["CUDA_VISIBLE_DEVICES"] = ""
     # print("Cache not found, creating new one...")
-    from torch_geometric.datasets import TUDataset, QM9
-    from torch_geometric.utils import (
-        to_dense_batch,
-        to_dense_adj,
-        remove_self_loops,
-    )
+    from torch_geometric.datasets import TUDataset
 
     print("Processing dataset...")
     dataset = TUDataset(
@@ -357,12 +390,12 @@ def load_data(
         edges_counts=np.asarray(edges_counts),
         nodes_counts=num_nodes_list,
         node_masks=node_masks,
+        filter_graphs_by_max_node_count=filter_graphs_by_max_node_count,
     )
     # free cuda memory
     # torch.cuda.empty_cache()
     # os.environ["CUDA_VISIBLE_DEVICES"] = old_visible_devices
     return result
-    # return cache
 
 
 def load_data_no_attributes(

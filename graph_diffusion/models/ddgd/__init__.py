@@ -1,1 +1,1 @@
-from .ddgd import DDGD, SimpleDDGD
+from .ddgd import DDGD, SimpleDDGD, StructureFirstDDGD

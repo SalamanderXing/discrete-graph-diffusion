@@ -226,7 +226,7 @@ def load_data(save_dir: str, batch_size: int, onehot: bool = True):
     # gets the directory containing this file
     # save_dir = os.path.dirname(os.path.realpath(__file__))
     cache = os.path.join(save_dir, "qm9.pt")
-    if True:  # not os.path.exists(cache):
+    if not os.path.exists(cache):
         print("Creating cache")
         dense_data = get_dense_data(save_dir, batch_size, onehot=False)
         pickle.dump(dense_data, open(cache, "wb"))

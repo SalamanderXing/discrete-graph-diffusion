@@ -28,7 +28,7 @@ NodeDistribution = gd.NodeDistribution
 Q = gd.Q
 
 GetProbabilityType = Callable[
-    [gd.OneHotGraph, Int[Array, "batch_size"]], gd.DenseGraphDistribution
+    [gd.GraphDistribution, Int[Array, "batch_size"]], gd.DenseGraphDistribution
 ]
 
 # import sys
@@ -291,7 +291,7 @@ def compute_val_loss(
     # 1.  log_prob of the target graph under the nodes distribution (based on # of nodes)
     log_pn = np.log(nodes_dist[target.nodes_mask.sum(-1)])  # / np.log(base)
     # 2. The KL between q(z_T | x) and p(z_T) = (simply an Empirical prior).
-    kl_prior = 0.0
+    kl_prior = np.array(0.0)
     t, g_t, g_pred = predict_from_random_timesteps(p, target, transition_model, rng_lt)
     loss_all_t = _compute_lt(
         t=t, g=target, g_t=g_t, raw_g_pred=g_pred, transition_model=transition_model

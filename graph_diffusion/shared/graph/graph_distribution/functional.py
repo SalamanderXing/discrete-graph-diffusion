@@ -11,9 +11,13 @@ import ipdb
 from mate.jax import SFloat, SInt, SBool, Key
 from jaxtyping import Float, Bool, Int, jaxtyped
 from typing import Sequence
-from .graph_distribution import GraphDistribution, EdgeDistribution
-from .one_hot_graph_distribution import OneHotGraph
-from .dense_graph_distribution import DenseGraphDistribution
+from .graph_distribution import (
+    GraphDistribution,
+    EdgeDistribution,
+    OneHotGraph,
+    DenseGraphDistribution,
+    StructureOneHotGraph,
+)
 from beartype import beartype
 import einops as e
 
@@ -61,6 +65,50 @@ def _kl_div(
 
 def typed(f):
     return jaxtyped(beartype(f))
+
+
+def dense_to_structure_dense(g: DenseGraphDistribution):
+    nodes_structure = np.concatenate(
+        (g.nodes[..., 0][..., None], 1 - g.nodes[..., 1][..., None]), axis=-1
+    )
+    edges_structure = np.concatenate(
+        (g.edges[..., 0][..., None], 1 - g.edges[..., 1][..., None]), axis=-1
+    )
+    return DenseGraphDistribution.create(
+        nodes=nodes_structure,
+        edges=edges_structure,
+        nodes_mask=g.nodes_mask,
+        edges_mask=g.edges_mask,
+    )
+
+
+def one_hot_structure_to_dense(
+    structure: StructureOneHotGraph, node_feature_count: SInt, edge_feature_count: SInt
+) -> DenseGraphDistribution:
+    node_structure_mask = structure.nodes.argmax(-1)
+    edge_structure_mask = structure.edges.argmax(-1)
+    one_nodes = np.eye(node_feature_count)[0]
+    structure_yes = one_nodes  # 1 / (node_feature_count - 1) * one_nodes
+    structure_no = (1 - one_nodes) * (1 / (node_feature_count - 1))
+    dense_nodes = np.where(
+        node_structure_mask[..., None],
+        structure_yes[None, None],
+        structure_no[None, None],
+    )
+    one_edges = np.eye(edge_feature_count)[0]
+    structure_yes = one_edges
+    structure_no = (1 - one_edges) * (1 / (edge_feature_count - 1))
+    dense_edges = np.where(
+        edge_structure_mask[..., None],
+        structure_yes[None, None, None],
+        structure_no[None, None, None],
+    )
+    return DenseGraphDistribution.create(
+        nodes=dense_nodes,
+        edges=dense_edges,
+        nodes_mask=structure.nodes_mask,
+        edges_mask=structure.edges_mask,
+    )
 
 
 @typed
@@ -179,11 +227,14 @@ def softmax(g: DenseGraphDistribution) -> DenseGraphDistribution:
 
 @typed
 def plot(
-    rows: Sequence["GraphDistribution"],
+    rows: Sequence[GraphDistribution] | GraphDistribution,
     location: str | None = None,
     shared_position: str | None = None,  # can be "row" or "col", or none
     title: str | None = None,
 ):
+    if isinstance(rows, GraphDistribution):
+        rows = [rows]
+    assert isinstance(rows, Sequence)
     assert shared_position in [None, "row", "col", "all"]
     location = (
         f"{location}.png"
@@ -192,7 +243,9 @@ def plot(
     )
     original_len = len(rows[0])
     skip = (len(rows[0]) // 15) if len(rows[0]) > 15 else 1
-    rows = [concatenate((row[::skip], row[np.array([-1])])) for row in rows]
+    rows_skips = [(row[::skip], row[np.array([-1])]) for row in rows]
+    ipdb.set_trace()
+    rows = [concatenate(row) for row in rows_skips]
     lrows = len(rows)
     lcolumn = len(rows[0])
     try:
@@ -309,8 +362,16 @@ def logprobs_at(
         nodes_mask=g.nodes_mask,
         edges_mask=g.edges_mask,
     )
-    safe_probs_nodes = np.where(g.nodes_mask, probs.nodes.sum(-1), 1)
-    safe_probs_edges = np.where(g.edges_mask, probs.edges.sum(-1), 1)
+    nodes_probs_sum = probs.nodes.sum(-1)
+    edges_probs_sum = probs.edges.sum(-1)
+    safe_probs_nodes = np.where(nodes_probs_sum > 0, probs.nodes.sum(-1), 1)
+    safe_probs_edges = np.where(edges_probs_sum > 0, probs.edges.sum(-1), 1)
+    # TODO: the version below is safer cause it implies a kind of check
+    # i.e. do the probs sum up to 1 for each node/edge? (wherever the mask is True)
+    # however, that does not work with the feature diffusion where we have a
+    # lot of zeros
+    # safe_probs_nodes = np.where(g.nodes_mask, probs.nodes.sum(-1), 1)
+    # safe_probs_edges = np.where(g.edges_mask, probs.edges.sum(-1), 1)
     nodes_logprob = np.log(safe_probs_nodes)
     edges_logprob = np.log(safe_probs_edges)
     return nodes_logprob.sum(1) + edges_logprob.sum((1, 2))

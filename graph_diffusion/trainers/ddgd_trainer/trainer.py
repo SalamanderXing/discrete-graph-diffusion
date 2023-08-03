@@ -9,12 +9,14 @@ from jaxtyping import Float, Int, Bool
 from time import time
 from jaxtyping import jaxtyped
 from flax.struct import dataclass as flax_dataclass
+from functools import partial
 import jax
 from jax import jit
 import optax
 import wandb
 from typing import Iterable
 from dataclasses import dataclass
+import enum
 
 from .metrics import SamplingMolecularMetrics
 from rich import print as print
@@ -27,7 +29,7 @@ import hashlib
 from beartype import beartype
 from .extra_features.extra_features import compute as compute_extra_features
 from ...shared.graph import graph_distribution as gd
-from ...models.ddgd import DDGD, SimpleDDGD
+from ...models.ddgd import DDGD, SimpleDDGD, StructureFirstDDGD
 
 # from . import diffusion_functions as df
 # from .transition_model import (
@@ -112,37 +114,26 @@ class TrainState(train_state.TrainState):
 #         return pred_graph
 
 
-@jit
+@partial(jit, static_argnames=("structure",))
 def train_step(
     *,
     g: gd.OneHotGraph,
     state: TrainState,
     rng: Key,
     ddgd: DDGD,
+    structure: SBool,
 ):
     dropout_train_key = jax.random.fold_in(rng, enc("dropout"))
     train_rng = jax.random.fold_in(rng, enc("train"))
 
     def loss_fn(params: FrozenDict):
-        # get_probability = GetProbabilityFromParams(
-        #     state=state,
-        #     params=params,
-        #     transition_model=transition_model,
-        #     dropout_rng=dropout_train_key,
-        #     extra_features=extra_features,
-        # )
-        # losses = df.compute_train_loss(
-        #     target=g,
-        #     transition_model=transition_model,
-        #     rng_key=train_rng,
-        #     get_probability=get_probability,
-        # ).mean()
         loss = ddgd.compute_train_loss(
             params=params,
             state=state,
             target=g,
             rng_key=train_rng,
             dropout_rng=dropout_train_key,
+            structure=structure,
         ).mean()
         return loss, None
 
@@ -176,8 +167,23 @@ def to_one_hot(nodes, edges, _, nodes_counts):
     )
 
 
+@jit
+def convert_to_shuffle_conding_metric(
+    val: Float[Array, "v"], target: GraphDistribution
+):
+    tot_edges_mask = target.edges.argmax(-1) > 0 & target.edges_mask
+    edges_count = tot_edges_mask.sum()
+    # converts val in log2
+    uba = val / (edges_count * np.log(2))
+    return uba
+
+
 @dataclass
 class Trainer:
+    class DiffusionType(enum.Enum):
+        structure_first = "structure-first"
+        simple = "simple"
+
     model: nn.Module
     train_loader: DataLoader
     val_loader: DataLoader
@@ -188,8 +194,6 @@ class Trainer:
     nodes_dist: Float[Array, "k"]
     feature_nodes_prior: Float[Array, "num_node_features"]
     feature_edges_prior: Float[Array, "num_edge_features"]
-    structure_nodes_prior: Float[Array, "2"]
-    structure_edges_prior: Float[Array, "2"]
     bits_per_edge: bool
     diffusion_steps: int
     noise_schedule_type: str
@@ -197,8 +201,11 @@ class Trainer:
     max_num_nodes: int
     num_edge_features: int
     num_node_features: int
-    dataset_infos: object
-    train_smiles: Iterable[str]
+    dataset_infos: object | None = None
+    structure_nodes_prior: Float[Array, "2"] | None = None
+    structure_edges_prior: Float[Array, "2"] | None = None
+    train_smiles: Iterable[str] | None = None
+    diffusion_type: DiffusionType = DiffusionType.simple
     match_edges: bool = True
     do_restart: bool = False
     plot_every_steps: int = 1
@@ -208,6 +215,7 @@ class Trainer:
     weight_decay: float = 1e-12
     min_learning_rate: float = 1e-6
     use_extra_features: bool = False
+    shuffle_coding_metric: bool = False
 
     def __post_init__(
         self,
@@ -219,22 +227,43 @@ class Trainer:
             self.save_path, orbax_checkpointer, options
         )
         self.a_val_batch = None
-        self.sampling_metric = SamplingMolecularMetrics(
-            self.dataset_infos,
-            self.train_smiles,
-        )
+        if self.train_smiles is not None and self.dataset_infos is not None:
+            self.sampling_metric = SamplingMolecularMetrics(
+                self.dataset_infos,
+                self.train_smiles,
+            )
         raw_dummy = to_one_hot(*next(iter(self.val_loader)))
+        print(f"{raw_dummy.nodes.shape=}")
         self.n = raw_dummy.nodes.shape[1]
-        self.ddgd = SimpleDDGD.create(
-            nodes_dist=self.nodes_dist,
-            nodes_prior=self.nodes_prior,
-            edges_prior=self.edges_prior,
-            diffusion_steps=self.diffusion_steps,
-            temporal_embedding_dim=self.temporal_embedding_dim,
-            n=self.n,
-            noise_schedule_type=self.noise_schedule_type,
-            use_extra_features=self.use_extra_features,
-        )
+        if self.diffusion_type == self.__class__.DiffusionType.simple:
+            self.ddgd = SimpleDDGD.create(
+                nodes_dist=self.nodes_dist,
+                nodes_prior=self.feature_nodes_prior,
+                edges_prior=self.feature_edges_prior,
+                diffusion_steps=self.diffusion_steps,
+                temporal_embedding_dim=self.temporal_embedding_dim,
+                n=self.n,
+                noise_schedule_type=self.noise_schedule_type,
+                use_extra_features=self.use_extra_features,
+            )
+        elif self.diffusion_type == self.__class__.DiffusionType.structure_first:
+            assert self.structure_nodes_prior is not None
+            assert self.structure_edges_prior is not None
+            self.ddgd = StructureFirstDDGD.create(
+                nodes_dist=self.nodes_dist,
+                feature_nodes_prior=self.feature_nodes_prior,
+                feature_edges_prior=self.feature_edges_prior,
+                structure_nodes_prior=self.structure_nodes_prior,
+                structure_edges_prior=self.structure_edges_prior,
+                structure_diffusion_steps=self.diffusion_steps,
+                feature_diffusion_steps=self.diffusion_steps,
+                temporal_embedding_dim=self.temporal_embedding_dim,
+                n=self.n,
+                noise_schedule_type=self.noise_schedule_type,
+                use_extra_features=self.use_extra_features,
+            )
+        else:
+            raise ValueError(f"Unknown diffusion type {self.diffusion_type}")
         dummy, global_features = self.ddgd.get_model_input(
             raw_dummy,
             t=np.array([10]),
@@ -271,6 +300,11 @@ class Trainer:
                 state=self.state,
                 rng=step_rng,
             )
+            if self.shuffle_coding_metric:
+                losses = {
+                    k: convert_to_shuffle_conding_metric(v, one_hot_graph)
+                    for k, v in losses.items()
+                }
             run_losses.append(losses)
         assert len(run_losses) > 0
         t1 = time()
@@ -282,6 +316,7 @@ class Trainer:
             for k in run_losses[0].keys()
             if k != "kl_prior"
         }
+
         return avg_losses, total_time
 
     def __train_epoch(
@@ -295,11 +330,26 @@ class Trainer:
         for i, x in enumerate(tqdm(self.train_loader)):
             one_hot_graph = to_one_hot(*x)
             step_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
+            structure_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
+            do_backprop_over_structure = (
+                (
+                    jax.random.uniform(
+                        structure_key,
+                    )
+                    > 0.5
+                ).item()
+                if self.diffusion_type == self.__class__.DiffusionType.structure_first
+                else False
+            )
+            # print(
+            #     f"[pink] do_backprop_over_structure={do_backprop_over_structure} [/pink]"
+            # )
             state, loss = train_step(
                 g=one_hot_graph,
                 state=self.state,
                 ddgd=self.ddgd,
                 rng=step_key,
+                structure=do_backprop_over_structure,
             )
             self.state = state
             run_losses.append(loss)

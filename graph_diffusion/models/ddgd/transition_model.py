@@ -52,9 +52,7 @@ def get_timestep_embedding(
 ):
     """Build sinusoidal embeddings (from Fairseq)."""
 
-    assert len(diffusion_steps.shape) == 1
     diffusion_steps *= 1000
-
     half_dim = embedding_dim // 2
     emb = np.log(10_000) / (half_dim - 1)
     emb = np.exp(np.arange(half_dim, dtype=dtype) * -emb)
@@ -86,8 +84,9 @@ class TransitionModel:
         n: SInt,
         schedule_type: str = "linear",
         adjust_prior=False,
+        concat_flag_to_temporal_embeddings: bool | Int[Array, "flag"] = False,
     ) -> "TransitionModel":
-        prior_type = "reload"
+        prior_type = ""
         if prior_type == "uniform":
             nodes_prior = np.ones(nodes_prior.shape[0]) / nodes_prior.shape[0]
             edge_prior = np.ones(edge_prior.shape[0]) / edge_prior.shape[0]
@@ -129,6 +128,16 @@ class TransitionModel:
         temporal_embeddings = np.concatenate(
             (temporal_embeddings, np.zeros((temporal_embeddings.shape[0], 1))), axis=1
         )
+        if isinstance(concat_flag_to_temporal_embeddings, Array):
+            # concat the same flag accross all timesteps
+            temporal_embeddings = np.concatenate(
+                (
+                    temporal_embeddings,
+                    np.ones((temporal_embeddings.shape[0], 1))
+                    * concat_flag_to_temporal_embeddings,
+                ),
+                axis=1,
+            )
         bs = 1
         limit_X = np.broadcast_to(
             np.expand_dims(nodes_prior, (0, 1)), (bs, n, nodes_prior.shape[-1])

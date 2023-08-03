@@ -233,9 +233,7 @@ class NodeEdgeBlock(nn.Module):
         # .flatten(start_axis=3)  # bs, n, n, dx
         ye1 = rearrange(y_e_add(y), "bs de -> bs 1 1 de")
         # .unsqueeze(1).unsqueeze(1)  # bs, 1, 1, de
-        ye2 = rearrange(
-            y_e_mul(y), "bs de -> bs 1 1 de"
-        )  # .unsqueeze(1).unsqueeze(1)
+        ye2 = rearrange(y_e_mul(y), "bs de -> bs 1 1 de")  # .unsqueeze(1).unsqueeze(1)
         newE = ye1 + (ye2 + 1) * newE
 
         # Output E
