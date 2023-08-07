@@ -56,7 +56,7 @@ dataset = load_data(
     train_batch_size=batch_size,
     test_batch_size=batch_size * 2,
     one_hot=True,
-    filter_graphs_by_max_node_count=27,
+    filter_graphs_by_max_node_count=None,
 )
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
