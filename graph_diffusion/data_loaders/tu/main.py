@@ -281,6 +281,9 @@ def split_dataset(
     )
 
 
+from torch_geometric.datasets import TUDataset as PyTUDataset
+
+
 def load_data(
     *,
     save_path: str,
@@ -297,120 +300,130 @@ def load_data(
     # old_visible_devices = os.environ["CUDA_VISIBLE_DEVICES"]
     # ipdb.set_trace()
     # os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
     # print("Cache not found, creating new one...")
-    from torch_geometric.datasets import TUDataset
-
-    print("Processing dataset...")
-    dataset = TUDataset(
-        root=save_path,
-        name=name,  # "PTC_MR",  # "MUTAG"
-        use_node_attr=True,
-        use_edge_attr=True,
-    )
-    items = len(dataset)
-    # Get the maximum number of nodes (atoms) in the dataset
-    max_n = max([data.num_nodes for data in dataset])  # one for the absence of a node
-    if filter_graphs_by_max_node_count is not None:
-        max_n = min(max_n, filter_graphs_by_max_node_count)
-
-    print(f"[red]Max number of nodes:[/red] {max_n}")
-    # Get unique atom types
-    num_atom_features = dataset[0].x.shape[1]
-
-    num_edge_features = dataset.num_edge_features + 1  # one for the absence of an edge
-
-    nodes = np.zeros((items, max_n, num_atom_features))
-    edges = np.zeros((items, max_n, max_n, num_edge_features))
-    print(f"[orange]Nodes shape:[/orange] {nodes.shape}")
-    print(f"[orange]Edges shape:[/orange] {edges.shape}")
-    node_masks = np.zeros((items, max_n))
-    num_nodes_list = np.zeros(items, int)
-    edges_counts = np.zeros(items, int)
-    filtered = 0
-    for idx, data in enumerate(dataset):
-        if data.num_nodes > max_n:
-            filtered += 1
-            continue
-        tot_edges = set()
-        num_nodes = data.num_nodes
-        # Fill in the node features as one-hot encoded atomic numbers
-        atom_one_hot = data.x.numpy()
-        nodes[idx, :num_nodes, :] = atom_one_hot
-
-        num_nodes_list[idx] = num_nodes
-        # Fill in the edge features
-        edge_indices = data.edge_index.numpy()
-        for j, (src, dst) in enumerate(edge_indices.T):
-            assert src < num_nodes and dst < num_nodes, ipdb.set_trace()
-            edges[idx, src, dst, :] = [0] + data.edge_attr[j].tolist()
-            edges[idx, dst, src, :] = [0] + data.edge_attr[j].tolist()
-            tot_edges.add((src.item(), dst.item()))
-            tot_edges.add((dst.item(), src.item()))
-
-        # Fill in the node_masks
-        node_masks[idx, :num_nodes] = 1
-        edges_counts[idx] = len(tot_edges)
-
-    if filtered > 0:
-        print(
-            f"[red]Filtered {filtered} ({1 - filtered/len(dataset):.4f}) graphs due to max node count[/red]"
+    f_name = os.path.join(save_path, f"dataset.pkl")
+    if not os.path.exists(f_name):
+        print("Processing dataset...")
+        dataset = PyTUDataset(
+            root=save_path,
+            name=name,  # "PTC_MR",  # "MUTAG"
+            use_node_attr=True,
+            use_edge_attr=True,
         )
+        items = len(dataset)
+        # Get the maximum number of nodes (atoms) in the dataset
+        max_n = max(
+            [data.num_nodes for data in dataset]
+        )  # one for the absence of a node
+        if filter_graphs_by_max_node_count is not None:
+            max_n = min(max_n, filter_graphs_by_max_node_count)
 
-    edges[np.where(edges.sum(axis=-1) == 0)] = np.eye(num_edge_features)[0]
-    nodes[np.where(nodes.sum(axis=-1) == 0)] = np.eye(num_atom_features)[0]
-    if not one_hot:
-        nodes = np.argmax(nodes, axis=-1)
-        edges = np.argmax(edges, axis=-1)
+        print(f"[red]Max number of nodes:[/red] {max_n}")
+        # Get unique atom types
+        num_atom_features = dataset[0].x.shape[1]
 
-    num_nodes_list = np.array(num_nodes_list)
+        num_edge_features = (
+            dataset.num_edge_features + 1
+        )  # one for the absence of an edge
 
-    nodes = np.array(nodes)
-    edges = np.array(edges)
-    node_masks = np.array(node_masks)
+        nodes = np.zeros((items, max_n, num_atom_features))
+        edges = np.zeros((items, max_n, max_n, num_edge_features))
+        print(f"[orange]Nodes shape:[/orange] {nodes.shape}")
+        print(f"[orange]Edges shape:[/orange] {edges.shape}")
+        node_masks = np.zeros((items, max_n))
+        num_nodes_list = np.zeros(items, int)
+        edges_counts = np.zeros(items, int)
+        filtered = 0
+        for idx, data in enumerate(dataset):
+            if data.num_nodes > max_n:
+                filtered += 1
+                continue
+            tot_edges = set()
+            num_nodes = data.num_nodes
+            # Fill in the node features as one-hot encoded atomic numbers
+            atom_one_hot = data.x.numpy()
+            nodes[idx, :num_nodes, :] = atom_one_hot
 
-    print("Processed dataset.")
-    num_edge_features = edges.shape[-1]
+            num_nodes_list[idx] = num_nodes
+            # Fill in the edge features
+            edge_indices = data.edge_index.numpy()
+            for j, (src, dst) in enumerate(edge_indices.T):
+                assert src < num_nodes and dst < num_nodes, ipdb.set_trace()
+                edges[idx, src, dst, :] = [0] + data.edge_attr[j].tolist()
+                edges[idx, dst, src, :] = [0] + data.edge_attr[j].tolist()
+                tot_edges.add((src.item(), dst.item()))
+                tot_edges.add((dst.item(), src.item()))
 
-    if name.lower() in ("mutag", "ptc_mr"):
-        print(f"Loading split indices from files...")
-        indices_dir = os.path.join(os.path.dirname(__file__), name.lower())
-        train_indices = np.array(
-            [
-                int(el)
-                for el in open(os.path.join(indices_dir, "train_idx.txt"))
-                .read()
-                .split("\n")
-                if el != ""
-            ]
-        )
-        test_indices = np.array(
-            [
-                int(el)
-                for el in open(os.path.join(indices_dir, "test_idx.txt"))
-                .read()
-                .split("\n")
-                if el != ""
-            ]
+            # Fill in the node_masks
+            node_masks[idx, :num_nodes] = 1
+            edges_counts[idx] = len(tot_edges)
+
+        if filtered > 0:
+            print(
+                f"[red]Filtered {filtered} ({1 - filtered/len(dataset):.4f}) graphs due to max node count[/red]"
+            )
+
+        edges[np.where(edges.sum(axis=-1) == 0)] = np.eye(num_edge_features)[0]
+        nodes[np.where(nodes.sum(axis=-1) == 0)] = np.eye(num_atom_features)[0]
+        if not one_hot:
+            nodes = np.argmax(nodes, axis=-1)
+            edges = np.argmax(edges, axis=-1)
+
+        num_nodes_list = np.array(num_nodes_list)
+
+        nodes = np.array(nodes)
+        edges = np.array(edges)
+        node_masks = np.array(node_masks)
+
+        print("Processed dataset.")
+        num_edge_features = edges.shape[-1]
+
+        if name.lower() in ("mutag", "ptc_mr"):
+            print(f"Loading split indices from files...")
+            indices_dir = os.path.join(os.path.dirname(__file__), name.lower())
+            train_indices = np.array(
+                [
+                    int(el)
+                    for el in open(os.path.join(indices_dir, "train_idx.txt"))
+                    .read()
+                    .split("\n")
+                    if el != ""
+                ]
+            )
+            test_indices = np.array(
+                [
+                    int(el)
+                    for el in open(os.path.join(indices_dir, "test_idx.txt"))
+                    .read()
+                    .split("\n")
+                    if el != ""
+                ]
+            )
+        else:
+            print(f"Loading train from files...")
+            shuffling_indices = np.random.permutation(len(nodes))
+            train_size = int(train_size * len(nodes))
+            train_indices = shuffling_indices[:train_size]
+            test_indices = shuffling_indices[train_size:]
+
+        result = split_dataset(
+            train_indices=train_indices,
+            test_indices=test_indices,
+            nodes=nodes,
+            edges=edges,
+            train_batch_size=train_batch_size,
+            test_batch_size=test_batch_size,
+            edges_counts=np.asarray(edges_counts),
+            nodes_counts=num_nodes_list,
+            node_masks=node_masks,
+            filter_graphs_by_max_node_count=filter_graphs_by_max_node_count,
         )
     else:
-        print(f"Loading train from files...")
-        shuffling_indices = np.random.permutation(len(nodes))
-        train_size = int(train_size * len(nodes))
-        train_indices = shuffling_indices[:train_size]
-        test_indices = shuffling_indices[train_size:]
-
-    return split_dataset(
-        train_indices=train_indices,
-        test_indices=test_indices,
-        nodes=nodes,
-        edges=edges,
-        train_batch_size=train_batch_size,
-        test_batch_size=test_batch_size,
-        edges_counts=np.asarray(edges_counts),
-        nodes_counts=num_nodes_list,
-        node_masks=node_masks,
-        filter_graphs_by_max_node_count=filter_graphs_by_max_node_count,
-    )
+        print(f"Loading dataset from {f_name}...")
+        with open(f_name, "rb") as f:
+            result = pickle.load(f)
+    return result
 
 
 def load_data_no_attributes(
