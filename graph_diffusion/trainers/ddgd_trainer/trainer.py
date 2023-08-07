@@ -702,7 +702,7 @@ class Trainer:
                 prior_sample,
             ],  # prior_sample,  # prior_sample,
             shared_position=None,
-            location=save_to,
+            location="wandb",
             title=title,
         )
 
