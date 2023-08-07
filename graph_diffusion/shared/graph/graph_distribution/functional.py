@@ -6,6 +6,7 @@ import networkx as nx
 import optax
 from rich import print
 import ipdb
+import wandb
 
 # import jax_dataclasses as jdc
 from mate.jax import SFloat, SInt, SBool, Key
@@ -335,6 +336,9 @@ def plot(
 
     if location is None:
         plt.show()
+    elif location == "wandb":
+
+        wandb.log({"prediction": wandb.Image(plt)})
     else:
         plt.savefig(location)
         plt.clf()

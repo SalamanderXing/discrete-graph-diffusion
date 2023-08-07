@@ -249,15 +249,15 @@ def load_data(
         edges = np.zeros((items, max_n, max_n, num_edge_features))
         print(f"[orange]Nodes shape:[/orange] {nodes.shape}")
         print(f"[orange]Edges shape:[/orange] {edges.shape}")
-        print(
-            f"[red]Filtered {1 - nodes.shape[0]/len(dataset):.4f}% graphs due to max node count[/red]"
-        )
+
         node_masks = np.zeros((items, max_n))
         num_nodes_list = np.zeros(items, int)
         edges_counts = np.zeros(items, int)
+        nonfiltered_length = 0
         for idx, data in enumerate(tqdm(dataset)):  # type: ignore
             if data.num_nodes > max_n:
                 continue
+            nonfiltered_length += 1
             tot_edges = set()
             num_nodes = data.num_nodes
             # Fill in the node features as one-hot encoded atomic numbers
@@ -277,6 +277,14 @@ def load_data(
             # Fill in the node_masks
             node_masks[idx, :num_nodes] = 1
             edges_counts[idx] = len(tot_edges)
+
+        nodes = nodes[:nonfiltered_length]
+        edges = edges[:nonfiltered_length]
+        node_masks = node_masks[:nonfiltered_length]
+        num_nodes_list = num_nodes_list[:nonfiltered_length]
+        print(
+            f"[red]Filtered {1 - nodes.shape[0]/len(dataset):.4f}% graphs due to max node count[/red]"
+        )
 
         edges[np.where(edges.sum(axis=-1) == 0)] = np.eye(num_edge_features)[0]
         nodes[np.where(nodes.sum(axis=-1) == 0)] = np.eye(num_atom_features)[0]
