@@ -346,6 +346,10 @@ def load_data(
         print(f"Loading dataset from {f_name}...")
         with open(f_name, "rb") as f:
             cache = pickle.load(f)
+        cache = cache | dict(
+            train_batch_size=train_batch_size,
+            test_batch_size=test_batch_size,
+        )
     return TUDataset.create(**cache)  # type: ignore
 
 

@@ -561,12 +561,7 @@ class Trainer:
                         #     ),
                         #     load_from_disk=False,
                         # )
-                        self.sample(
-                            restore_checkpoint=False,
-                            save_to=os.path.join(
-                                self.plot_path, f"{epoch_idx}_samples"
-                            ),
-                        )
+                        self.sample(restore_checkpoint=False, save_to="wandb")
 
         rng, _ = jax.random.split(self.rngs["params"])
         val_loss, val_time = self.__val_epoch(
@@ -667,7 +662,7 @@ class Trainer:
         gd.plot([model_samples], shared_position="row", location=save_to)
 
     def sample(
-        self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 500
+        self, restore_checkpoint: bool = True, save_to: str = "wandb", n: int = 500
     ):
         print(f"Saving samples to: {save_to}")
         if restore_checkpoint:
@@ -702,7 +697,7 @@ class Trainer:
                 prior_sample,
             ],  # prior_sample,  # prior_sample,
             shared_position=None,
-            location="wandb",
+            location=save_to,
             title=title,
         )
 
