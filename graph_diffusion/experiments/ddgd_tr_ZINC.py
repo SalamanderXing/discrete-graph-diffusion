@@ -47,7 +47,7 @@ from jax import numpy as np
 from jax import random
 
 
-batch_size = 64
+batch_size = 200
 
 dataset = load_data(
     name="ZINC_full",
