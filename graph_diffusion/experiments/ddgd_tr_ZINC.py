@@ -10,7 +10,6 @@ from jax.lib import xla_bridge
 import ipdb
 from rich import print
 
-# has to be doneemory.
 data_key = jax.random.PRNGKey(0)
 
 
@@ -25,24 +24,17 @@ jax.config.update("jax_debug_nans", True)
 
 device = xla_bridge.get_backend().platform
 print(f"Using device: [yellow]{device} [/yellow]")
-if device.lower() != "gpu":
+if device.lower() == "cpu":
     print("[red]WARNING: :skull:[/red] Running on CPU. This will be slow.")
 
 
 import jax
 from jax import config
 from ..data_loaders.tu import load_data
-
 from mate import mate
-
-# from ..data_loaders.qm9_digress import load_data
 import os
-
-
-# from ..data_loaders.qm92 import load_data
 from ..models.gt_digress import GraphTransformer
 from ..trainers.ddgd_trainer import Trainer
-
 from jax import numpy as np
 from jax import random
 
@@ -56,7 +48,7 @@ dataset = load_data(
     train_batch_size=batch_size,
     test_batch_size=batch_size * 2,
     one_hot=True,
-    filter_graphs_by_max_node_count=None,
+    # filter_graphs_by_max_node_count=10,
 )
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
