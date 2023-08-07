@@ -1,6 +1,7 @@
 import pickle
 import os
 import h5py
+from tqdm import tqdm
 from jaxtyping import Float, Array
 from rich import print
 import ipdb
@@ -10,40 +11,181 @@ from scipy.signal import savgol_filter
 from jax import numpy as jnp
 from jaxtyping import Int, Float
 from tensorflow.data import Dataset
+from torch_geometric.datasets import TUDataset as PyTUDataset
 from typing import Iterable
 import tensorflow as tf
 
 tf.config.experimental.set_visible_devices([], "GPU")
 
 
-def __to_dense(x, edge_index, edge_attr, batch):
-    x, node_mask = to_dense_batch(x=x, batch=batch)
-    edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
-    # TODO: carefully check if setting node_mask as a bool breaks the continuous case
-    max_num_nodes = x.size(1)
-    e = to_dense_adj(
-        edge_index=edge_index,
-        batch=batch,
-        edge_attr=edge_attr,
-        max_num_nodes=max_num_nodes,
-    )
-    e = __encode_no_edge(e)
-    return x, e, node_mask
+@dataclass(frozen=True)
+class TUDataset:
+    train_loader: Iterable
+    test_loader: Iterable
+    max_node_feature: int
+    max_edge_feature: int
+    n: int
+    nodes_dist: Float[Array, "k"]
+    feature_node_prior: Float[Array, "m"]
+    feature_edge_prior: Float[Array, "l"]
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        train_indices: np.ndarray,
+        test_indices: np.ndarray,
+        nodes: np.ndarray,
+        edges: np.ndarray,
+        nodes_counts: np.ndarray,
+        train_batch_size: int,
+        test_batch_size: int,
+        edges_counts: np.ndarray,
+        node_masks: np.ndarray,
+    ):
+        edges_counts = np.array(edges_counts)
+        train_nodes = nodes[train_indices]
+        train_edges = edges[train_indices]
+        train_masks = node_masks[train_indices]
+        train_nodes_counts = nodes_counts[train_indices]
+        train_edges_counts = edges_counts[train_indices]
+        test_nodes = nodes[test_indices]
+        test_edges = edges[test_indices]
+        test_nodes_counts = nodes_counts[test_indices]
+        test_edges_counts = edges_counts[test_indices]
+        max_n = train_nodes.shape[1]
+        train_nodes = np.array(train_nodes).astype(float)[..., None]
+        train_edges = np.array(train_edges).astype(float)
+        test_nodes = np.array(test_nodes).astype(float)[..., None]
+        test_edges = np.array(test_edges).astype(float)
+        train_nodes = train_nodes.squeeze(-1)
+        test_nodes = test_nodes.squeeze(-1)
+
+        # if filter_graphs_by_max_node_count is not None:
+        #     print(
+        #         f"Filtering graphs by max node count {filter_graphs_by_max_node_count}"
+        #     )
+        #     len_before_filtering = len(train_nodes)
+        #     train_mask = train_nodes_counts <= filter_graphs_by_max_node_count
+        #     test_mask = test_nodes_counts <= filter_graphs_by_max_node_count
+        #     train_nodes = train_nodes[train_mask, :filter_graphs_by_max_node_count]
+        #     train_edges = train_edges[
+        #         train_mask,
+        #         :filter_graphs_by_max_node_count,
+        #         :filter_graphs_by_max_node_count,
+        #     ]
+        #     train_nodes_counts = train_nodes_counts[train_mask]
+        #     train_edges_counts = train_edges_counts[train_mask]
+        #     test_nodes = test_nodes[test_mask, :filter_graphs_by_max_node_count]
+        #     test_edges = test_edges[
+        #         test_mask,
+        #         :filter_graphs_by_max_node_count,
+        #         :filter_graphs_by_max_node_count,
+        #     ]
+        #     test_nodes_counts = test_nodes_counts[test_mask]
+        #     test_edges_counts = test_edges_counts[test_mask]
+        #     train_masks = train_masks[train_mask, :filter_graphs_by_max_node_count]
+        #     len_after_filtering = len(train_nodes)
+        #     # prints the relative number of graphs that were filtered out
+        #     print(
+        #         f"Filtered out {(1 - len_after_filtering/len_before_filtering)} of graphs due to max node count"
+        #     )
+
+        nodes_dist = compute_distribution(jnp.array(train_masks), margin=5)
+        nodes_prior = jnp.array(train_nodes.mean(axis=(0, 1)).squeeze())
+        edges_prior = jnp.array(train_edges.mean(axis=(0, 1, 2)).squeeze())
+        train_loader = (
+            Dataset.zip(
+                tuple(
+                    map(
+                        Dataset.from_tensor_slices,
+                        (
+                            train_nodes,
+                            train_edges,
+                            train_edges_counts,
+                            train_nodes_counts,
+                        ),
+                    )
+                )
+            )
+            .shuffle(1000)
+            .batch(train_batch_size)
+            .prefetch(100)
+        )
+        test_loader = (
+            Dataset.zip(
+                tuple(
+                    map(
+                        Dataset.from_tensor_slices,
+                        (
+                            test_nodes,
+                            test_edges,
+                            test_edges_counts,
+                            test_nodes_counts,
+                        ),
+                    )
+                )
+            )
+            .batch(test_batch_size)
+            .prefetch(100)
+        )
+        return TUDataset(
+            train_loader=train_loader,
+            test_loader=test_loader,
+            max_node_feature=int(np.max(train_nodes)),
+            max_edge_feature=int(np.max(train_edges)),
+            n=int(max_n),
+            nodes_dist=nodes_dist,
+            feature_node_prior=nodes_prior,
+            feature_edge_prior=edges_prior,
+        )
 
 
-def __encode_no_edge(E):
-    # assert len(E.shape) == 4
-    if E.shape[-1] == 0:
-        return E
-    no_edge = torch.sum(E, dim=3) == 0
-    first_elt = E[:, :, :, 0]
-    first_elt[no_edge] = 1
-    E[:, :, :, 0] = first_elt
-    diag = (
-        torch.eye(E.shape[1], dtype=torch.bool).unsqueeze(0).expand(E.shape[0], -1, -1)
-    )
-    E[diag] = 0
-    return E
+#
+# def __to_dense(x, edge_index, edge_attr, batch):
+#     x, node_mask = to_dense_batch(x=x, batch=batch)
+#     edge_index, edge_attr = remove_self_loops(edge_index, edge_attr)
+#     # TODO: carefully check if setting node_mask as a bool breaks the continuous case
+#     max_num_nodes = x.size(1)
+#     e = to_dense_adj(
+#         edge_index=edge_index,
+#         batch=batch,
+#         edge_attr=edge_attr,
+#         max_num_nodes=max_num_nodes,
+#     )
+#     e = __encode_no_edge(e)
+#     return x, e, node_mask
+#
+#
+# def __encode_no_edge(E):
+#     # assert len(E.shape) == 4
+#     if E.shape[-1] == 0:
+#         return E
+#     no_edge = torch.sum(E, dim=3) == 0
+#     first_elt = E[:, :, :, 0]
+#     first_elt[no_edge] = 1
+#     E[:, :, :, 0] = first_elt
+#     diag = (
+#         torch.eye(E.shape[1], dtype=torch.bool).unsqueeze(0).expand(E.shape[0], -1, -1)
+#     )
+#     E[diag] = 0
+#     return E
+#
+# def save_cache(cache_location, test_dataset, train_dataset, freqs):
+#     with h5py.File(cache_location, "w") as hf:
+#         hf.create_dataset("testset", data=test_dataset)
+#         hf.create_dataset("trainset", data=train_dataset)
+#         hf.create_dataset("freqs", data=freqs)
+#
+#
+# def load_cache(
+#     cache_location: str,
+# ):  # -> tuple[jdl.ArrayDataset, jdl.ArrayDataset, Array]:
+#     with h5py.File(cache_location, "r") as hf:
+#         test_dataset = hf["testset"][:]  # type: ignore
+#         train_dataset = hf["trainset"][:]  # type: ignore
+#         freqs = hf["freqs"][:]  # type: ignore
+#     return test_dataset, train_dataset, freqs
 
 
 def compute_distribution(
@@ -64,226 +206,6 @@ def compute_distribution(
     return jnp.array(norm_dist_smooth_3)
 
 
-def save_cache(cache_location, test_dataset, train_dataset, freqs):
-    with h5py.File(cache_location, "w") as hf:
-        hf.create_dataset("testset", data=test_dataset)
-        hf.create_dataset("trainset", data=train_dataset)
-        hf.create_dataset("freqs", data=freqs)
-
-
-def load_cache(
-    cache_location: str,
-):  # -> tuple[jdl.ArrayDataset, jdl.ArrayDataset, Array]:
-    with h5py.File(cache_location, "r") as hf:
-        test_dataset = hf["testset"][:]  # type: ignore
-        train_dataset = hf["trainset"][:]  # type: ignore
-        freqs = hf["freqs"][:]  # type: ignore
-    return test_dataset, train_dataset, freqs
-
-
-# def compute_priors(nodes:Float[], edges):
-
-
-# def create_graph(nodes, edges, edges_counts, nodes_counts, train=False):
-#     nodes = np.asarray(nodes)
-#     edges = np.asarray(edges)
-#     nodes_counts = np.asarray(nodes_counts)
-#     edges_counts = np.asarray(edges_counts)
-#     assert nodes_counts.shape == edges_counts.shape and len(nodes_counts.shape) == 1
-#     if len(nodes.shape) > 3:
-#         nodes = nodes.squeeze(-1)
-#     if train:
-#         batch_size, n, _ = nodes.shape
-#
-#         # if np.random.rand() < 0.5:
-#         #     # takes a subgraph
-#         #     max_n = np.max(nodes_counts)
-#         #     new_nodes_counts = np.random.randint(1, max_n, size=batch_size)
-#         #     # ipdb.set_trace()
-#         #     for i in range(batch_size):
-#         #         nodes[i, new_nodes_counts[i] :] = np.eye(nodes.shape[-1])[0]
-#         #         edges[i, new_nodes_counts[i] :, new_nodes_counts[i] :] = np.eye(
-#         #             edges.shape[-1]
-#         #         )[0]
-#         # pass
-#
-#     nodes = jnp.asarray(nodes)
-#
-#     edges = jnp.asarray(edges)
-#     edges_counts = jnp.asarray(edges_counts)
-#     # assert len(nodes_counts.shape) == 1
-#     nodes_counts = jnp.asarray(nodes_counts)
-#     # assert len(nodes_counts.shape) == 1
-#     return (
-#         Graph.create(
-#             nodes=nodes,
-#             edges=edges,
-#             edges_counts=edges_counts,
-#             nodes_counts=nodes_counts,
-#         )
-#         if len(edges.shape) < 4
-#         else GraphDistribution.create_from_counts(
-#             nodes=nodes,
-#             edges=edges,
-#             nodes_counts=nodes_counts,
-#         )
-#     )
-#
-#
-
-
-# @dataclass(frozen=True)
-# class QM9Dataset:
-#     train_loader: Iterable
-#     test_loader: Iterable
-#     max_node_feature: int
-#     max_edge_feature: int
-#     n: int
-#     nodes_dist: Float[Array, "k"]
-#     feature_node_prior: Float[Array, "m"]
-#     feature_edge_prior: Float[Array, "l"]
-#     structure_node_prior: Float[Array, "k"]
-#     structure_edge_prior: Float[Array, "k"]
-#     infos: QM9infos
-#     train_smiles: Iterable[str]
-#     mean_edge_count: SFloat = 0.0
-#     mean_node_count: SFloat = 0.0
-#     var_edge_count: SFloat = 0.0
-#     var_node_count: SFloat = 0.0
-#
-
-
-@dataclass(frozen=True)
-class TUDataset:
-    train_loader: Iterable
-    test_loader: Iterable
-    max_node_feature: int
-    max_edge_feature: int
-    n: int
-    nodes_dist: Float[Array, "k"]
-    feature_node_prior: Float[Array, "m"]
-    feature_edge_prior: Float[Array, "l"]
-
-
-def split_dataset(
-    *,
-    train_indices: np.ndarray,
-    test_indices: np.ndarray,
-    nodes: np.ndarray,
-    edges: np.ndarray,
-    nodes_counts: np.ndarray,
-    train_batch_size: int,
-    test_batch_size: int,
-    edges_counts: np.ndarray,
-    node_masks: np.ndarray,
-    filter_graphs_by_max_node_count: int | None = None,
-):
-    edges_counts = np.array(edges_counts)
-    train_nodes = nodes[train_indices]
-    train_edges = edges[train_indices]
-    train_masks = node_masks[train_indices]
-    train_nodes_counts = nodes_counts[train_indices]
-    train_edges_counts = edges_counts[train_indices]
-    test_nodes = nodes[test_indices]
-    test_edges = edges[test_indices]
-    test_nodes_counts = nodes_counts[test_indices]
-    test_edges_counts = edges_counts[test_indices]
-    max_n = train_nodes.shape[1]
-    num_edge_features = train_edges.shape[-1]
-    max_n_atom = train_nodes.shape[-1]
-    train_nodes = np.array(train_nodes).astype(float)[..., None]
-    train_edges = np.array(train_edges).astype(float)
-    # train_node_masks = np.array(train_node_masks)
-    test_nodes = np.array(test_nodes).astype(float)[..., None]
-    test_edges = np.array(test_edges).astype(float)
-    # test_node_masks = np.array(test_node_masks)
-    # freqs = (
-    #     compute_distribution(train_node_masks, margin=10) if do_dist else np.array(-1)
-    # )
-    train_nodes = train_nodes.squeeze(-1)
-    test_nodes = test_nodes.squeeze(-1)
-
-    if filter_graphs_by_max_node_count is not None:
-        print(f"Filtering graphs by max node count {filter_graphs_by_max_node_count}")
-        len_before_filtering = len(train_nodes)
-        train_mask = train_nodes_counts <= filter_graphs_by_max_node_count
-        test_mask = test_nodes_counts <= filter_graphs_by_max_node_count
-        train_nodes = train_nodes[train_mask, :filter_graphs_by_max_node_count]
-        train_edges = train_edges[
-            train_mask,
-            :filter_graphs_by_max_node_count,
-            :filter_graphs_by_max_node_count,
-        ]
-        train_nodes_counts = train_nodes_counts[train_mask]
-        train_edges_counts = train_edges_counts[train_mask]
-        test_nodes = test_nodes[test_mask, :filter_graphs_by_max_node_count]
-        test_edges = test_edges[
-            test_mask,
-            :filter_graphs_by_max_node_count,
-            :filter_graphs_by_max_node_count,
-        ]
-        test_nodes_counts = test_nodes_counts[test_mask]
-        test_edges_counts = test_edges_counts[test_mask]
-        train_masks = train_masks[train_mask, :filter_graphs_by_max_node_count]
-        len_after_filtering = len(train_nodes)
-        # prints the relative number of graphs that were filtered out
-        print(
-            f"Filtered out {(1 - len_after_filtering/len_before_filtering)} of graphs due to max node count"
-        )
-
-    train_loader = (
-        Dataset.zip(
-            tuple(
-                map(
-                    Dataset.from_tensor_slices,
-                    (
-                        train_nodes,
-                        train_edges,
-                        train_edges_counts,
-                        train_nodes_counts,
-                    ),
-                )
-            )
-        )
-        .shuffle(1000)
-        .batch(train_batch_size)
-        .prefetch(100)
-    )
-    test_loader = (
-        Dataset.zip(
-            tuple(
-                map(
-                    Dataset.from_tensor_slices,
-                    (
-                        test_nodes,
-                        test_edges,
-                        test_edges_counts,
-                        test_nodes_counts,
-                    ),
-                )
-            )
-        )
-        .batch(test_batch_size)
-        .prefetch(100)
-    )
-    nodes_dist = compute_distribution(jnp.array(train_masks), margin=5)
-    nodes_prior = jnp.array(train_nodes.mean(axis=(0, 1)).squeeze())
-    edges_prior = jnp.array(train_edges.mean(axis=(0, 1, 2)).squeeze())
-    return TUDataset(
-        train_loader=train_loader,
-        test_loader=test_loader,
-        max_node_feature=int(np.max(train_nodes)),
-        max_edge_feature=int(np.max(train_edges)),
-        n=int(max_n),
-        nodes_dist=nodes_dist,
-        feature_node_prior=nodes_prior,
-        feature_edge_prior=edges_prior,
-    )
-
-
-from torch_geometric.datasets import TUDataset as PyTUDataset
-
-
 def load_data(
     *,
     save_path: str,
@@ -294,13 +216,9 @@ def load_data(
     name: str = "PTC_MR",
     filter_graphs_by_max_node_count: int | None = None,
     verbose: bool = True,
-    cache: bool = False,
+    use_cache: bool = False,
     one_hot: bool = False,
 ):
-    # old_visible_devices = os.environ["CUDA_VISIBLE_DEVICES"]
-    # ipdb.set_trace()
-    # os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
     # print("Cache not found, creating new one...")
     f_name = os.path.join(save_path, f"dataset.pkl")
     if not os.path.exists(f_name):
@@ -314,14 +232,14 @@ def load_data(
         items = len(dataset)
         # Get the maximum number of nodes (atoms) in the dataset
         max_n = max(
-            [data.num_nodes for data in dataset]
+            [data.num_nodes for data in dataset]  # type: ignore
         )  # one for the absence of a node
         if filter_graphs_by_max_node_count is not None:
             max_n = min(max_n, filter_graphs_by_max_node_count)
 
         print(f"[red]Max number of nodes:[/red] {max_n}")
         # Get unique atom types
-        num_atom_features = dataset[0].x.shape[1]
+        num_atom_features = dataset[0].x.shape[1]  # type: ignore
 
         num_edge_features = (
             dataset.num_edge_features + 1
@@ -331,13 +249,14 @@ def load_data(
         edges = np.zeros((items, max_n, max_n, num_edge_features))
         print(f"[orange]Nodes shape:[/orange] {nodes.shape}")
         print(f"[orange]Edges shape:[/orange] {edges.shape}")
+        print(
+            f"[red]Filtered {1 - nodes.shape[0]/len(dataset):.4f}% graphs due to max node count[/red]"
+        )
         node_masks = np.zeros((items, max_n))
         num_nodes_list = np.zeros(items, int)
         edges_counts = np.zeros(items, int)
-        filtered = 0
-        for idx, data in enumerate(dataset):
+        for idx, data in enumerate(tqdm(dataset)):  # type: ignore
             if data.num_nodes > max_n:
-                filtered += 1
                 continue
             tot_edges = set()
             num_nodes = data.num_nodes
@@ -359,11 +278,6 @@ def load_data(
             node_masks[idx, :num_nodes] = 1
             edges_counts[idx] = len(tot_edges)
 
-        if filtered > 0:
-            print(
-                f"[red]Filtered {filtered} ({1 - filtered/len(dataset):.4f}) graphs due to max node count[/red]"
-            )
-
         edges[np.where(edges.sum(axis=-1) == 0)] = np.eye(num_edge_features)[0]
         nodes[np.where(nodes.sum(axis=-1) == 0)] = np.eye(num_atom_features)[0]
         if not one_hot:
@@ -376,7 +290,7 @@ def load_data(
         edges = np.array(edges)
         node_masks = np.array(node_masks)
 
-        print("Processed dataset.")
+        print("Dataset turned into dense numpy arrays")
         num_edge_features = edges.shape[-1]
 
         if name.lower() in ("mutag", "ptc_mr"):
@@ -401,13 +315,12 @@ def load_data(
                 ]
             )
         else:
-            print(f"Loading train from files...")
             shuffling_indices = np.random.permutation(len(nodes))
             train_size = int(train_size * len(nodes))
             train_indices = shuffling_indices[:train_size]
             test_indices = shuffling_indices[train_size:]
 
-        result = split_dataset(
+        cache = dict(
             train_indices=train_indices,
             test_indices=test_indices,
             nodes=nodes,
@@ -417,16 +330,15 @@ def load_data(
             edges_counts=np.asarray(edges_counts),
             nodes_counts=num_nodes_list,
             node_masks=node_masks,
-            filter_graphs_by_max_node_count=filter_graphs_by_max_node_count,
         )
         with open(f_name, "wb") as f:
-            pickle.dump(result, f)
+            pickle.dump(cache, f)
         print(f"Saved dataset to {f_name}")
     else:
         print(f"Loading dataset from {f_name}...")
         with open(f_name, "rb") as f:
-            result = pickle.load(f)
-    return result
+            cache = pickle.load(f)
+    return TUDataset.create(**cache)  # type: ignore
 
 
 def load_data_no_attributes(
