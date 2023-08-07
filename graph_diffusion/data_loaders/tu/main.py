@@ -419,6 +419,9 @@ def load_data(
             node_masks=node_masks,
             filter_graphs_by_max_node_count=filter_graphs_by_max_node_count,
         )
+        with open(f_name, "wb") as f:
+            pickle.dump(result, f)
+        print(f"Saved dataset to {f_name}")
     else:
         print(f"Loading dataset from {f_name}...")
         with open(f_name, "rb") as f:
