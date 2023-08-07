@@ -8,7 +8,7 @@ from flax.struct import dataclass
 from beartype import beartype
 from typing import Union
 
-
+@jaxtyped
 @beartype
 @dataclass
 class Q:

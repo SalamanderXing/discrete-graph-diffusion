@@ -295,6 +295,9 @@ class HiddenDims:
     dim_ffy: int
 
 
+from mate.jax import SBool
+
+
 @no_type_check
 class GraphTransformer(nn.Module):
     n_layers: int
@@ -334,7 +337,7 @@ class GraphTransformer(nn.Module):
     @jaxtyped
     @beartype
     @nn.compact
-    def __call__(self, g: gd.GraphDistribution, y, deterministic: bool):
+    def __call__(self, g: gd.GraphDistribution, y, deterministic: SBool):
         act_fn_in = nn.relu
         act_fn_out = nn.relu
         X = g.nodes

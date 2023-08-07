@@ -244,7 +244,6 @@ def plot(
     original_len = len(rows[0])
     skip = (len(rows[0]) // 15) if len(rows[0]) > 15 else 1
     rows_skips = [(row[::skip], row[np.array([-1])]) for row in rows]
-    ipdb.set_trace()
     rows = [concatenate(row) for row in rows_skips]
     lrows = len(rows)
     lcolumn = len(rows[0])
@@ -259,10 +258,15 @@ def plot(
     if len(axs.shape) == 1:
         axs = axs[None, :]
 
-    cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1] - 1))
-    cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1]))
-    cmap_edge = numpy.concatenate([numpy.zeros((1, 4)), cmap_edge], axis=0)
-    # cmap_node = numpy.concatenate([cmap_node, numpy.zeros((1, 4))], axis=0)
+    if rows[0].nodes.shape[-1] > 2:
+        cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1] - 1))
+        cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1]))
+        cmap_edge = numpy.concatenate([numpy.zeros((1, 4)), cmap_edge], axis=0)
+    else:
+        cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1] - 1))
+        cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1] - 1))
+        cmap_edge = numpy.concatenate([numpy.zeros((1, 4)), cmap_edge], axis=0)
+        cmap_node = numpy.concatenate([numpy.zeros((1, 4)), cmap_node], axis=0)
     node_size = 10.0
     positions = [None] * len(rows[0])
 
@@ -273,8 +277,9 @@ def plot(
         xs = row.nodes.argmax(-1)
         es = row.edges.argmax(-1)
         n_nodes_row = row.nodes_counts
-        for j in range(len(row)):
+        for j in range(len(ax_row)):
             ax = ax_row[j]
+            j *= skip
             x = xs[j]
             e = es[j]
             n_nodes = n_nodes_row[j]

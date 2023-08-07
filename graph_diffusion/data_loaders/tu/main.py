@@ -172,7 +172,8 @@ def split_dataset(
     nodes: np.ndarray,
     edges: np.ndarray,
     nodes_counts: np.ndarray,
-    batch_size: int,
+    train_batch_size: int,
+    test_batch_size: int,
     edges_counts: np.ndarray,
     node_masks: np.ndarray,
     filter_graphs_by_max_node_count: int | None = None,
@@ -230,37 +231,41 @@ def split_dataset(
             f"Filtered out {(1 - len_after_filtering/len_before_filtering)} of graphs due to max node count"
         )
 
-    train_dataset = Dataset.zip(
-        tuple(
-            map(
-                Dataset.from_tensor_slices,
-                (
-                    train_nodes,
-                    train_edges,
-                    train_edges_counts,
-                    train_nodes_counts,
-                ),
+    train_loader = (
+        Dataset.zip(
+            tuple(
+                map(
+                    Dataset.from_tensor_slices,
+                    (
+                        train_nodes,
+                        train_edges,
+                        train_edges_counts,
+                        train_nodes_counts,
+                    ),
+                )
             )
         )
-    ).shuffle(1000)
-    test_dataset = Dataset.zip(
-        tuple(
-            map(
-                Dataset.from_tensor_slices,
-                (
-                    test_nodes,
-                    test_edges,
-                    test_edges_counts,
-                    test_nodes_counts,
-                ),
-            )
-        )
+        .shuffle(1000)
+        .batch(train_batch_size)
+        .prefetch(100)
     )
-
-    # return train_dataset, test_dataset
-    train_loader = train_dataset.batch(batch_size)
-
-    test_loader = test_dataset.batch(batch_size)
+    test_loader = (
+        Dataset.zip(
+            tuple(
+                map(
+                    Dataset.from_tensor_slices,
+                    (
+                        test_nodes,
+                        test_edges,
+                        test_edges_counts,
+                        test_nodes_counts,
+                    ),
+                )
+            )
+        )
+        .batch(test_batch_size)
+        .prefetch(100)
+    )
     nodes_dist = compute_distribution(jnp.array(train_masks), margin=5)
     nodes_prior = jnp.array(train_nodes.mean(axis=(0, 1)).squeeze())
     edges_prior = jnp.array(train_edges.mean(axis=(0, 1, 2)).squeeze())
@@ -281,7 +286,8 @@ def load_data(
     save_path: str,
     train_size: float = 0.8,
     seed,
-    batch_size: int,
+    train_batch_size: int,
+    test_batch_size: int,
     name: str = "PTC_MR",
     filter_graphs_by_max_node_count: int | None = None,
     verbose: bool = True,
@@ -304,25 +310,34 @@ def load_data(
     items = len(dataset)
     # Get the maximum number of nodes (atoms) in the dataset
     max_n = max([data.num_nodes for data in dataset])  # one for the absence of a node
+    if filter_graphs_by_max_node_count is not None:
+        max_n = min(max_n, filter_graphs_by_max_node_count)
+
     print(f"[red]Max number of nodes:[/red] {max_n}")
     # Get unique atom types
-    max_n_atom = dataset[0].x.shape[1]
+    num_atom_features = dataset[0].x.shape[1]
 
     num_edge_features = dataset.num_edge_features + 1  # one for the absence of an edge
 
-    nodes = np.zeros((items, max_n, max_n_atom))
+    nodes = np.zeros((items, max_n, num_atom_features))
     edges = np.zeros((items, max_n, max_n, num_edge_features))
+    print(f"[orange]Nodes shape:[/orange] {nodes.shape}")
+    print(f"[orange]Edges shape:[/orange] {edges.shape}")
     node_masks = np.zeros((items, max_n))
-    num_nodes_list = []
-    edges_counts = []
+    num_nodes_list = np.zeros(items, int)
+    edges_counts = np.zeros(items, int)
+    filtered = 0
     for idx, data in enumerate(dataset):
+        if data.num_nodes > max_n:
+            filtered += 1
+            continue
         tot_edges = set()
         num_nodes = data.num_nodes
         # Fill in the node features as one-hot encoded atomic numbers
         atom_one_hot = data.x.numpy()
         nodes[idx, :num_nodes, :] = atom_one_hot
 
-        num_nodes_list.append(num_nodes)
+        num_nodes_list[idx] = num_nodes
         # Fill in the edge features
         edge_indices = data.edge_index.numpy()
         for j, (src, dst) in enumerate(edge_indices.T):
@@ -334,11 +349,15 @@ def load_data(
 
         # Fill in the node_masks
         node_masks[idx, :num_nodes] = 1
-        edges_counts.append(len(tot_edges))
-    # print(edges_counts)
+        edges_counts[idx] = len(tot_edges)
+
+    if filtered > 0:
+        print(
+            f"[red]Filtered {filtered} ({1 - filtered/len(dataset):.4f}) graphs due to max node count[/red]"
+        )
 
     edges[np.where(edges.sum(axis=-1) == 0)] = np.eye(num_edge_features)[0]
-    nodes[np.where(nodes.sum(axis=-1) == 0)] = np.eye(max_n_atom)[0]
+    nodes[np.where(nodes.sum(axis=-1) == 0)] = np.eye(num_atom_features)[0]
     if not one_hot:
         nodes = np.argmax(nodes, axis=-1)
         edges = np.argmax(edges, axis=-1)
@@ -350,7 +369,6 @@ def load_data(
     node_masks = np.array(node_masks)
 
     print("Processed dataset.")
-    items = len(nodes)
     num_edge_features = edges.shape[-1]
 
     if name.lower() in ("mutag", "ptc_mr"):
@@ -376,26 +394,23 @@ def load_data(
         )
     else:
         print(f"Loading train from files...")
-        shuffling_indices = np.random.permutation(items)
-        train_size = int(train_size * items)
+        shuffling_indices = np.random.permutation(len(nodes))
+        train_size = int(train_size * len(nodes))
         train_indices = shuffling_indices[:train_size]
         test_indices = shuffling_indices[train_size:]
 
-    result = split_dataset(
+    return split_dataset(
         train_indices=train_indices,
         test_indices=test_indices,
         nodes=nodes,
         edges=edges,
-        batch_size=batch_size,
+        train_batch_size=train_batch_size,
+        test_batch_size=test_batch_size,
         edges_counts=np.asarray(edges_counts),
         nodes_counts=num_nodes_list,
         node_masks=node_masks,
         filter_graphs_by_max_node_count=filter_graphs_by_max_node_count,
     )
-    # free cuda memory
-    # torch.cuda.empty_cache()
-    # os.environ["CUDA_VISIBLE_DEVICES"] = old_visible_devices
-    return result
 
 
 def load_data_no_attributes(

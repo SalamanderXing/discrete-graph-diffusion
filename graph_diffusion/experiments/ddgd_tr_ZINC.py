@@ -4,15 +4,17 @@ tags:
 - rocket 
 ```
 """
-from jax import random
-
 import jax
+from jax import random
+from jax.lib import xla_bridge
+import ipdb
+from rich import print
 
-# has to be done at the beginning to allow JAX to take control of the GPU memory.
+# has to be doneemory.
 data_key = jax.random.PRNGKey(0)
 
 
-gpu = True 
+gpu = True
 debug_compiles = False
 
 if not gpu:
@@ -21,10 +23,14 @@ if not gpu:
 jax.config.update("jax_log_compiles", debug_compiles)
 jax.config.update("jax_debug_nans", True)
 
+device = xla_bridge.get_backend().platform
+print(f"Using device: [yellow]{device} [/yellow]")
+if device.lower() != "gpu":
+    print("[red]WARNING: :skull:[/red] Running on CPU. This will be slow.")
+
 
 import jax
 from jax import config
-from jax.lib import xla_bridge
 from ..data_loaders.tu import load_data
 
 from mate import mate
@@ -39,26 +45,22 @@ from ..trainers.ddgd_trainer import Trainer
 
 from jax import numpy as np
 from jax import random
-from rich import print
 
+
+batch_size = 64
 
 dataset = load_data(
-    name="PTC_MR",  # "MUTAG",
+    name="ZINC_full",
     seed=32,
     save_path=mate.data_dir,
-    batch_size=15,
+    train_batch_size=batch_size,
+    test_batch_size=batch_size * 2,
     one_hot=True,
-    filter_graphs_by_max_node_count=22,
+    filter_graphs_by_max_node_count=27,
 )
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
 
-device = xla_bridge.get_backend().platform
-print(f"Using device: [yellow]{device} [/yellow]")
-if device.lower() != "gpu":
-    print("[red]WARNING: :skull:[/red] Running on CPU. This will be slow.")
-
-batch_size = 512
 
 diffusion_steps = 500
 import random as pyrandom
@@ -74,7 +76,7 @@ rngs = {
 #     number_of_nodes=dataset.n,
 #     num_layers=5,
 # )
-#model = GraphTransformer(n_layers=5)
+# model = GraphTransformer(n_layers=5)
 save_path = os.path.join(mate.save_dir, f"{diffusion_steps}_diffusion_steps")
 os.makedirs(save_path, exist_ok=True)
 os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)

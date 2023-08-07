@@ -59,7 +59,7 @@ print(f"Using device: [yellow]{device} [/yellow]")
 if device.lower() != "gpu":
     print("[red]WARNING: :skull:[/red] Running on CPU. This will be slow.")
 
-batch_size = 512
+batch_size = 400  # 512
 
 ds_name = "QM9"  # "PTC_MR"# "MUTAG"
 dataset = load_data(
@@ -81,7 +81,7 @@ rngs = {
 #     number_of_nodes=dataset.n,
 #     num_layers=5,
 # )
-model = GraphTransformer(n_layers=5)
+# model = GraphTransformer(n_layers=5)
 save_path = os.path.join(mate.save_dir, f"{diffusion_steps}_diffusion_steps")
 os.makedirs(save_path, exist_ok=True)
 os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)
@@ -97,7 +97,7 @@ os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)
 
 
 trainer = Trainer(
-    model=model,
+    model_class=GraphTransformer,
     rngs=rngs,
     train_loader=dataset.train_loader,
     val_loader=dataset.test_loader,

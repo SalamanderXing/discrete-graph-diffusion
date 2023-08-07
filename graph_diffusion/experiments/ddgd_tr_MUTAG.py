@@ -12,7 +12,7 @@ import jax
 data_key = jax.random.PRNGKey(0)
 
 
-gpu = True 
+gpu = True
 debug_compiles = False
 
 if not gpu:
@@ -42,13 +42,15 @@ from jax import random
 from rich import print
 
 
+batch_size = 32
+
 dataset = load_data(
-    name="PTC_MR",  # "MUTAG",
+    name="MUTAG",
     seed=32,
     save_path=mate.data_dir,
-    batch_size=15,
+    batch_size=batch_size,
     one_hot=True,
-    filter_graphs_by_max_node_count=22,
+    filter_graphs_by_max_node_count=None,
 )
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
@@ -58,7 +60,6 @@ print(f"Using device: [yellow]{device} [/yellow]")
 if device.lower() != "gpu":
     print("[red]WARNING: :skull:[/red] Running on CPU. This will be slow.")
 
-batch_size = 512
 
 diffusion_steps = 500
 import random as pyrandom
@@ -74,7 +75,7 @@ rngs = {
 #     number_of_nodes=dataset.n,
 #     num_layers=5,
 # )
-#model = GraphTransformer(n_layers=5)
+# model = GraphTransformer(n_layers=5)
 save_path = os.path.join(mate.save_dir, f"{diffusion_steps}_diffusion_steps")
 os.makedirs(save_path, exist_ok=True)
 os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)

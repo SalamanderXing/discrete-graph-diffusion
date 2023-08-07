@@ -76,6 +76,8 @@ def pseudo_assert(condition: SBool):
     return np.where(condition, 0, np.nan)
 
 
+@jaxtyped
+@beartype
 def __compute_posterior_distribution_edges(
     edges: EdgeDistribution,
     edges_t: EdgeDistribution,
@@ -98,6 +100,8 @@ def __compute_posterior_distribution_edges(
     return prob
 
 
+@jaxtyped
+@beartype
 def __compute_posterior_distribution_nodes(
     nodes: NodeDistribution,
     nodes_t: NodeDistribution,
@@ -381,7 +385,6 @@ def __compute_batched_over0_posterior_distribution_edges(edges_t, q_t, q_s_b, q_
     return out
 
 
-@jax.jit
 def sample_p_zs_given_zt(
     p: GetProbabilityType,
     t: Int[Array, "batch"],

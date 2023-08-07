@@ -69,6 +69,8 @@ def to_symmetric(edges: EdgeDistribution) -> EdgeDistribution:
     return np.where(upper, edges, rearrange(edges, "b n1 n2 ee -> b n2 n1 ee"))
 
 
+@jaxtyped
+@beartype
 @dataclass
 class GraphDistribution:
     nodes: NodeDistribution
@@ -174,6 +176,8 @@ class GraphDistribution:
         return self.nodes.shape[0]
 
     @classmethod
+    @beartype
+    @jaxtyped
     def create_and_mask(
         cls,
         nodes: NodeDistribution,
@@ -223,7 +227,7 @@ class GraphDistribution:
             _created_internally=True,
         )
 
-    def repeat(self, n: int):
+    def repeat(self, n: SInt):
         return GraphDistribution.create(
             nodes=np.repeat(self.nodes, n, axis=0),
             edges=np.repeat(self.edges, n, axis=0),
@@ -238,11 +242,14 @@ class GraphDistribution:
         yes = np.array([1, 0])
         no = np.array([0, 1])
         new_nodes = np.where(
-            self.nodes[..., 0][..., None], yes[None, None], no[None, None]
+            self.nodes_mask[..., None], no[None, None], yes[None, None]
         ).astype(float)
         new_edges = np.where(
-            self.edges[..., 0][..., None], yes[None, None, None], no[None, None, None]
+            (self.edges_mask & (self.edges[..., 0] < 0.5))[..., None],
+            no[None, None, None],
+            yes[None, None, None],
         ).astype(float)
+        # ipdb.set_trace()
         return StructureOneHotGraph.create(
             OneHotGraph.create(
                 nodes=new_nodes,
@@ -254,7 +261,7 @@ class GraphDistribution:
 
     def feature(self):
         g = OneHotGraph.create(
-            nodes=self.nodes[..., 1:],
+            nodes=self.nodes,
             edges=self.edges[..., 1:],
             nodes_mask=self.nodes_mask,
             edges_mask=self.edges_mask,
@@ -262,6 +269,8 @@ class GraphDistribution:
         return g
 
 
+@jaxtyped
+@beartype
 @dataclass
 class OneHotGraph(GraphDistribution):
     @classmethod
@@ -314,7 +323,21 @@ class OneHotGraph(GraphDistribution):
             edges_mask=g.edges_mask,
         )
 
+    @classmethod
+    def empty(cls, b: int, n: int, d_nodes: int, d_edges: int):
+        id = ~np.eye(n, bool)
+        nodes_mask = np.ones((b, n), bool)
+        edges_mask = repeat(id, "n n -> b n n", b=b)
+        return cls.create(
+            nodes=np.zeros((b, n, d_nodes)),
+            edges=np.zeros((b, n, n, d_edges)),
+            nodes_mask=nodes_mask,
+            edges_mask=edges_mask,
+        )
 
+
+@jaxtyped
+@beartype
 @dataclass
 class DenseGraphDistribution(GraphDistribution):
     @classmethod
@@ -365,6 +388,8 @@ class DenseGraphDistribution(GraphDistribution):
         )
 
     @classmethod
+    @jaxtyped
+    @beartype
     def create_and_mask(
         cls,
         nodes: NodeDistribution,
@@ -407,7 +432,7 @@ class DenseGraphDistribution(GraphDistribution):
             edges_mask=g.edges_mask,
         )
 
-    def repeat(self, n: int) -> "DenseGraphDistribution":
+    def repeat(self, n: SInt) -> "DenseGraphDistribution":
         return DenseGraphDistribution.create(
             nodes=np.repeat(self.nodes, n, axis=0),
             edges=np.repeat(self.edges, n, axis=0),

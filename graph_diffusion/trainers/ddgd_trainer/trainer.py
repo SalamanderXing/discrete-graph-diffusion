@@ -52,88 +52,22 @@ class TrainState(train_state.TrainState):
     last_loss: SFloat
 
 
-# def get_model_input(g, t: Int[Array, "bs"], extra_features, transition_model):
-#     if extra_features:
-#         extra_features = compute_extra_features(g, g.nodes.shape[1])
-#         g = gd.GraphDistribution.create(
-#             nodes=np.concatenate([g.nodes, extra_features.nodes], axis=-1),
-#             edges=np.concatenate([g.edges, extra_features.edges], axis=-1),
-#             nodes_mask=g.nodes_mask,
-#             edges_mask=g.edges_mask,
-#         )
-#         temporal_embeddings = extra_features.y
-#     else:
-#         temporal_embeddings = transition_model.temporal_embeddings[t]
-#     return g, temporal_embeddings
-# @flax_dataclass
-# class GetProbabilityFromState:
-#     state: TrainState
-#     dropout_rng: Key
-#     transition_model: TransitionModel
-#     extra_features: SBool = False
-#
-#     def __call__(
-#         self, g: gd.OneHotGraph, t: Int[Array, "batch_size"]
-#     ) -> gd.DenseGraphDistribution:
-#         g_input, temporal_embeddings = get_model_input(
-#             g, t, self.extra_features, self.transition_model
-#         )
-#         pred_graph = self.state.apply_fn(
-#             self.state.params,
-#             g_input,
-#             temporal_embeddings,
-#             deterministic=True,
-#             rngs={"dropout": self.dropout_rng},
-#         )
-#         return pred_graph
-#
-#
-# @flax_dataclass
-# class GetProbabilityFromParams:
-#     params: FrozenDict
-#     state: TrainState
-#     dropout_rng: Key
-#     transition_model: TransitionModel
-#     deterministic: SBool = False
-#     extra_features: SBool = False
-#
-#     def __call__(
-#         self, g: gd.OneHotGraph, t: Int[Array, "batch_size"]
-#     ) -> gd.DenseGraphDistribution:
-#         g_input, temporal_embeddings = get_model_input(
-#             g, t, self.extra_features, self.transition_model
-#         )
-#         pred_graph = self.state.apply_fn(
-#             self.params,
-#             g_input,
-#             temporal_embeddings,
-#             deterministic=False,
-#             rngs={"dropout": self.dropout_rng},
-#             # deterministic=False,
-#         )
-#         return pred_graph
-
-
-@partial(jit, static_argnames=("structure",))
+@jit
 def train_step(
     *,
     g: gd.OneHotGraph,
     state: TrainState,
     rng: Key,
-    ddgd: DDGD,
-    structure: SBool,
 ):
-    dropout_train_key = jax.random.fold_in(rng, enc("dropout"))
     train_rng = jax.random.fold_in(rng, enc("train"))
+    dropout_rng = jax.random.fold_in(rng, enc("dropout"))
 
     def loss_fn(params: FrozenDict):
-        loss = ddgd.compute_train_loss(
-            params=params,
-            state=state,
+        loss = state.apply_fn(
+            params,
             target=g,
             rng_key=train_rng,
-            dropout_rng=dropout_train_key,
-            structure=structure,
+            rngs={"dropout": dropout_rng},
         ).mean()
         return loss, None
 
@@ -143,20 +77,30 @@ def train_step(
     return state, loss
 
 
-@jit
-def val_step(
-    *,
-    data: gd.OneHotGraph,
-    state: TrainState,
-    rng: Key,
-    ddgd: DDGD,
-) -> dict[str, Float[Array, "batch_size"]]:
-    val_rng = jax.random.fold_in(rng, enc("val"))
-    return ddgd.compute_val_loss(
-        state=state,
-        target=data,
-        rng_key=val_rng,
-    )
+# def val_step(
+#     *,
+#     ddgd,
+#     data: gd.OneHotGraph,
+#     state: TrainState,
+#     rng: Key,
+# ) -> dict[str, Float[Array, "batch_size"]]:
+#     val_rng = jax.random.fold_in(rng, enc("val"))
+#
+#     # val_state = TrainState.create(
+#     #     apply_fn=ddgd.apply,
+#     #     params=FrozenDict(state.params),
+#     #     key=jax.random.PRNGKey(0),
+#     #     last_loss=1000000,
+#     #     lr=0.1,
+#     # )
+#     # @jit
+#     # def test_run():
+#     # apply_fn = ddgd.apply(
+#     #
+#     # )
+#
+#
+#     return alla
 
 
 def to_one_hot(nodes, edges, _, nodes_counts):
@@ -184,7 +128,7 @@ class Trainer:
         structure_first = "structure-first"
         simple = "simple"
 
-    model: nn.Module
+    model_class: type[nn.Module]
     train_loader: DataLoader
     val_loader: DataLoader
     num_epochs: int
@@ -216,6 +160,7 @@ class Trainer:
     min_learning_rate: float = 1e-6
     use_extra_features: bool = False
     shuffle_coding_metric: bool = False
+    n_layers: int = 5
 
     def __post_init__(
         self,
@@ -232,11 +177,24 @@ class Trainer:
                 self.dataset_infos,
                 self.train_smiles,
             )
+        else:
+            self.sampling_metric = None
         raw_dummy = to_one_hot(*next(iter(self.val_loader)))
         print(f"{raw_dummy.nodes.shape=}")
         self.n = raw_dummy.nodes.shape[1]
+        # dummy, global_features = self.ddgd.get_model_input(
+        #     raw_dummy,
+        #     t=np.array([10]),
+        # )
+        # params = self.model.init(
+        #     self.rngs["params"],
+        #     dummy,
+        #     global_features,
+        #     deterministic=True,
+        # )
         if self.diffusion_type == self.__class__.DiffusionType.simple:
-            self.ddgd = SimpleDDGD.create(
+            self.ddgd = SimpleDDGD(
+                model_class=self.model_class,
                 nodes_dist=self.nodes_dist,
                 nodes_prior=self.feature_nodes_prior,
                 edges_prior=self.feature_edges_prior,
@@ -245,44 +203,70 @@ class Trainer:
                 n=self.n,
                 noise_schedule_type=self.noise_schedule_type,
                 use_extra_features=self.use_extra_features,
+                n_layers=self.n_layers,
             )
         elif self.diffusion_type == self.__class__.DiffusionType.structure_first:
             assert self.structure_nodes_prior is not None
             assert self.structure_edges_prior is not None
-            self.ddgd = StructureFirstDDGD.create(
+            self.ddgd = StructureFirstDDGD(
+                model_class=self.model_class,
                 nodes_dist=self.nodes_dist,
                 feature_nodes_prior=self.feature_nodes_prior,
                 feature_edges_prior=self.feature_edges_prior,
                 structure_nodes_prior=self.structure_nodes_prior,
                 structure_edges_prior=self.structure_edges_prior,
-                structure_diffusion_steps=self.diffusion_steps,
-                feature_diffusion_steps=self.diffusion_steps,
+                structure_diffusion_steps=self.diffusion_steps // 2,
+                feature_diffusion_steps=self.diffusion_steps // 2,
                 temporal_embedding_dim=self.temporal_embedding_dim,
                 n=self.n,
                 noise_schedule_type=self.noise_schedule_type,
                 use_extra_features=self.use_extra_features,
+                n_layers=self.n_layers,
             )
         else:
             raise ValueError(f"Unknown diffusion type {self.diffusion_type}")
-        dummy, global_features = self.ddgd.get_model_input(
+
+        rng_train = jax.random.fold_in(self.rngs["params"], enc("train"))
+        self.params = self.ddgd.init(
+            self.rngs,
             raw_dummy,
-            t=np.array([10]),
+            rng_key=rng_train,
         )
-        params = self.model.init(
-            self.rngs["params"],
-            dummy,
-            global_features,
-            deterministic=True,
-        )
-        self.params = params
         self.state = TrainState.create(
-            apply_fn=self.model.apply,
+            apply_fn=self.ddgd.apply,
             params=FrozenDict(self.params),
             tx=self.__get_optimizer(),
             key=self.rngs["dropout"],
             last_loss=1000000,
             lr=self.learning_rate,
         )
+
+        @jit
+        def val_step(data, val_rng, params):
+            return self.ddgd.apply(
+                params,
+                data,
+                rng_key=val_rng,
+                method=self.ddgd.compute_val_loss,
+            )
+
+        @jit
+        def __sample_step(rng, t, g):
+            return self.ddgd.apply(
+                self.state.params, rng, t, g, method=self.ddgd.sample_step
+            )
+
+        def __sample(rng, n_samples):
+            return self.ddgd.apply(
+                self.state.params,
+                __sample_step,
+                rng,
+                n_samples,
+                method=self.ddgd.sample,
+            )
+
+        self.val_step = val_step
+        self.__sample = __sample
 
     def __val_epoch(
         self,
@@ -294,11 +278,10 @@ class Trainer:
         for i, x in enumerate(tqdm(self.val_loader)):
             step_rng = jax.random.fold_in(rng, enc(f"val_step_{i}"))
             one_hot_graph = to_one_hot(*x)
-            losses = val_step(
-                ddgd=self.ddgd,
+            losses = self.val_step(
                 data=one_hot_graph,
-                state=self.state,
-                rng=step_rng,
+                params=self.state.params,
+                val_rng=step_rng,
             )
             if self.shuffle_coding_metric:
                 losses = {
@@ -347,9 +330,7 @@ class Trainer:
             state, loss = train_step(
                 g=one_hot_graph,
                 state=self.state,
-                ddgd=self.ddgd,
                 rng=step_key,
-                structure=do_backprop_over_structure,
             )
             self.state = state
             run_losses.append(loss)
@@ -573,20 +554,19 @@ class Trainer:
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )
-                    if epoch_idx % self.plot_every_steps == 0:
+                    if avg_loss < min(val_losses, key=lambda x: x["nll"])["nll"]:
                         # self.plot_preds(
                         #     plot_path=os.path.join(
                         #         self.plot_path, f"{epoch_idx}_preds.png"
                         #     ),
                         #     load_from_disk=False,
                         # )
-                        # self.sample(
-                        #     restore_checkpoint=False,
-                        #     save_to=os.path.join(
-                        #         self.plot_path, f"{epoch_idx}_samples"
-                        #     ),
-                        # )
-                        pass
+                        self.sample(
+                            restore_checkpoint=False,
+                            save_to=os.path.join(
+                                self.plot_path, f"{epoch_idx}_samples"
+                            ),
+                        )
 
         rng, _ = jax.random.split(self.rngs["params"])
         val_loss, val_time = self.__val_epoch(
@@ -696,32 +676,34 @@ class Trainer:
 
         rng_model = jax.random.PRNGKey(random.randint(0, 1000000))
         rng_sample = jax.random.fold_in(rng_model, enc("sample"))
-        model = GetProbabilityFromState(
-            self.state,
-            rng_model,
-            self.transition_model,
-            extra_features=self.use_extra_features,
-        )
-        model_samples = _sample(self.transition_model, model, rng_sample, n)
+
+        model_samples, prior_sample = self.__sample(rng_sample, n)
         data_sample = None
         rnd_i = random.randint(0, len(self.val_loader) - 1)
         for i, x in enumerate(self.val_loader):
             if i == rnd_i:
-                data_sample = to_one_hot(x)[:n]
+                data_sample = to_one_hot(*x)[:n]
                 break
         assert data_sample is not None
-        prior_sample = gd.sample_one_hot(
-            gd.repeat_dense(self.transition_model.limit_dist, n), rng_sample
-        )
-        metrics = self.sampling_metric(model_samples)
-        print(
-            f"Relaxed validity: {metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
-        )
+        # prior_sample = gd.sample_one_hot(
+        #     self.transition_model.limit_dist.repeat(n), rng_sample
+        # )
+        title = "A Title"
+        if self.sampling_metric is not None:
+            metrics = self.sampling_metric(model_samples)
+            print(
+                f"Relaxed validity: {metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
+            )
+            title = f"{metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
         gd.plot(
-            [data_sample, prior_sample, model_samples],  # prior_sample,
+            [
+                data_sample,
+                model_samples,
+                prior_sample,
+            ],  # prior_sample,  # prior_sample,
             shared_position=None,
             location=save_to,
-            title=f"{metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}",
+            title=title,
         )
 
 
