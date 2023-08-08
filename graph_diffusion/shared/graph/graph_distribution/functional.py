@@ -313,7 +313,11 @@ def plot(
             else:
                 position = nx.spring_layout(G)
 
-            color_nodes = numpy.array([cmap_node[i - 1] for i in nodes])
+            color_nodes = (
+                numpy.array([cmap_node[i - 1] for i in nodes])
+                if rows[0].nodes.shape[-1] > 2
+                else numpy.array([cmap_node[i] for i in nodes])
+            )
             color_edges = numpy.array(
                 [cmap_edge[edges_features[i, j]] for (i, j) in G.edges]
             )
