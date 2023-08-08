@@ -254,7 +254,7 @@ class Trainer:
             lr=self.learning_rate,
         )
 
-        # @jit
+        @jit
         def val_step(data, val_rng, params):
             return self.ddgd.apply(
                 params,
