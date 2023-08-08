@@ -54,13 +54,14 @@ class TrainState(train_state.TrainState):
     last_loss: SFloat
 
 
-@jit
+# @jit
 def single_train_step(
     *,
     g: gd.OneHotGraph,
     state: TrainState,
     rng: Key,
 ):
+    # print(f"[red]{g.nodes.device()}[/red]")
     train_rng = jax.random.fold_in(rng, enc("train"))
     dropout_rng = jax.random.fold_in(rng, enc("dropout"))
 
@@ -97,11 +98,17 @@ def parallel_train_step(
     return single_train_step(g=graph, state=state, rng=rng)
 
 
+# def to_one_hot(nodes, edges, _, nodes_counts, device=jax.devices("cpu")[0]):
+#     return gd.OneHotGraph.create_from_counts(
+#         nodes=jax.device_put(nnp.array(nodes), device=device),
+#         edges=jax.device_put(nnp.array(edges), device=device),
+#         nodes_counts=jax.device_put(nnp.array(nodes_counts), device=device),
+#     )
 def to_one_hot(nodes, edges, _, nodes_counts, device=jax.devices("cpu")[0]):
     return gd.OneHotGraph.create_from_counts(
-        nodes=jax.device_put(nnp.array(nodes), device=device),
-        edges=jax.device_put(nnp.array(edges), device=device),
-        nodes_counts=jax.device_put(nnp.array(nodes_counts), device=device),
+        nodes=np.array(nodes),
+        edges=np.array(edges),
+        nodes_counts=np.array(nodes_counts),
     )
 
 
@@ -543,7 +550,7 @@ class Trainer:
         )
         self.sample(
             restore_checkpoint=False,
-            save_to=os.path.join(self.plot_path, f"raw_sample.png"),
+            save_to="wandb",  # os.path.join(self.plot_path, f"raw_sample.png"),
         )
         val_losses.append(val_loss)
         print(
@@ -619,9 +626,7 @@ class Trainer:
                         # self.sample(restore_checkpoint=False, save_to="wandb")
                         self.sample(
                             restore_checkpoint=False,
-                            save_to=os.path.join(
-                                self.plot_path, f"{epoch_idx}_sample.png"
-                            ),
+                            save_to="wandb",
                         )
 
         rng, _ = jax.random.split(self.rngs["params"])
