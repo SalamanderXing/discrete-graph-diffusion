@@ -117,8 +117,20 @@ def convert_to_shuffle_conding_metric(
 
 def shard_graph(g: gd.GraphDistribution):
     num_devices = jax.device_count()
+
+    # Function to trim data such that its length becomes divisible by num_devices
+    def trim_to_divisible(x):
+        remainder = len(x) % num_devices
+        if remainder != 0:
+            return x[:-remainder]
+        return x
+
     data = (g.nodes, g.edges, g.nodes_mask, g.edges_mask)
-    return jax.tree_map(lambda x: x.reshape((num_devices, -1) + x.shape[1:]), data)
+    trimmed_data = jax.tree_map(trim_to_divisible, data)
+
+    return jax.tree_map(
+        lambda x: x.reshape((num_devices, -1) + x.shape[1:]), trimmed_data
+    )
 
 
 @dataclass
