@@ -354,7 +354,7 @@ def load_data(
         with h5py.File(f_name, "r") as f:
             cache = dict()
             for k in f.keys():
-                cache[k] = f[k][:]
+                cache[k] = np.asarray(f[k])
         cache = cache | dict(
             train_batch_size=train_batch_size,
             test_batch_size=test_batch_size,
