@@ -17,7 +17,7 @@ import wandb
 from typing import Iterable
 from dataclasses import dataclass
 import enum
-
+from flax import jax_utils
 from .metrics import SamplingMolecularMetrics
 from rich import print as print
 from tqdm import tqdm
@@ -27,6 +27,7 @@ from orbax import checkpoint
 from einops import rearrange, reduce, repeat
 import hashlib
 from beartype import beartype
+from jax import pmap
 from .extra_features.extra_features import compute as compute_extra_features
 from ...shared.graph import graph_distribution as gd
 from ...models.ddgd import DDGD, SimpleDDGD, StructureFirstDDGD
@@ -53,7 +54,7 @@ class TrainState(train_state.TrainState):
 
 
 @jit
-def train_step(
+def single_train_step(
     *,
     g: gd.OneHotGraph,
     state: TrainState,
@@ -77,10 +78,8 @@ def train_step(
     return grads, loss
 
 
-from jax import pmap
-
-
-def __unshard_train_step(
+@pmap
+def parallel_train_step(
     sharded_nodes,
     sharded_edges,
     sharded_nodes_mask,
@@ -94,39 +93,7 @@ def __unshard_train_step(
         nodes_mask=sharded_nodes_mask,
         edges_mask=sharded_edges_mask,
     )
-    return train_step(g=graph, state=state, rng=rng)
-
-
-def parallel_train_step(g: gd.OneHotGraph, state: TrainState, rng: Key):
-    (
-        sharded_nodes,
-        sharded_edges,
-        sharded_nodes_mask,
-        sharded_edges_mask,
-    ) = shard_graph(g)
-
-    @pmap
-    def low_train_step(
-        sharded_nodes, sharded_edges, sharded_nodes_mask, sharded_edges_mask
-    ):
-        return __unshard_train_step(
-            sharded_nodes,
-            sharded_edges,
-            sharded_nodes_mask,
-            sharded_edges_mask,
-            state,
-            rng,
-        )
-
-    result = low_train_step(
-        sharded_nodes,
-        sharded_edges,
-        sharded_nodes_mask,
-        sharded_edges_mask,
-    )
-    grads, loss = jax.tree_map(lambda x: x.mean(0), result)
-    state = state.apply_gradients(grads=grads)
-    return state, loss
+    return single_train_step(g=graph, state=state, rng=rng)
 
 
 def to_one_hot(nodes, edges, _, nodes_counts):
@@ -283,8 +250,8 @@ class Trainer:
                 method=self.ddgd.compute_val_loss,
             )
 
-        @jit
-        def __unshard_val_step(
+        @pmap
+        def parallel_val_step(
             sharded_nodes,
             sharded_edges,
             sharded_nodes_mask,
@@ -299,42 +266,6 @@ class Trainer:
                 edges_mask=sharded_edges_mask,
             )
             return val_step(graph, val_rng, params)
-
-        # parallel_val_step = pmap(__parallel_val_step, static_broadcasted_argnums=)
-
-        def parallel_val_step(
-            data: gd.OneHotGraph,
-            val_rng: Key,
-            params: FrozenDict[str, Array],
-        ):
-            (
-                sharded_nodes,
-                sharded_edges,
-                sharded_nodes_mask,
-                sharded_edges_mask,
-            ) = shard_graph(data)
-
-            @pmap
-            def low_val_step(
-                sharded_nodes, sharded_edges, sharded_nodes_mask, sharded_edges_mask
-            ):
-                return __unshard_val_step(
-                    sharded_nodes,
-                    sharded_edges,
-                    sharded_nodes_mask,
-                    sharded_edges_mask,
-                    val_rng,
-                    params,
-                )
-
-            result = low_val_step(
-                sharded_nodes,
-                sharded_edges,
-                sharded_nodes_mask,
-                sharded_edges_mask,
-            )
-            result_flattened = jax.tree_map(lambda x: x.reshape(-1), result)
-            return result_flattened
 
         @jit
         def __sample_step(rng, t, g):
@@ -354,6 +285,7 @@ class Trainer:
         # self.val_step = val_step
         self.parallel_val_step = parallel_val_step
         self.__sample = __sample
+        self.n_devices = jax.local_device_count()
 
     def __val_epoch(
         self,
@@ -365,10 +297,22 @@ class Trainer:
         for i, x in enumerate(tqdm(self.val_loader)):
             step_rng = jax.random.fold_in(rng, enc(f"val_step_{i}"))
             one_hot_graph = to_one_hot(*x)
-            losses = self.parallel_val_step(
-                data=one_hot_graph,
-                params=self.state.params,
-                val_rng=step_rng,
+            (
+                sharded_nodes,
+                sharded_edges,
+                sharded_nodes_mask,
+                sharded_edges_mask,
+            ) = shard_graph(one_hot_graph)
+            losses = jax.tree_map(
+                lambda x: x.reshape(-1),
+                self.parallel_val_step(
+                    sharded_nodes,
+                    sharded_edges,
+                    sharded_nodes_mask,
+                    sharded_edges_mask,
+                    params=jax_utils.replicate(self.state.params),
+                    val_rng=jax.random.split(step_rng, self.n_devices),
+                ),
             )
             if self.shuffle_coding_metric:
                 losses = {
@@ -411,15 +355,22 @@ class Trainer:
                 if self.diffusion_type == self.__class__.DiffusionType.structure_first
                 else False
             )
-            # print(
-            #     f"[pink] do_backprop_over_structure={do_backprop_over_structure} [/pink]"
-            # )
-            state, loss = parallel_train_step(
-                g=one_hot_graph,
-                state=self.state,
-                rng=step_key,
+            (
+                sharded_nodes,
+                sharded_edges,
+                sharded_nodes_mask,
+                sharded_edges_mask,
+            ) = shard_graph(one_hot_graph)
+            result = parallel_train_step(
+                sharded_nodes,
+                sharded_edges,
+                sharded_nodes_mask,
+                sharded_edges_mask,
+                state=jax_utils.replicate(self.state),
+                rng=jax.random.split(step_key, self.n_devices),
             )
-            self.state = state
+            grads, loss = jax.tree_map(lambda x: x.mean(0), result)
+            self.state = self.state.apply_gradients(grads=grads)
             run_losses.append(loss)
         avg_loss = np.mean(np.array(run_losses)).tolist()
         t1 = time()
