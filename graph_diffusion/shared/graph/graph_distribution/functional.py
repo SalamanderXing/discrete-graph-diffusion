@@ -241,7 +241,7 @@ def plot(
         f"{location}.png"
         if location is not None and not location.endswith(".png")
         else location
-    )
+    ) if location != 'wandb' else 'wandb'
     original_len = len(rows[0])
     skip = (len(rows[0]) // 15) if len(rows[0]) > 15 else 1
     rows_skips = [(row[::skip], row[np.array([-1])]) for row in rows]
