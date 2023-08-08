@@ -332,8 +332,8 @@ def load_data(
             import jax
 
             # take only the structure
-            nodes = jax.nn.one_hot(nodes[:, :, 0], 2)
-            edges = jax.nn.one_hot(edges[:, :, :, 0], 2)
+            nodes = np.asarray(jax.nn.one_hot(nodes[:, :, 0], 2))
+            edges = np.asarray(jax.nn.one_hot(edges[:, :, :, 0], 2))
 
         cache = dict(
             train_indices=train_indices,
