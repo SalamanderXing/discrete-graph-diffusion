@@ -339,13 +339,22 @@ def load_data(
             nodes_counts=num_nodes_list,
             node_masks=node_masks,
         )
-        with open(f_name, "wb") as f:
-            pickle.dump(cache, f)
+        # with open(f_name, "wb") as f:
+        #     pickle.dump(cache, f)
+        # saves it as a h5 file
+        with h5py.File(f_name, "w") as f:
+            for k, v in cache.items():
+                f.create_dataset(k, data=v)
         print(f"Saved dataset to {f_name}")
     else:
         print(f"Loading dataset from {f_name}...")
-        with open(f_name, "rb") as f:
-            cache = pickle.load(f)
+        # with open(f_name, "rb") as f:
+        #     cache = pickle.load(f)
+
+        with h5py.File(f_name, "r") as f:
+            cache = dict()
+            for k in f.keys():
+                cache[k] = f[k][:]
         cache = cache | dict(
             train_batch_size=train_batch_size,
             test_batch_size=test_batch_size,
