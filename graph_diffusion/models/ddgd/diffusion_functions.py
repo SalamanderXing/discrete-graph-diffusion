@@ -255,7 +255,8 @@ def compute_train_loss(
     t, g_t, g_pred = predict_from_random_timesteps(
         get_probability, target, transition_model, rng_sample
     )
-    loss_type = "elbo_ce"
+    #loss_type = "elbo_ce"
+    loss_type = 'elbo'
     if "ce" in loss_type:
         ce_term = gd.softmax_cross_entropy(g_pred, target).mean()
     if "elbo" in loss_type or loss_type == "ce_minimal":
