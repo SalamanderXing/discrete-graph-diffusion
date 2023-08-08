@@ -73,34 +73,60 @@ def train_step(
 
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
+    # state = state.apply_gradients(grads=grads)
+    return grads, loss
+
+
+from jax import pmap
+
+
+def __unshard_train_step(
+    sharded_nodes,
+    sharded_edges,
+    sharded_nodes_mask,
+    sharded_edges_mask,
+    state: TrainState,
+    rng: Key,
+):
+    graph = gd.OneHotGraph.create(
+        nodes=sharded_nodes,
+        edges=sharded_edges,
+        nodes_mask=sharded_nodes_mask,
+        edges_mask=sharded_edges_mask,
+    )
+    return train_step(g=graph, state=state, rng=rng)
+
+
+def parallel_train_step(g: gd.OneHotGraph, state: TrainState, rng: Key):
+    (
+        sharded_nodes,
+        sharded_edges,
+        sharded_nodes_mask,
+        sharded_edges_mask,
+    ) = shard_graph(g)
+
+    @pmap
+    def low_train_step(
+        sharded_nodes, sharded_edges, sharded_nodes_mask, sharded_edges_mask
+    ):
+        return __unshard_train_step(
+            sharded_nodes,
+            sharded_edges,
+            sharded_nodes_mask,
+            sharded_edges_mask,
+            state,
+            rng,
+        )
+
+    result = low_train_step(
+        sharded_nodes,
+        sharded_edges,
+        sharded_nodes_mask,
+        sharded_edges_mask,
+    )
+    grads, loss = jax.tree_map(lambda x: x.mean(0), result)
     state = state.apply_gradients(grads=grads)
     return state, loss
-
-
-# def val_step(
-#     *,
-#     ddgd,
-#     data: gd.OneHotGraph,
-#     state: TrainState,
-#     rng: Key,
-# ) -> dict[str, Float[Array, "batch_size"]]:
-#     val_rng = jax.random.fold_in(rng, enc("val"))
-#
-#     # val_state = TrainState.create(
-#     #     apply_fn=ddgd.apply,
-#     #     params=FrozenDict(state.params),
-#     #     key=jax.random.PRNGKey(0),
-#     #     last_loss=1000000,
-#     #     lr=0.1,
-#     # )
-#     # @jit
-#     # def test_run():
-#     # apply_fn = ddgd.apply(
-#     #
-#     # )
-#
-#
-#     return alla
 
 
 def to_one_hot(nodes, edges, _, nodes_counts):
@@ -120,6 +146,12 @@ def convert_to_shuffle_conding_metric(
     # converts val in log2
     uba = val / (edges_count * np.log(2))
     return uba
+
+
+def shard_graph(g: gd.GraphDistribution):
+    num_devices = jax.device_count()
+    data = (g.nodes, g.edges, g.nodes_mask, g.edges_mask)
+    return jax.tree_map(lambda x: x.reshape((num_devices, -1) + x.shape[1:]), data)
 
 
 @dataclass
@@ -161,6 +193,7 @@ class Trainer:
     use_extra_features: bool = False
     shuffle_coding_metric: bool = False
     n_layers: int = 5
+    patience: int = 10
 
     def __post_init__(
         self,
@@ -251,6 +284,59 @@ class Trainer:
             )
 
         @jit
+        def __unshard_val_step(
+            sharded_nodes,
+            sharded_edges,
+            sharded_nodes_mask,
+            sharded_edges_mask,
+            val_rng,
+            params,
+        ):
+            graph = gd.OneHotGraph.create(
+                nodes=sharded_nodes,
+                edges=sharded_edges,
+                nodes_mask=sharded_nodes_mask,
+                edges_mask=sharded_edges_mask,
+            )
+            return val_step(graph, val_rng, params)
+
+        # parallel_val_step = pmap(__parallel_val_step, static_broadcasted_argnums=)
+
+        def parallel_val_step(
+            data: gd.OneHotGraph,
+            val_rng: Key,
+            params: FrozenDict[str, Array],
+        ):
+            (
+                sharded_nodes,
+                sharded_edges,
+                sharded_nodes_mask,
+                sharded_edges_mask,
+            ) = shard_graph(data)
+
+            @pmap
+            def low_val_step(
+                sharded_nodes, sharded_edges, sharded_nodes_mask, sharded_edges_mask
+            ):
+                return __unshard_val_step(
+                    sharded_nodes,
+                    sharded_edges,
+                    sharded_nodes_mask,
+                    sharded_edges_mask,
+                    val_rng,
+                    params,
+                )
+
+            result = low_val_step(
+                sharded_nodes,
+                sharded_edges,
+                sharded_nodes_mask,
+                sharded_edges_mask,
+            )
+            result_flattened = jax.tree_map(lambda x: x.reshape(-1), result)
+            return result_flattened
+
+        @jit
         def __sample_step(rng, t, g):
             return self.ddgd.apply(
                 self.state.params, rng, t, g, method=self.ddgd.sample_step
@@ -265,7 +351,8 @@ class Trainer:
                 method=self.ddgd.sample,
             )
 
-        self.val_step = val_step
+        # self.val_step = val_step
+        self.parallel_val_step = parallel_val_step
         self.__sample = __sample
 
     def __val_epoch(
@@ -278,7 +365,7 @@ class Trainer:
         for i, x in enumerate(tqdm(self.val_loader)):
             step_rng = jax.random.fold_in(rng, enc(f"val_step_{i}"))
             one_hot_graph = to_one_hot(*x)
-            losses = self.val_step(
+            losses = self.parallel_val_step(
                 data=one_hot_graph,
                 params=self.state.params,
                 val_rng=step_rng,
@@ -327,7 +414,7 @@ class Trainer:
             # print(
             #     f"[pink] do_backprop_over_structure={do_backprop_over_structure} [/pink]"
             # )
-            state, loss = train_step(
+            state, loss = parallel_train_step(
                 g=one_hot_graph,
                 state=self.state,
                 rng=step_key,
@@ -481,8 +568,7 @@ class Trainer:
 
         val_losses = []
         train_losses = []
-        patience = 5
-        current_patience = patience
+        current_patience = self.patience
         stopping_criterion = -5
         rng, _ = jax.random.split(self.rngs["params"])
         rng, rng_this_epoch = jax.random.split(rng)  # TODO use that
@@ -535,7 +621,7 @@ class Trainer:
                             self.state = self.state.replace(
                                 lr=new_lr, tx=self.__get_optimizer(), last_loss=avg_loss
                             )
-                            current_patience = patience
+                            current_patience = self.patience
                     else:
                         current_patience -= 1
                         if current_patience <= stopping_criterion:
@@ -546,7 +632,7 @@ class Trainer:
 
                 print(f"{current_patience=}")
                 if avg_loss < self.state.last_loss:
-                    current_patience = patience
+                    current_patience = self.patience
                     self.state = self.state.replace(last_loss=avg_loss)
 
                     print(f"[yellow] Saving checkpoint[/yellow]")
