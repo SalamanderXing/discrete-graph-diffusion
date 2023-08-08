@@ -92,7 +92,11 @@ class TUDataset:
         #     )
 
         nodes_dist = compute_distribution(jnp.array(train_masks), margin=5)
-        nodes_prior = jnp.array(train_nodes.mean(axis=(0, 1)).squeeze())
+        nodes_prior = (
+            jnp.array(train_nodes.mean(axis=(0, 1)).squeeze())
+            if not train_nodes.shape[-1] == 1
+            else jnp.ones(1)
+        )
         edges_prior = jnp.array(train_edges.mean(axis=(0, 1, 2)).squeeze())
         train_loader = (
             Dataset.zip(
@@ -221,13 +225,14 @@ def load_data(
 ):
     # print("Cache not found, creating new one...")
     f_name = os.path.join(save_path, f"dataset.pkl")
+    use_attrs = False if "ZINC" in name else True
     if not os.path.exists(f_name):
         print("Processing dataset...")
         dataset = PyTUDataset(
             root=save_path,
             name=name,  # "PTC_MR",  # "MUTAG"
-            use_node_attr=True,
-            use_edge_attr=True,
+            use_node_attr=use_attrs,
+            use_edge_attr=use_attrs,
         )
         items = len(dataset)
         # Get the maximum number of nodes (atoms) in the dataset
@@ -239,10 +244,10 @@ def load_data(
 
         print(f"[red]Max number of nodes:[/red] {max_n}")
         # Get unique atom types
-        num_atom_features = dataset[0].x.shape[1]  # type: ignore
+        num_atom_features = dataset[0].x.shape[1] if use_attrs else 1
 
         num_edge_features = (
-            dataset.num_edge_features + 1
+            (dataset.num_edge_features + 1) if use_attrs else 2
         )  # one for the absence of an edge
 
         nodes = np.zeros((items, max_n, num_atom_features))
@@ -250,7 +255,7 @@ def load_data(
         print(f"[orange]Nodes shape:[/orange] {nodes.shape}")
         print(f"[orange]Edges shape:[/orange] {edges.shape}")
 
-        node_masks = np.zeros((items, max_n))
+        nodes_mask = np.zeros((items, max_n))
         num_nodes_list = np.zeros(items, int)
         edges_counts = np.zeros(items, int)
         nonfiltered_length = 0
@@ -261,26 +266,31 @@ def load_data(
             tot_edges = set()
             num_nodes = data.num_nodes
             # Fill in the node features as one-hot encoded atomic numbers
-            atom_one_hot = data.x.numpy()
-            nodes[idx, :num_nodes, :] = atom_one_hot
-
+            atom_one_hot = data.x.numpy()[:, :num_atom_features]
+            nodes[idx, :num_nodes, :] = atom_one_hot if use_attrs else 1
             num_nodes_list[idx] = num_nodes
             # Fill in the edge features
             edge_indices = data.edge_index.numpy()
             for j, (src, dst) in enumerate(edge_indices.T):
                 assert src < num_nodes and dst < num_nodes, ipdb.set_trace()
-                edges[idx, src, dst, :] = [0] + data.edge_attr[j].tolist()
-                edges[idx, dst, src, :] = [0] + data.edge_attr[j].tolist()
+                if src == dst:
+                    continue
+                if use_attrs:
+                    edges[idx, src, dst, :] = [0] + data.edge_attr[j].tolist()
+                    edges[idx, dst, src, :] = [0] + data.edge_attr[j].tolist()
+                else:
+                    edges[idx, src, dst, 1] = 1
+                    edges[idx, dst, src, 1] = 1
                 tot_edges.add((src.item(), dst.item()))
                 tot_edges.add((dst.item(), src.item()))
 
             # Fill in the node_masks
-            node_masks[idx, :num_nodes] = 1
+            nodes_mask[idx, :num_nodes] = 1
             edges_counts[idx] = len(tot_edges)
 
         nodes = nodes[:nonfiltered_length]
         edges = edges[:nonfiltered_length]
-        node_masks = node_masks[:nonfiltered_length]
+        nodes_mask = nodes_mask[:nonfiltered_length]
         num_nodes_list = num_nodes_list[:nonfiltered_length]
         print(
             f"[red]Filtered {1 - nodes.shape[0]/len(dataset):.4f}% graphs due to max node count[/red]"
@@ -293,11 +303,6 @@ def load_data(
             edges = np.argmax(edges, axis=-1)
 
         num_nodes_list = np.array(num_nodes_list)
-
-        nodes = np.array(nodes)
-        edges = np.array(edges)
-        node_masks = np.array(node_masks)
-
         print("Dataset turned into dense numpy arrays")
         num_edge_features = edges.shape[-1]
 
@@ -328,12 +333,25 @@ def load_data(
             train_indices = shuffling_indices[:train_size]
             test_indices = shuffling_indices[train_size:]
 
-        if name == "ZINC_full":
-            import jax
-
-            # take only the structure
-            nodes = np.asarray(jax.nn.one_hot(nodes[:, :, 0], 2))
-            edges = np.asarray(jax.nn.one_hot(edges[:, :, :, 0], 2))
+        # if name == "ZINC_full":
+        #     import jax
+        #
+        #     # take only the structure
+        #     #nodes = nodes[:, :, 0][..., None]
+        #     # nodes = jax.nn.one_hot(nodes[:, :, 0], 2)
+        #     # edges = np.asarray(jax.nn.one_hot(edges[:, :, :, 0], 2))
+        #     yes = np.array([1, 0])
+        #     no = np.array([0, 1])
+        #     nodes = np.where(
+        #         nodes_mask[..., None], no[None, None], yes[None, None]
+        #     ).astype(float)
+        #     new_edges = np.where(
+        #         (self.edges_mask & (self.edges[..., 0] < 0.5))[..., None],
+        #         no[None, None, None],
+        #         yes[None, None, None],
+        #     ).astype(float)
+        #
+        # ipdb.set_trace()
 
         cache = dict(
             train_indices=train_indices,
@@ -344,7 +362,7 @@ def load_data(
             test_batch_size=test_batch_size,
             edges_counts=np.asarray(edges_counts),
             nodes_counts=num_nodes_list,
-            node_masks=node_masks,
+            node_masks=nodes_mask,
         )
         # with open(f_name, "wb") as f:
         #     pickle.dump(cache, f)
@@ -354,7 +372,7 @@ def load_data(
                 f.create_dataset(k, data=v)
         print(f"Saved dataset to {f_name}")
     else:
-        print(f"Loading dataset from {f_name}...")
+        print(f"Loading dataset from {f_name}")
         # with open(f_name, "rb") as f:
         #     cache = pickle.load(f)
 

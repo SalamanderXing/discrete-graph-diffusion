@@ -267,7 +267,7 @@ def plot(
         cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1] - 1))
         cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1] - 1))
         cmap_edge = numpy.concatenate([numpy.zeros((1, 4)), cmap_edge], axis=0)
-        cmap_node = numpy.concatenate([numpy.zeros((1, 4)), cmap_node], axis=0)
+        # cmap_node = numpy.concatenate([numpy.zeros((1, 4)), cmap_node], axis=0)
     node_size = 10.0
     positions = [None] * len(rows[0])
 
@@ -313,7 +313,7 @@ def plot(
             else:
                 position = nx.spring_layout(G)
 
-            color_nodes = numpy.array([cmap_node[i] for i in nodes])
+            color_nodes = numpy.array([cmap_node[i - 1] for i in nodes])
             color_edges = numpy.array(
                 [cmap_edge[edges_features[i, j]] for (i, j) in G.edges]
             )
@@ -337,7 +337,6 @@ def plot(
     if location is None:
         plt.show()
     elif location == "wandb":
-
         wandb.log({"prediction": wandb.Image(plt)})
     else:
         plt.savefig(location)
