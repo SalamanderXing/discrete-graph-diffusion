@@ -265,9 +265,11 @@ def plot(
         cmap_edge = numpy.concatenate([numpy.zeros((1, 4)), cmap_edge], axis=0)
     else:
         cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1] - 1))
-        cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1] - 1))
+        # cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1] - 1))
         cmap_edge = numpy.concatenate([numpy.zeros((1, 4)), cmap_edge], axis=0)
         # cmap_node = numpy.concatenate([numpy.zeros((1, 4)), cmap_node], axis=0)
+        # node will be black
+        cmap_node = np.array([[0, 0, 0, 1]])
     node_size = 10.0
     positions = [None] * len(rows[0])
 
