@@ -134,11 +134,8 @@ def shard_graph(g: gd.GraphDistribution):
         return x
 
     data = (g.nodes, g.edges, g.nodes_mask, g.edges_mask)
-    trimmed_data = jax.tree_map(trim_to_divisible, data)
-
-    return jax.tree_map(
-        lambda x: x.reshape((num_devices, -1) + x.shape[1:]), trimmed_data
-    )
+    trimmed_data = tuple(trim_to_divisible(x) for x in data)
+    return tuple(x.reshape((num_devices, -1) + x.shape[1:]) for x in trimmed_data)
 
 
 @dataclass
@@ -617,13 +614,6 @@ class Trainer:
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )
                     if avg_loss < min(val_losses, key=lambda x: x["nll"])["nll"]:
-                        # self.plot_preds(
-                        #     plot_path=os.path.join(
-                        #         self.plot_path, f"{epoch_idx}_preds.png"
-                        #     ),
-                        #     load_from_disk=False,
-                        # )
-                        # self.sample(restore_checkpoint=False, save_to="wandb")
                         self.sample(
                             restore_checkpoint=False,
                             save_to="wandb",
