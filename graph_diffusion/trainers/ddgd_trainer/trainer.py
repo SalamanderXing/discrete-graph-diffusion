@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import flax.linen as nn
 from jaxtyping import Float, Int, Bool
 from time import time
+import numpy as nnp
 from jaxtyping import jaxtyped
 from flax.struct import dataclass as flax_dataclass
 from functools import partial
@@ -96,11 +97,11 @@ def parallel_train_step(
     return single_train_step(g=graph, state=state, rng=rng)
 
 
-def to_one_hot(nodes, edges, _, nodes_counts):
+def to_one_hot(nodes, edges, _, nodes_counts, device=jax.devices("cpu")[0]):
     return gd.OneHotGraph.create_from_counts(
-        nodes=np.asarray(nodes),
-        edges=np.asarray(edges),
-        nodes_counts=np.asarray(nodes_counts),
+        nodes=jax.device_put(nnp.array(nodes), device=device),
+        edges=jax.device_put(nnp.array(edges), device=device),
+        nodes_counts=jax.device_put(nnp.array(nodes_counts), device=device),
     )
 
 
@@ -253,7 +254,7 @@ class Trainer:
             lr=self.learning_rate,
         )
 
-        @jit
+        # @jit
         def val_step(data, val_rng, params):
             return self.ddgd.apply(
                 params,
@@ -298,6 +299,7 @@ class Trainer:
         self.parallel_val_step = parallel_val_step
         self.__sample = __sample
         self.n_devices = jax.local_device_count()
+        self.cpu_device = jax.devices("cpu")[0]
 
     def __val_epoch(
         self,
@@ -539,9 +541,13 @@ class Trainer:
         val_loss, val_time = self.__val_epoch(
             rng=rng_this_epoch,
         )
+        self.sample(
+            restore_checkpoint=False,
+            save_to=os.path.join(self.plot_path, f"raw_sample.png"),
+        )
         val_losses.append(val_loss)
         print(
-            f"""[green underline]Validation[/green underline]
+            f"""[green underline]Validation (prior training)[/green underline]
             current={prettify(val_loss)}
             best={prettify(min(val_losses, key=lambda x: x['nll']))}
             time={val_time:.4f}"""
@@ -610,7 +616,13 @@ class Trainer:
                         #     ),
                         #     load_from_disk=False,
                         # )
-                        self.sample(restore_checkpoint=False, save_to="wandb")
+                        # self.sample(restore_checkpoint=False, save_to="wandb")
+                        self.sample(
+                            restore_checkpoint=False,
+                            save_to=os.path.join(
+                                self.plot_path, f"{epoch_idx}_sample.png"
+                            ),
+                        )
 
         rng, _ = jax.random.split(self.rngs["params"])
         val_loss, val_time = self.__val_epoch(
