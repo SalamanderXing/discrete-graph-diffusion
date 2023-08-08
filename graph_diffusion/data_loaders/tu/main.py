@@ -35,8 +35,8 @@ class TUDataset:
         *,
         train_indices: np.ndarray,
         test_indices: np.ndarray,
-        nodes: np.ndarray,
-        edges: np.ndarray,
+        nodes: np.ndarray | Array,
+        edges: np.ndarray | Array,
         nodes_counts: np.ndarray,
         train_batch_size: int,
         test_batch_size: int,
@@ -327,6 +327,13 @@ def load_data(
             train_size = int(train_size * len(nodes))
             train_indices = shuffling_indices[:train_size]
             test_indices = shuffling_indices[train_size:]
+
+        if name == "ZINC_full":
+            import jax
+
+            # take only the structure
+            nodes = jax.nn.one_hot(nodes[:, :, 0], 2)
+            edges = jax.nn.one_hot(edges[:, :, :, 0], 2)
 
         cache = dict(
             train_indices=train_indices,
