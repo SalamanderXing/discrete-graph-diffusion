@@ -7,7 +7,7 @@ from rich import print
 import ipdb
 from dataclasses import dataclass
 import numpy as np
-from scipy.signal import savgol_filter
+from scipy.signal import filtfilt, savgol_filter
 from jax import numpy as jnp
 from jaxtyping import Int, Float
 from tensorflow.data import Dataset
@@ -309,7 +309,7 @@ def load_data(
                     .split("\n")
                     if el != ""
                 ]
-            )
+            )[filter_mask]
             test_indices = np.array(
                 [
                     int(el)
@@ -318,7 +318,7 @@ def load_data(
                     .split("\n")
                     if el != ""
                 ]
-            )
+            )[filter_mask]
         else:
             shuffling_indices = np.random.permutation(len(nodes))
             train_size = int(train_size * len(nodes))
