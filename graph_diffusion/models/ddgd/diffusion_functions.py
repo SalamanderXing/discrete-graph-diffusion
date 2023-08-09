@@ -308,7 +308,7 @@ def compute_val_loss(
         g=target,
         transition_model=transition_model,
         p=p,
-    ).mean()
+    )
     tot_loss = -log_pn + kl_prior + loss_all_t - reconstruction_logp
     return {
         "log_pn": log_pn,
