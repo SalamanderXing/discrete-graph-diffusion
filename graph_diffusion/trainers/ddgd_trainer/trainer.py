@@ -397,7 +397,7 @@ class Trainer:
         avg_loss = np.mean(np.array(run_losses)).tolist()
         t1 = time()
         tot_time = t1 - t0
-        return avg_loss, tot_time
+        return avg_loss, tot_time  # type: ignore
 
     def plot_preds(
         self,
@@ -586,10 +586,10 @@ class Trainer:
                 if val_loss["nll"] < min_val_loss["nll"]:
                     print(f"[yellow] Saving checkpoint[/yellow]")
                     self.checkpoint_manager.save(epoch_idx, self.state)
-                    self.sample(
-                        restore_checkpoint=False,
-                        save_to="wandb",
-                    )
+                    # self.sample(
+                    #     restore_checkpoint=False,
+                    #     save_to="wandb",
+                    # )
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )

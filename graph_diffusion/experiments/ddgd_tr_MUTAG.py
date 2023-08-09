@@ -42,13 +42,13 @@ from jax import random
 from rich import print
 
 
-batch_size = 32
+batch_size = 85
 
 dataset = load_data(
     name="MUTAG",
-    seed=32,
     save_path=mate.data_dir,
-    batch_size=batch_size,
+    train_batch_size=batch_size,
+    test_batch_size=2 * batch_size,
     one_hot=True,
     filter_graphs_by_max_node_count=None,
 )
@@ -105,7 +105,7 @@ trainer = Trainer(
     bits_per_edge=False,
     diffusion_steps=diffusion_steps,
     noise_schedule_type="cosine",
-    learning_rate=0.0002,
+    learning_rate=0.00002,
     log_every_steps=4,
     max_num_nodes=dataset.n,
     num_node_features=dataset.max_node_feature,
