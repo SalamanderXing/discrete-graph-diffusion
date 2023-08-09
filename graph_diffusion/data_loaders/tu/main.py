@@ -359,9 +359,15 @@ def load_data(
         # with open(f_name, "wb") as f:
         #     pickle.dump(cache, f)
         # saves it as a h5 file
+        # with h5py.File(f_name, "w") as f:
+        #     for k, v in cache.items():
+        #         f.create_dataset(k, data=v)
+
         with h5py.File(f_name, "w") as f:
             for k, v in cache.items():
-                f.create_dataset(k, data=v)
+                f.create_dataset(
+                    k, data=v, compression="gzip", compression_opts=9, chunks=True
+                )
         print(f"Saved dataset to {f_name}")
     else:
         print(f"Loading dataset from {f_name}")
