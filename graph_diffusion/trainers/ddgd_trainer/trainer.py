@@ -323,7 +323,6 @@ class Trainer:
                 sharded_nodes_mask,
                 sharded_edges_mask,
             ) = shard_graph(one_hot_graph)
-            print(f"{one_hot_graph.edges.argmax(-1).sum((1, 2))[:10]=}")
             shareded_losses = self.parallel_val_step(
                 sharded_nodes,
                 sharded_edges,
