@@ -114,25 +114,20 @@ class TUDataset:
             )
             .shuffle(1000)
             .batch(train_batch_size)
-            .prefetch(100)
         )
-        test_loader = (
-            Dataset.zip(
-                tuple(
-                    map(
-                        Dataset.from_tensor_slices,
-                        (
-                            test_nodes,
-                            test_edges,
-                            test_edges_counts,
-                            test_nodes_counts,
-                        ),
-                    )
+        test_loader = Dataset.zip(
+            tuple(
+                map(
+                    Dataset.from_tensor_slices,
+                    (
+                        test_nodes,
+                        test_edges,
+                        test_edges_counts,
+                        test_nodes_counts,
+                    ),
                 )
             )
-            .batch(test_batch_size)
-            .prefetch(100)
-        )
+        ).batch(test_batch_size)
         return TUDataset(
             train_loader=train_loader,
             test_loader=test_loader,
@@ -214,17 +209,13 @@ def load_data(
     *,
     save_path: str,
     train_size: float = 0.8,
-    seed,
     train_batch_size: int,
     test_batch_size: int,
     name: str = "PTC_MR",
     filter_graphs_by_max_node_count: int | None = None,
-    verbose: bool = True,
-    use_cache: bool = False,
     one_hot: bool = False,
 ):
-    # print("Cache not found, creating new one...")
-    f_name = os.path.join(save_path, f"dataset.pkl")
+    f_name = os.path.join(save_path, f"{name}_{filter_graphs_by_max_node_count}.h5")
     use_attrs = False if "ZINC" in name else True
     if not os.path.exists(f_name):
         print("Processing dataset...")
@@ -258,11 +249,9 @@ def load_data(
         nodes_mask = np.zeros((items, max_n))
         num_nodes_list = np.zeros(items, int)
         edges_counts = np.zeros(items, int)
-        nonfiltered_length = 0
         for idx, data in enumerate(tqdm(dataset)):  # type: ignore
             if data.num_nodes > max_n:
                 continue
-            nonfiltered_length += 1
             tot_edges = set()
             num_nodes = data.num_nodes
             # Fill in the node features as one-hot encoded atomic numbers
@@ -270,11 +259,12 @@ def load_data(
             nodes[idx, :num_nodes, :] = atom_one_hot if use_attrs else 1
             num_nodes_list[idx] = num_nodes
             # Fill in the edge features
-            edge_indices = data.edge_index.numpy()
-            for j, (src, dst) in enumerate(edge_indices.T):
+            edge_indices = data.edge_index.numpy().T
+            edge_indices = np.unique(np.sort(edge_indices, axis=-1), axis=0)
+            for j, (src, dst) in enumerate(edge_indices):
                 assert src < num_nodes and dst < num_nodes, ipdb.set_trace()
-                if src == dst:
-                    continue
+                # if src == dst:
+                #     continue
                 if use_attrs:
                     edges[idx, src, dst, :] = [0] + data.edge_attr[j].tolist()
                     edges[idx, dst, src, :] = [0] + data.edge_attr[j].tolist()
@@ -288,10 +278,12 @@ def load_data(
             nodes_mask[idx, :num_nodes] = 1
             edges_counts[idx] = len(tot_edges)
 
-        nodes = nodes[:nonfiltered_length]
-        edges = edges[:nonfiltered_length]
-        nodes_mask = nodes_mask[:nonfiltered_length]
-        num_nodes_list = num_nodes_list[:nonfiltered_length]
+        filter_mask = edges_counts > 0
+        nodes = nodes[filter_mask]
+        edges = edges[filter_mask]
+        edges_counts = edges_counts[filter_mask]
+        nodes_mask = nodes_mask[filter_mask]
+        num_nodes_list = num_nodes_list[filter_mask]
         print(
             f"[red]Filtered {1 - nodes.shape[0]/len(dataset):.4f}% graphs due to max node count[/red]"
         )
