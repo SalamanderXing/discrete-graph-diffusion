@@ -365,9 +365,14 @@ def load_data(
 
         with h5py.File(f_name, "w") as f:
             for k, v in cache.items():
-                f.create_dataset(
-                    k, data=v, compression="gzip", compression_opts=9, chunks=True
-                )
+                if (
+                    not isinstance(v, int) and not isinstance(v, float) and v.ndim > 0
+                ):  # Not a scalar dataset
+                    f.create_dataset(
+                        k, data=v, compression="gzip", compression_opts=9, chunks=True
+                    )
+                else:
+                    f.create_dataset(k, data=v)
         print(f"Saved dataset to {f_name}")
     else:
         print(f"Loading dataset from {f_name}")
