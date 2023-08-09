@@ -309,7 +309,8 @@ def load_data(
                     .split("\n")
                     if el != ""
                 ]
-            )[filter_mask]
+            )
+            train_indices = train_indices[filter_mask[train_indices]]
             test_indices = np.array(
                 [
                     int(el)
@@ -318,7 +319,8 @@ def load_data(
                     .split("\n")
                     if el != ""
                 ]
-            )[filter_mask]
+            )
+            test_indices = test_indices[filter_mask[test_indices]]
         else:
             shuffling_indices = np.random.permutation(len(nodes))
             train_size = int(train_size * len(nodes))
