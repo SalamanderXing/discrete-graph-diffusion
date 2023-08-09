@@ -359,7 +359,7 @@ class Trainer:
         self,
         *,
         key: Key,
-    ) -> tuple[Float[Array, ""], float]:
+    ) -> tuple[float, float]:
         run_losses = []
         t0 = time()
         print(f"[pink] LR={round(np.array(self.state.lr).tolist(), 7)} [/pink]")
@@ -551,7 +551,7 @@ class Trainer:
             rng=rng_this_epoch,
         )
         min_val_loss = val_loss
-        min_train_loss = np.inf 
+        min_train_loss = np.inf
         print(
             f"""[green underline]Validation (prior training)[/green underline]
             current={prettify(val_loss)}
