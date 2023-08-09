@@ -323,7 +323,9 @@ class Trainer:
                 sharded_nodes_mask,
                 sharded_edges_mask,
             ) = shard_graph(one_hot_graph)
-            shareded_losses = self.parallel_val_step(
+            new_bs = sharded_nodes.shape[0] * sharded_nodes.shape[1]
+            one_hot_graph = one_hot_graph[:new_bs]
+            sharded_losses = self.parallel_val_step(
                 sharded_nodes,
                 sharded_edges,
                 sharded_nodes_mask,
@@ -333,7 +335,7 @@ class Trainer:
             )
             losses = jax.tree_map(
                 lambda x: x.reshape(-1),
-                shareded_losses,
+                sharded_losses,
             )
             if self.shuffle_coding_metric:
                 losses = {
