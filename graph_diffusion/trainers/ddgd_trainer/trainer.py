@@ -359,7 +359,7 @@ class Trainer:
         self,
         *,
         key: Key,
-    ):
+    ) -> tuple[Float[Array, ""], float]:
         run_losses = []
         t0 = time()
         print(f"[pink] LR={round(np.array(self.state.lr).tolist(), 7)} [/pink]")
@@ -539,8 +539,6 @@ class Trainer:
         assert last_epoch is not None
         assert last_epoch <= self.num_epochs, "Already trained for this many epochs."
 
-        val_losses = []
-        train_losses = []
         current_patience = self.patience
         stopping_criterion = -5
         rng, _ = jax.random.split(self.rngs["params"])
@@ -552,11 +550,12 @@ class Trainer:
         val_loss, val_time = self.__val_epoch(
             rng=rng_this_epoch,
         )
-        val_losses.append(val_loss)
+        min_val_loss = val_loss
+        min_train_loss = np.inf 
         print(
             f"""[green underline]Validation (prior training)[/green underline]
             current={prettify(val_loss)}
-            best={prettify(min(val_losses, key=lambda x: x['nll']))}
+            best={prettify(min_val_loss)}
             time={val_time:.4f}"""
         )
         eval_every = 4
@@ -567,67 +566,41 @@ class Trainer:
             train_loss, train_time = self.__train_epoch(
                 key=train_rng_epoch,
             )
-            train_losses.append(train_loss)
-
+            if train_loss < min_train_loss:
+                min_train_loss = train_loss
             wandb.log({"train_loss": train_loss, "val_loss": val_loss}, epoch_idx)
             print(
-                f"[red underline]Train[/red underline]\nloss={train_loss:.5f} best={min(train_losses):.5f} time={train_time:.4f}"
+                f"[red underline]Train[/red underline]\nloss={train_loss:.5f} best={min_train_loss:.5f} time={train_time:.4f}"
             )
             if epoch_idx % eval_every == 0:
                 print("[green underline]Validating[/green underline]")
                 val_loss, val_time = self.__val_epoch(
                     rng=val_rng_epoch,
                 )
-                val_losses.append(val_loss)
                 print(
                     f"""
                     current={prettify(val_loss)}
-                    best={prettify(min(val_losses, key=lambda x: x['nll']))}
+                    best={prettify(min_val_loss)}
                     time={val_time:.4f}"""
                 )
-                avg_loss = val_losses[-1]["nll"]
-                if self.state.last_loss < avg_loss:
-                    if current_patience <= 0:
-                        new_lr = self.state.lr * 0.1
-                        if self.learning_rate >= self.min_learning_rate:
-                            self.learning_rate = new_lr
-                            print(
-                                f"[red] learning rate did not decrease. Reducing lr to {self.learning_rate} [/red]"
-                            )
-                            self.state = self.state.replace(
-                                lr=new_lr, tx=self.__get_optimizer(), last_loss=avg_loss
-                            )
-                            current_patience = self.patience
-                    else:
-                        current_patience -= 1
-                        if current_patience <= stopping_criterion:
-                            print(
-                                f"[red] stopping criterion reached. Stopping training [/red]"
-                            )
-                            break
-
-                print(f"{current_patience=}")
-                if avg_loss < self.state.last_loss:
-                    current_patience = self.patience
-                    self.state = self.state.replace(last_loss=avg_loss)
-
+                if val_loss["nll"] < min_val_loss["nll"]:
                     print(f"[yellow] Saving checkpoint[/yellow]")
                     self.checkpoint_manager.save(epoch_idx, self.state)
+                    self.sample(
+                        restore_checkpoint=False,
+                        save_to="wandb",
+                    )
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )
-                    if avg_loss < min(val_losses, key=lambda x: x["nll"])["nll"]:
-                        self.sample(
-                            restore_checkpoint=False,
-                            save_to="wandb",
-                        )
+                    min_val_loss = val_loss
 
         rng, _ = jax.random.split(self.rngs["params"])
         val_loss, val_time = self.__val_epoch(
             rng=rng,
         )
         print(
-            f"Final loss: {val_loss:.4f} best={min(val_losses):.5f} time: {val_time:.4f}"
+            f"Final loss: {val_loss:.4f} best={min(val_loss):.5f} time: {val_time:.4f}"
         )
 
     def __plot_targets(self, save_to: str | None = None):
@@ -721,7 +694,7 @@ class Trainer:
         gd.plot([model_samples], shared_position="row", location=save_to)
 
     def sample(
-        self, restore_checkpoint: bool = True, save_to: str = "wandb", n: int = 500
+        self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 500
     ):
         print(f"Saving samples to: {save_to}")
         if restore_checkpoint:
