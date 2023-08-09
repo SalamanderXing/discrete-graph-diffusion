@@ -54,7 +54,6 @@ class TrainState(train_state.TrainState):
     last_loss: SFloat
 
 
-# @jit
 def single_train_step(
     *,
     g: gd.OneHotGraph,
@@ -112,15 +111,14 @@ def to_one_hot(nodes, edges, _, nodes_counts, device=jax.devices("cpu")[0]):
     )
 
 
-@jit
+# @jit
 def convert_to_shuffle_conding_metric(
     val: Float[Array, "v"], target: GraphDistribution
 ):
-    tot_edges_mask = target.edges.argmax(-1) > 0 & target.edges_mask
-    edges_count = tot_edges_mask.sum()
+    tot_edges_mask = target.edges.argmax(-1) > 0
+    edges_count = tot_edges_mask.sum((1, 2))
     # converts val in log2
-    uba = val / (edges_count * np.log(2))
-    return uba
+    return val / (edges_count * np.log(2))
 
 
 def shard_graph(g: gd.GraphDistribution):
@@ -197,7 +195,12 @@ class Trainer:
         else:
             self.sampling_metric = None
         raw_dummy = to_one_hot(*next(iter(self.val_loader)))
-        print(f"{raw_dummy.nodes.shape=}")
+        # for x in self.val_loader:
+        #     print(to_one_hot(*x).nodes.shape)
+        #
+        # for x in self.train_loader:
+        #     print(to_one_hot(*x).nodes.shape)
+
         self.n = raw_dummy.nodes.shape[1]
         # dummy, global_features = self.ddgd.get_model_input(
         #     raw_dummy,
@@ -299,7 +302,6 @@ class Trainer:
                 method=self.ddgd.sample,
             )
 
-        # self.val_step = val_step
         self.parallel_val_step = parallel_val_step
         self.__sample = __sample
         self.n_devices = jax.local_device_count()
@@ -321,16 +323,18 @@ class Trainer:
                 sharded_nodes_mask,
                 sharded_edges_mask,
             ) = shard_graph(one_hot_graph)
+            print(f"{one_hot_graph.edges.argmax(-1).sum((1, 2))[:10]=}")
+            shareded_losses = self.parallel_val_step(
+                sharded_nodes,
+                sharded_edges,
+                sharded_nodes_mask,
+                sharded_edges_mask,
+                params=jax_utils.replicate(self.state.params),
+                val_rng=jax.random.split(step_rng, self.n_devices),
+            )
             losses = jax.tree_map(
                 lambda x: x.reshape(-1),
-                self.parallel_val_step(
-                    sharded_nodes,
-                    sharded_edges,
-                    sharded_nodes_mask,
-                    sharded_edges_mask,
-                    params=jax_utils.replicate(self.state.params),
-                    val_rng=jax.random.split(step_rng, self.n_devices),
-                ),
+                shareded_losses,
             )
             if self.shuffle_coding_metric:
                 losses = {
@@ -348,7 +352,6 @@ class Trainer:
             for k in run_losses[0].keys()
             if k != "kl_prior"
         }
-
         return avg_losses, total_time
 
     def __train_epoch(
@@ -541,13 +544,12 @@ class Trainer:
         stopping_criterion = -5
         rng, _ = jax.random.split(self.rngs["params"])
         rng, rng_this_epoch = jax.random.split(rng)  # TODO use that
-
+        # self.sample(
+        #     restore_checkpoint=False,
+        #     save_to="wandb",  # os.path.join(self.plot_path, f"raw_sample.png"),
+        # )
         val_loss, val_time = self.__val_epoch(
             rng=rng_this_epoch,
-        )
-        self.sample(
-            restore_checkpoint=False,
-            save_to="wandb",  # os.path.join(self.plot_path, f"raw_sample.png"),
         )
         val_losses.append(val_loss)
         print(
