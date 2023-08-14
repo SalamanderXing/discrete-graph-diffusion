@@ -107,7 +107,7 @@ trainer = Trainer(
     num_node_features=dataset.max_node_feature,
     num_edge_features=dataset.max_edge_feature,
     train_smiles=dataset.train_smiles,
-    diffusion_type=Trainer.DiffusionType.structure_first,
+    diffusion_type=Trainer.DiffusionType.simple,
 )
 with jax.disable_jit(not do_jit):
     mate.bind(trainer)

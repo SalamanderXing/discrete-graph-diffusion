@@ -148,8 +148,10 @@ def posterior_distribution(
     )
     pseudo_assert((prob_e >= 0).all())
     return gd.DenseGraphDistribution.create(
-        nodes=prob_x,
-        edges=prob_e,
+        nodes=prob_x
+        / np.where(g.nodes_mask[..., None], prob_x.sum(-1, keepdims=True), 1),
+        edges=prob_e
+        / np.where(g.edges_mask[..., None], prob_e.sum(-1, keepdims=True), 1),
         nodes_mask=g.nodes_mask,
         edges_mask=g.edges_mask,
     )
