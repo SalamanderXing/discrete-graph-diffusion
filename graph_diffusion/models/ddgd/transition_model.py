@@ -3,6 +3,8 @@ from jax import Array
 from jaxtyping import Float, Int
 from mate.jax import SFloat, SInt
 from flax.struct import dataclass
+from jaxtyping import jaxtyped
+from beartype import beartype
 import jax
 import ipdb
 
@@ -11,7 +13,8 @@ from ...shared.graph import graph_distribution as gd
 
 Q, GraphDistribution = gd.Q, gd.GraphDistribution
 
-
+@jaxtyped
+@beartype
 def cosine_beta_schedule_discrete(timesteps, s=0.008):
     """Cosine schedule as proposed in https://openreview.net/forum?id=-NEXDKk8gZ."""
     steps = timesteps + 2
@@ -24,6 +27,8 @@ def cosine_beta_schedule_discrete(timesteps, s=0.008):
     return betas.squeeze().astype(np.float32)[:timesteps]
 
 
+@jaxtyped
+@beartype
 def compute_noise_schedule(
     diffusion_steps: SInt,
     schedule_type: str = "cosine",
@@ -46,7 +51,8 @@ def compute_noise_schedule(
     alphas_bar = np.exp(log_alpha_bar)
     return betas, alphas, alphas_bar
 
-
+@jaxtyped
+@beartype
 def get_timestep_embedding(
     diffusion_steps: Int[Array, "diffusion_steps"], embedding_dim: int, dtype=np.float32
 ):
@@ -75,6 +81,8 @@ class TransitionModel:
     limit_dist: gd.DenseGraphDistribution
 
     @classmethod
+    @jaxtyped
+    @beartype
     def create(
         cls,
         nodes_prior: Float[Array, "n"],
@@ -101,26 +109,36 @@ class TransitionModel:
             edge_prior = e_prior_adj / e_prior_adj.sum()
         # prior = Distribution(x=x_priors, e=e_priors)
 
-        node_types = len(nodes_prior)
-        edge_types = len(edge_prior)
-        u_x = e.repeat(nodes_prior, "p -> 1 x_classes p", x_classes=node_types)
-        u_e = e.repeat(edge_prior, "p -> 1 e_classes p", e_classes=edge_types)
+        node_classes = len(nodes_prior)
+        edge_classes = len(edge_prior)
+        u_nodes = e.repeat(
+            nodes_prior, "p -> 1 node_classes p", node_classes=node_classes
+        )
+        u_edges = e.repeat(
+            edge_prior, "p -> 1 edge_classes p", edge_classes=edge_classes
+        )
         betas, _, alphas_bar = compute_noise_schedule(diffusion_steps, schedule_type)
         betas = np.concatenate([betas, np.ones(1)])
         alphas_bar = np.concatenate([alphas_bar, np.zeros(1)])
         betas = betas[:, None, None]
-        Ie = np.eye(
-            edge_types,
-        )[None]
         In = np.eye(
-            node_types,
+            node_classes,
         )[None]
-        q_xs = betas * u_x + (1 - betas) * In
-        q_es = betas * u_e + (1 - betas) * Ie
-        qs = Q(nodes=q_xs, edges=q_es)
+        Ie = np.eye(
+            edge_classes,
+        )[None]
+        if node_classes == 1:
+            q_nodes = np.ones((diffusion_steps + 1, 1, 1))
+        else:
+            q_nodes = betas * u_nodes + (1 - betas) * In
+        q_edges = betas * u_edges + (1 - betas) * Ie
+        qs = Q(nodes=q_nodes, edges=q_edges)
         betas_bar = 1 - alphas_bar[:, None, None]
-        q_bar_xs = betas_bar * u_x + (1 - betas_bar) * In
-        q_bar_es = betas_bar * u_e + (1 - betas_bar) * Ie
+        if node_classes == 1:
+            q_bar_xs = np.ones((diffusion_steps + 1, 1, 1))
+        else:
+            q_bar_xs = betas_bar * u_nodes + (1 - betas_bar) * In
+        q_bar_es = betas_bar * u_edges + (1 - betas_bar) * Ie
         q_bars = Q(nodes=q_bar_xs, edges=q_bar_es)
         temporal_embeddings = get_timestep_embedding(
             np.arange(diffusion_steps), temporal_embedding_dim
@@ -139,16 +157,16 @@ class TransitionModel:
                 axis=1,
             )
         bs = 1
-        limit_X = np.broadcast_to(
+        limit_dist_nodes = np.broadcast_to(
             np.expand_dims(nodes_prior, (0, 1)), (bs, n, nodes_prior.shape[-1])
         )
-        limit_X /= limit_X.sum(-1, keepdims=True)
-        limit_E = np.broadcast_to(
+        limit_dist_nodes /= limit_dist_nodes.sum(-1, keepdims=True)
+        limit_dist_edges = np.broadcast_to(
             np.expand_dims(edge_prior, (0, 1, 2)), (bs, n, n, edge_prior.shape[-1])
         )
         limit_dist = gd.DenseGraphDistribution.create_from_counts(
-            nodes=limit_X,
-            edges=limit_E,
+            nodes=limit_dist_nodes,
+            edges=limit_dist_edges,
             nodes_counts=np.array([n]),
         )
         return cls(

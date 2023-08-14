@@ -432,4 +432,5 @@ class GraphTransformer(nn.Module):
             edges=E,
             nodes_mask=g.nodes_mask,
             edges_mask=g.edges_mask,
+            unsafe=True,
         )

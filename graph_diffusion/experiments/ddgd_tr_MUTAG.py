@@ -42,7 +42,7 @@ from jax import random
 from rich import print
 
 
-batch_size = 85
+batch_size = 10
 
 dataset = load_data(
     name="MUTAG",
@@ -50,7 +50,7 @@ dataset = load_data(
     train_batch_size=batch_size,
     test_batch_size=2 * batch_size,
     one_hot=True,
-    filter_graphs_by_max_node_count=None,
+    filter_graphs_by_max_node_count=20,
 )
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8

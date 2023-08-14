@@ -14,6 +14,7 @@ from mate.jax import SFloat
 from .qm9_dataset import QM9DataModule, QM9infos, get_train_smiles
 from ...shared.graph import graph_distribution as gd, graph
 
+tf.config.experimental.set_visible_devices([], "GPU")
 GraphDistribution = gd.GraphDistribution
 
 
@@ -178,8 +179,6 @@ def compute_priors(train_nodes, train_edges, train_nodes_counts):
 
 
 def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
-    tf.config.experimental.set_visible_devices([], "GPU")
-
     train_loader = (
         Dataset.zip(
             (

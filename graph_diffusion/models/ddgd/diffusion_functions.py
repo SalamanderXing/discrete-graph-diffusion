@@ -155,22 +155,32 @@ def posterior_distribution(
     )
 
 
-def predict_from_random_timesteps(
+def predict_from_timesteps(
     p: GetProbabilityType,
     g: gd.OneHotGraph,
     transition_model: TransitionModel,
-    rng: Key,
+    t: Int[Array, "b"],
+    rng_z: Key,
 ):
-    rng_t = jax.random.fold_in(rng, enc("t"))
-    rng_z = jax.random.fold_in(rng, enc("z"))
-    t = jax.random.randint(
-        rng_t, (g.nodes.shape[0],), 1, transition_model.diffusion_steps + 1
-    )
     q_t_b = transition_model.q_bars[t]
     q_t_bar_given_g = gd.matmul(g, q_t_b)
     g_t = gd.sample_one_hot(q_t_bar_given_g, rng_z)
     g_pred = p(g_t, t)
     return t, g_t, g_pred
+
+
+def predict_from_random_timesteps(
+    p: GetProbabilityType,
+    g: gd.OneHotGraph,
+    transition_model: TransitionModel,
+    rng: Key,
+) -> tuple[Int[Array, "b"], gd.OneHotGraph, gd.GraphDistribution]:
+    rng_t = jax.random.fold_in(rng, enc("t"))
+    rng_z = jax.random.fold_in(rng, enc("z"))
+    t = jax.random.randint(
+        rng_t, (g.nodes.shape[0],), 1, transition_model.diffusion_steps + 1
+    )
+    return predict_from_timesteps(p, g, transition_model, t, rng_z)
 
 
 def _compute_lt(
@@ -255,8 +265,8 @@ def compute_train_loss(
     t, g_t, g_pred = predict_from_random_timesteps(
         get_probability, target, transition_model, rng_sample
     )
-    # loss_type = "elbo_ce"
-    loss_type = "elbo"
+    loss_type = "elbo_ce"
+    # loss_type = "elbo"
     if "ce" in loss_type:
         ce_term = gd.softmax_cross_entropy(g_pred, target).mean()
     if "elbo" in loss_type or loss_type == "ce_minimal":
@@ -436,8 +446,8 @@ def sample_p_zs_given_zt(
     )
     sampled_s = gd.sample_one_hot(
         gd.DenseGraphDistribution.create(
-            nodes=prob_nodes,
-            edges=prob_edges,
+            nodes=prob_nodes * g_t.nodes_mask[..., None],
+            edges=prob_edges * g_t.edges_mask[..., None],
             nodes_mask=g_t.nodes_mask,
             edges_mask=g_t.edges_mask,
         ),

@@ -31,13 +31,14 @@ from .q import Q
 ## only used for testing ##
 import torch.nn.functional as F
 import torch as t
-
+from typing import TypeVar
 
 NodeDistribution = Float[Array, "b n en"]
 EdgeDistribution = Float[Array, "b n n ee"]
 NodeMaskType = Bool[Array, "b n"]
 EdgeMaskType = Bool[Array, "b n n"]
 EdgeCountType = Int[Array, "b"]
+GD = TypeVar("GD", bound=GraphDistribution)
 
 
 @jaxtyped
@@ -83,6 +84,7 @@ def dense_to_structure_dense(g: DenseGraphDistribution):
     )
 
 
+
 def one_hot_structure_to_dense(
     structure: StructureOneHotGraph, node_feature_count: SInt, edge_feature_count: SInt
 ) -> DenseGraphDistribution:
@@ -122,21 +124,6 @@ def concatenate(items: Sequence[GraphDistribution]) -> GraphDistribution:
     )
 
 
-# @typed
-# def softmax_cross_entropy(
-#     target: DenseGraphDistribution,
-#     labels: OneHotGraph,
-#     weights: Float[Array, "2"] | None = None,
-# ) -> Float[Array, "b"]:
-#     if weights is None:
-#         weights = np.array([1.0, 1.0])
-#     assert weights is not None
-#     assert weights.shape == (2,)
-#     loss_fn = optax.softmax_cross_entropy  # (logits=x, labels=y).sum()
-#     nodes_loss = loss_fn(target.nodes, labels.nodes).sum(-1) * weights[0]
-#     edges_loss = loss_fn(target.edges, labels.edges).sum(axis=(1, 2)) * weights[1]
-#     return nodes_loss + edges_loss
-#
 @typed
 def softmax_cross_entropy(
     target: DenseGraphDistribution,
@@ -165,7 +152,6 @@ def check_same(a, b):
 def __normalize(x: Array):
     x += 1e-11
     den = np.sum(x, axis=-1, keepdims=True)
-    # x /= np.where(den > 0, den, 1)
     x /= den
     return x
 
@@ -201,8 +187,6 @@ def normalize_and_mask(g: DenseGraphDistribution):
     )
 
 
-# @jax.jit
-@typed
 def kl_div(input: DenseGraphDistribution, target: DenseGraphDistribution):
     kl_div_nodes = _kl_div(input.nodes, target.nodes)
     # kl_div_nodes = np.log(input.nodes + 1e-7) - np.log(target.nodes + 1e-7)
@@ -219,138 +203,11 @@ def kl_div(input: DenseGraphDistribution, target: DenseGraphDistribution):
 @jit
 def softmax(g: DenseGraphDistribution) -> DenseGraphDistribution:
     return DenseGraphDistribution.create(
-        nodes=jax.nn.softmax(g.nodes),
-        edges=jax.nn.softmax(g.edges),
+        nodes=jax.nn.softmax(g.nodes) * g.nodes_mask[..., None],
+        edges=jax.nn.softmax(g.edges) * g.edges_mask[..., None],
         nodes_mask=g.nodes_mask,
         edges_mask=g.edges_mask,
     )
-
-
-@typed
-def plot(
-    rows: Sequence[GraphDistribution] | GraphDistribution,
-    location: str | None = None,
-    shared_position: str | None = None,  # can be "row" or "col", or none
-    title: str | None = None,
-):
-    if isinstance(rows, GraphDistribution):
-        rows = [rows]
-    assert isinstance(rows, Sequence)
-    assert shared_position in [None, "row", "col", "all"]
-    location = (
-        f"{location}.png"
-        if location is not None and not location.endswith(".png")
-        else location
-    ) if location != 'wandb' else 'wandb'
-    original_len = len(rows[0])
-    skip = (len(rows[0]) // 15) if len(rows[0]) > 15 else 1
-    rows_skips = [(row[::skip], row[np.array([-1])]) for row in rows]
-    rows = [concatenate(row) for row in rows_skips]
-    lrows = len(rows)
-    lcolumn = len(rows[0])
-    try:
-        _, axs = plt.subplots(
-            lrows,
-            lcolumn,
-            figsize=(100, 10),
-        )
-    except Exception as e:
-        ipdb.set_trace()
-    if len(axs.shape) == 1:
-        axs = axs[None, :]
-
-    if rows[0].nodes.shape[-1] > 2:
-        cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1] - 1))
-        cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1]))
-        cmap_edge = numpy.concatenate([numpy.zeros((1, 4)), cmap_edge], axis=0)
-    else:
-        cmap_edge = plt.cm.viridis(np.linspace(0, 1, rows[0].edges.shape[-1] - 1))
-        # cmap_node = plt.cm.viridis(np.linspace(0, 1, rows[0].nodes.shape[-1] - 1))
-        cmap_edge = numpy.concatenate([numpy.zeros((1, 4)), cmap_edge], axis=0)
-        # cmap_node = numpy.concatenate([numpy.zeros((1, 4)), cmap_node], axis=0)
-        # node will be black
-        cmap_node = np.array([[0, 0, 0, 1]])
-    node_size = 10.0
-    positions = [None] * len(rows[0])
-
-    # x s.t len(row) / x = 15
-    # => x = len(row) / 15
-
-    for i, (row, ax_row) in enumerate(zip(rows, axs)):
-        xs = row.nodes.argmax(-1)
-        es = row.edges.argmax(-1)
-        n_nodes_row = row.nodes_counts
-        for j in range(len(ax_row)):
-            ax = ax_row[j]
-            j *= skip
-            x = xs[j]
-            e = es[j]
-            n_nodes = n_nodes_row[j]
-
-            nodes = x[:n_nodes]
-            edges_features = e[:n_nodes, :n_nodes]
-
-            indices = np.indices(edges_features.shape).reshape(2, -1).T
-            mask = edges_features.flatten() != 0
-            edges = indices[mask]
-
-            # c_values_edges = np.array([cmap_edge[i] for i in edges[:, -1]])
-
-            G = nx.Graph()
-            for i in range(n_nodes):
-                G.add_node(i)
-            for i in range(edges.shape[0]):
-                G.add_edge(edges[i, 0].tolist(), edges[i, 1].tolist())
-
-            if shared_position is not None:
-                if positions[j] is None:
-                    if j > 0 and shared_position in (
-                        "row",
-                        "all",
-                    ):  # FIXME: "row" is not working, does the same as all
-                        positions[j] = positions[0]
-                    else:
-                        positions[j] = nx.spring_layout(G)  # positions for all nodes
-                position = positions[j]
-            else:
-                position = nx.spring_layout(G)
-
-            color_nodes = (
-                numpy.array([cmap_node[i - 1] for i in nodes])
-                if rows[0].nodes.shape[-1] > 2
-                else numpy.array([cmap_node[i] for i in nodes])
-            )
-            color_edges = numpy.array(
-                [cmap_edge[edges_features[i, j]] for (i, j) in G.edges]
-            )
-            nx.draw(
-                G,
-                position,
-                node_size=node_size,
-                edge_color=color_edges,
-                node_color=color_nodes,
-                ax=ax,
-            )
-            ax.set_title(f"t={j*skip if not j == len(row)-1 else original_len-1}")
-            ax.set_aspect("equal")
-            ax.set_axis_off()
-
-    plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
-
-    if title is not None:
-        plt.suptitle(title, fontsize=16)
-
-    if location is None:
-        plt.show()
-    elif location == "wandb":
-        wandb.log({"prediction": wandb.Image(plt)})
-    else:
-        plt.savefig(location)
-        plt.clf()
-        plt.close()
-        # wandb.log({"prediction": wandb.Image(location)})
-    plt.clf()
-    plt.close()
 
 
 @typed
@@ -370,16 +227,12 @@ def logprobs_at(
     g: GraphDistribution, one_hot: GraphDistribution
 ) -> Float[Array, "batch_size"]:
     """Returns the probability of the given one-hot vector."""
-    probs = OneHotGraph.create(
-        nodes=g.nodes * one_hot.nodes,
-        edges=g.edges * one_hot.edges,
-        nodes_mask=g.nodes_mask,
-        edges_mask=g.edges_mask,
-    )
-    nodes_probs_sum = probs.nodes.sum(-1)
-    edges_probs_sum = probs.edges.sum(-1)
-    safe_probs_nodes = np.where(nodes_probs_sum > 0, probs.nodes.sum(-1), 1)
-    safe_probs_edges = np.where(edges_probs_sum > 0, probs.edges.sum(-1), 1)
+    prob_nodes = g.nodes * one_hot.nodes
+    prob_edges = g.edges * one_hot.edges
+    nodes_probs_sum = prob_nodes.sum(-1)
+    edges_probs_sum = prob_edges.sum(-1)
+    safe_probs_nodes = np.where(nodes_probs_sum > 0, prob_nodes.sum(-1), 1)
+    safe_probs_edges = np.where(edges_probs_sum > 0, prob_edges.sum(-1), 1)
     # TODO: the version below is safer cause it implies a kind of check
     # i.e. do the probs sum up to 1 for each node/edge? (wherever the mask is True)
     # however, that does not work with the feature diffusion where we have a
@@ -440,7 +293,11 @@ def sample_one_hot(g: DenseGraphDistribution, rng_key: Key) -> OneHotGraph:
 # @jax.jit
 def matmul(g: OneHotGraph, q: Q):
     x = g.nodes @ q.nodes
+    den_x = np.where(g.nodes_mask, np.sum(x, -1), 1)
+    x /= den_x[..., None]
     e = g.edges @ q.edges[:, None]
+    den_e = np.where(g.edges_mask, np.sum(e, -1), 1)
+    e /= den_e[..., None]
     return DenseGraphDistribution.create_and_mask(
         nodes=x, edges=e, nodes_mask=g.nodes_mask, edges_mask=g.edges_mask
     )

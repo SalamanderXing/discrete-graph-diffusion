@@ -39,16 +39,15 @@ from jax import numpy as np
 from jax import random
 
 
-batch_size = 200
+batch_size = 100
 
 dataset = load_data(
     name="ZINC_full",
-    seed=32,
     save_path=mate.data_dir,
     train_batch_size=batch_size,
     test_batch_size=batch_size * 2,
     one_hot=True,
-    filter_graphs_by_max_node_count=10,
+    filter_graphs_by_max_node_count=20,
 )
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
@@ -58,8 +57,8 @@ diffusion_steps = 500
 import random as pyrandom
 
 rngs = {
-    "params": random.PRNGKey(pyrandom.randint(0, 10000)),
-    "dropout": random.PRNGKey(pyrandom.randint(0, 10000)),
+    "params": random.PRNGKey(1),  # pyrandom.randint(0, 10000)),
+    "dropout": random.PRNGKey(100),  # pyrandom.randint(0, 10000)),
 }
 # model, params = GraphTransformer.initialize(
 #     key=rngs["params"],

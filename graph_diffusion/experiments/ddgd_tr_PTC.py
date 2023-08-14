@@ -12,7 +12,7 @@ import jax
 data_key = jax.random.PRNGKey(0)
 
 
-gpu = True 
+gpu = True
 debug_compiles = False
 
 if not gpu:
@@ -44,11 +44,11 @@ from rich import print
 
 dataset = load_data(
     name="PTC_MR",  # "MUTAG",
-    seed=32,
     save_path=mate.data_dir,
-    batch_size=15,
+    train_batch_size=15,
+    test_batch_size=100,
     one_hot=True,
-    filter_graphs_by_max_node_count=22,
+    filter_graphs_by_max_node_count=None,
 )
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
@@ -58,7 +58,6 @@ print(f"Using device: [yellow]{device} [/yellow]")
 if device.lower() != "gpu":
     print("[red]WARNING: :skull:[/red] Running on CPU. This will be slow.")
 
-batch_size = 512
 
 diffusion_steps = 500
 import random as pyrandom
@@ -74,7 +73,7 @@ rngs = {
 #     number_of_nodes=dataset.n,
 #     num_layers=5,
 # )
-#model = GraphTransformer(n_layers=5)
+# model = GraphTransformer(n_layers=5)
 save_path = os.path.join(mate.save_dir, f"{diffusion_steps}_diffusion_steps")
 os.makedirs(save_path, exist_ok=True)
 os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)
@@ -104,12 +103,13 @@ trainer = Trainer(
     bits_per_edge=False,
     diffusion_steps=diffusion_steps,
     noise_schedule_type="cosine",
-    learning_rate=0.0002,
+    learning_rate=0.00001,
     log_every_steps=4,
     max_num_nodes=dataset.n,
     num_node_features=dataset.max_node_feature,
     num_edge_features=dataset.max_edge_feature,
     diffusion_type=Trainer.DiffusionType.simple,
     shuffle_coding_metric=True,
+    n_layers=5,
 )
 mate.bind(trainer)

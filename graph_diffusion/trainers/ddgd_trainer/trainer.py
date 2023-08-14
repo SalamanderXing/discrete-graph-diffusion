@@ -29,6 +29,7 @@ from einops import rearrange, reduce, repeat
 import hashlib
 from beartype import beartype
 from jax import pmap
+import random as pyrandom
 from .extra_features.extra_features import compute as compute_extra_features
 from ...shared.graph import graph_distribution as gd
 from ...models.ddgd import DDGD, SimpleDDGD, StructureFirstDDGD
@@ -38,6 +39,17 @@ from ...models.ddgd import DDGD, SimpleDDGD, StructureFirstDDGD
 #     TransitionModel,
 # )
 from functools import partial
+
+
+# creates a fake pmap, useful for debugggin. Instead of running for every device,
+# it has a for loop that runs for every device
+def fake_pmap(f):
+    def faked(*args):
+        return np.concatenate(
+            [f(*(a[i] for a in args)) for i in args[0].shape[0]], axis=0
+        )
+
+    return faked
 
 
 def enc(x: str):
@@ -79,7 +91,6 @@ def single_train_step(
     return grads, loss
 
 
-@pmap
 def parallel_train_step(
     sharded_nodes,
     sharded_edges,
@@ -270,7 +281,6 @@ class Trainer:
                 method=self.ddgd.compute_val_loss,
             )
 
-        @pmap
         def parallel_val_step(
             sharded_nodes,
             sharded_edges,
@@ -287,23 +297,25 @@ class Trainer:
             )
             return val_step(graph, val_rng, params)
 
-        @jit
-        def __sample_step(rng, t, g):
-            return self.ddgd.apply(
-                self.state.params, rng, t, g, method=self.ddgd.sample_step
-            )
+        # @jit
+        # def __sample_step(rng, t, g):
+        #     return self.ddgd.apply(
+        #         self.state.params, rng, t, g, method=self.ddgd.sample_step
+        #     )
+        #
+        # def __sample(rng, n_samples):
+        #     return self.ddgd.apply(
+        #         self.state.params,
+        #         __sample_step,
+        #         rng,
+        #         n_samples,
+        #         method=self.ddgd.sample,
+        #     )
 
-        def __sample(rng, n_samples):
-            return self.ddgd.apply(
-                self.state.params,
-                __sample_step,
-                rng,
-                n_samples,
-                method=self.ddgd.sample,
-            )
-
-        self.parallel_val_step = parallel_val_step
-        self.__sample = __sample
+        # self.parallel_val_step = fake_pmap(parallel_val_step)
+        # self.parallel_train_step = fake_pmap(parallel_train_step)
+        self.parallel_val_step = pmap(parallel_val_step)
+        self.parallel_train_step = pmap(parallel_train_step)
         self.n_devices = jax.local_device_count()
         self.cpu_device = jax.devices("cpu")[0]
 
@@ -317,6 +329,7 @@ class Trainer:
         for i, x in enumerate(tqdm(self.val_loader)):
             step_rng = jax.random.fold_in(rng, enc(f"val_step_{i}"))
             one_hot_graph = to_one_hot(*x)
+            # print(one_hot_graph.hashes())
             (
                 sharded_nodes,
                 sharded_edges,
@@ -324,7 +337,9 @@ class Trainer:
                 sharded_edges_mask,
             ) = shard_graph(one_hot_graph)
             new_bs = sharded_nodes.shape[0] * sharded_nodes.shape[1]
-            one_hot_graph = one_hot_graph[:new_bs]
+            one_hot_graph = one_hot_graph[
+                :new_bs
+            ]  # FIXME: this raises an error with self-loops
             sharded_losses = self.parallel_val_step(
                 sharded_nodes,
                 sharded_edges,
@@ -367,23 +382,13 @@ class Trainer:
             one_hot_graph = to_one_hot(*x)
             step_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
             structure_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
-            do_backprop_over_structure = (
-                (
-                    jax.random.uniform(
-                        structure_key,
-                    )
-                    > 0.5
-                ).item()
-                if self.diffusion_type == self.__class__.DiffusionType.structure_first
-                else False
-            )
             (
                 sharded_nodes,
                 sharded_edges,
                 sharded_nodes_mask,
                 sharded_edges_mask,
             ) = shard_graph(one_hot_graph)
-            result = parallel_train_step(
+            result = self.parallel_train_step(
                 sharded_nodes,
                 sharded_edges,
                 sharded_nodes_mask,
@@ -398,6 +403,36 @@ class Trainer:
         t1 = time()
         tot_time = t1 - t0
         return avg_loss, tot_time  # type: ignore
+
+    def predict_structure(self):
+        self.__restore_checkpoint()
+        data = to_one_hot(*next(iter(self.val_loader)))
+        data = data[:5]
+        t = np.ones(data.batch_size, int) * self.diffusion_steps
+        rng = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+        g_t, g_pred = self.ddgd.apply(
+            self.params,
+            data,
+            t,
+            rng,
+            method=self.ddgd.predict_structure,
+        )
+        gd.plot([data, g_pred, g_t], shared_position_option="col")
+
+    def predict_feature(self):
+        self.__restore_checkpoint()
+        data = to_one_hot(*next(iter(self.val_loader)))
+        data = data[:5]
+        t = np.ones(data.batch_size, int) * self.diffusion_steps
+        rng = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+        g_t, g_pred = self.ddgd.apply(
+            self.params,
+            data,
+            t,
+            rng,
+            method=self.ddgd.predict_feature,
+        )
+        gd.plot([data, g_pred, g_t], shared_position_option="col")
 
     def plot_preds(
         self,
@@ -586,10 +621,10 @@ class Trainer:
                 if val_loss["nll"] < min_val_loss["nll"]:
                     print(f"[yellow] Saving checkpoint[/yellow]")
                     self.checkpoint_manager.save(epoch_idx, self.state)
-                    # self.sample(
-                    #     restore_checkpoint=False,
-                    #     save_to="wandb",
-                    # )
+                    self.sample(
+                        restore_checkpoint=False,
+                        save_to="wandb",
+                    )
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )
@@ -694,7 +729,7 @@ class Trainer:
         gd.plot([model_samples], shared_position="row", location=save_to)
 
     def sample(
-        self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 500
+        self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 10
     ):
         print(f"Saving samples to: {save_to}")
         if restore_checkpoint:
@@ -704,7 +739,7 @@ class Trainer:
         rng_model = jax.random.PRNGKey(random.randint(0, 1000000))
         rng_sample = jax.random.fold_in(rng_model, enc("sample"))
 
-        model_samples, prior_sample = self.__sample(rng_sample, n)
+        model_samples = self.ddgd.sample(self.state.params, rng_sample, n)
         data_sample = None
         rnd_i = random.randint(0, len(self.val_loader) - 1)
         for i, x in enumerate(self.val_loader):
@@ -726,9 +761,9 @@ class Trainer:
             [
                 data_sample,
                 model_samples,
-                prior_sample,
-            ],  # prior_sample,  # prior_sample,
-            shared_position=None,
+                # prior_sample,
+            ],
+            shared_position_option=None,  # prior_sample,  # prior_sample,
             location=save_to,
             title=title,
         )

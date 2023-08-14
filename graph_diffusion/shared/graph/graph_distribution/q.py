@@ -8,6 +8,7 @@ from flax.struct import dataclass
 from beartype import beartype
 from typing import Union
 
+
 @jaxtyped
 @beartype
 @dataclass
@@ -16,7 +17,8 @@ class Q:
     edges: Float[Array, "t ee ee"]
 
     # overrides the square bracket indexing
-    def __getitem__(self, key: Int[Array, "n"]) -> "Q":
+    @jaxtyped
+    def __getitem__(self, key) -> "Q":
         return Q(nodes=self.nodes[key], edges=self.edges[key])
 
     @property

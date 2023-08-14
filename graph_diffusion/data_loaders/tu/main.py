@@ -298,7 +298,7 @@ def load_data(
         print("Dataset turned into dense numpy arrays")
         num_edge_features = edges.shape[-1]
 
-        if name.lower() in ("mutag", "ptc_mr"):
+        if False:  # name.lower() in ("mutag", "ptc_mr"):
             print(f"Loading split indices from files...")
             indices_dir = os.path.join(os.path.dirname(__file__), name.lower())
             train_indices = np.array(
