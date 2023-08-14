@@ -147,6 +147,43 @@ def shard_graph(g: gd.GraphDistribution):
     return tuple(x.reshape((num_devices, -1) + x.shape[1:]) for x in trimmed_data)
 
 
+from rich.table import Table
+from rich.style import Style
+
+
+def dict_to_table(title: str, data: dict[str, Array], epoch: int | None = None):
+    # Create a table with the title "Val Loss"
+    table = Table(
+        title=f"{title} {'epoch=' + str(epoch) if epoch is not None else ''}",
+        style=Style(color="green"),
+    )
+
+    # Extract feature and structure keys and values
+    feature_keys = [key.replace("feat_", "") for key in data if key.startswith("feat_")]
+    structure_keys = [key.replace("str_", "") for key in data if key.startswith("str_")]
+
+    # Add columns based on the keys
+    table.add_column("Metrics", style=Style(color="blue", bold=True))
+    for key in feature_keys:
+        table.add_column(key, style=Style(color="cyan"))
+
+    # Add feature row
+    feature_values = [data[f"feat_{key}"] for key in feature_keys]
+    table.add_row(
+        "Features", *[str(val) for val in feature_values], style=Style(color="yellow")
+    )
+
+    # Add structure row
+    structure_values = [data[f"str_{key}"] for key in structure_keys]
+    table.add_row(
+        "Structure",
+        *[str(val) for val in structure_values],
+        style=Style(color="yellow"),
+    )
+
+    return table
+
+
 @dataclass
 class Trainer:
     class DiffusionType(enum.Enum):
@@ -206,23 +243,7 @@ class Trainer:
         else:
             self.sampling_metric = None
         raw_dummy = to_one_hot(*next(iter(self.val_loader)))
-        # for x in self.val_loader:
-        #     print(to_one_hot(*x).nodes.shape)
-        #
-        # for x in self.train_loader:
-        #     print(to_one_hot(*x).nodes.shape)
-
         self.n = raw_dummy.nodes.shape[1]
-        # dummy, global_features = self.ddgd.get_model_input(
-        #     raw_dummy,
-        #     t=np.array([10]),
-        # )
-        # params = self.model.init(
-        #     self.rngs["params"],
-        #     dummy,
-        #     global_features,
-        #     deterministic=True,
-        # )
         if self.diffusion_type == self.__class__.DiffusionType.simple:
             self.ddgd = SimpleDDGD(
                 model_class=self.model_class,
@@ -297,23 +318,6 @@ class Trainer:
             )
             return val_step(graph, val_rng, params)
 
-        # @jit
-        # def __sample_step(rng, t, g):
-        #     return self.ddgd.apply(
-        #         self.state.params, rng, t, g, method=self.ddgd.sample_step
-        #     )
-        #
-        # def __sample(rng, n_samples):
-        #     return self.ddgd.apply(
-        #         self.state.params,
-        #         __sample_step,
-        #         rng,
-        #         n_samples,
-        #         method=self.ddgd.sample,
-        #     )
-
-        # self.parallel_val_step = fake_pmap(parallel_val_step)
-        # self.parallel_train_step = fake_pmap(parallel_train_step)
         self.parallel_val_step = pmap(parallel_val_step)
         self.parallel_train_step = pmap(parallel_train_step)
         self.n_devices = jax.local_device_count()
@@ -329,7 +333,6 @@ class Trainer:
         for i, x in enumerate(tqdm(self.val_loader)):
             step_rng = jax.random.fold_in(rng, enc(f"val_step_{i}"))
             one_hot_graph = to_one_hot(*x)
-            # print(one_hot_graph.hashes())
             (
                 sharded_nodes,
                 sharded_edges,
@@ -339,7 +342,7 @@ class Trainer:
             new_bs = sharded_nodes.shape[0] * sharded_nodes.shape[1]
             one_hot_graph = one_hot_graph[
                 :new_bs
-            ]  # FIXME: this raises an error with self-loops
+            ]  # the new exact batch size depends on the number of devices
             sharded_losses = self.parallel_val_step(
                 sharded_nodes,
                 sharded_edges,
@@ -440,9 +443,7 @@ class Trainer:
         load_from_disk: bool = True,
         epoch: int = -1,
     ):
-        import random
-
-        rng = jax.random.PRNGKey(random.randint(0, 100000))
+        rng = jax.random.PRNGKey(pyrandom.randint(0, 100000))
         if load_from_disk:
             self.__restore_checkpoint()
         p = GetProbabilityFromState(
@@ -587,12 +588,7 @@ class Trainer:
         )
         min_val_loss = val_loss
         min_train_loss = np.inf
-        print(
-            f"""[green underline]Validation (prior training)[/green underline]
-            current={prettify(val_loss)}
-            best={prettify(min_val_loss)}
-            time={val_time:.4f}"""
-        )
+        print(dict_to_table(f"Val Loss (prior training)", val_loss, epoch=0))
         eval_every = 4
         for epoch_idx in range(last_epoch, self.num_epochs + 1):
             val_rng_epoch = jax.random.fold_in(rng, enc(f"val_rng_{epoch_idx}"))
@@ -603,7 +599,16 @@ class Trainer:
             )
             if train_loss < min_train_loss:
                 min_train_loss = train_loss
-            wandb.log({"train_loss": train_loss, "val_loss": val_loss}, epoch_idx)
+            wandb.log(
+                {
+                    "main/nll": val_loss["nll"],
+                    "main/structure": val_loss["str_nll"],
+                    "main/feature": val_loss["feat_nll"],
+                }
+                | {f"minor/{key}": val for key, val in val_loss if not "nll" in key}
+                | {"train_losses/train_loss": train_loss},
+                epoch_idx,
+            )
             print(
                 f"[red underline]Train[/red underline]\nloss={train_loss:.5f} best={min_train_loss:.5f} time={train_time:.4f}"
             )
@@ -612,12 +617,16 @@ class Trainer:
                 val_loss, val_time = self.__val_epoch(
                     rng=val_rng_epoch,
                 )
-                print(
-                    f"""
-                    current={prettify(val_loss)}
-                    best={prettify(min_val_loss)}
-                    time={val_time:.4f}"""
-                )
+                # print(
+                #     f"""
+                #     current={prettify(val_loss)}
+                #     best={prettify(min_val_loss)}
+                #     time={val_time:.4f}"""
+                # )
+
+                print(dict_to_table(f"Cur Val Loss", val_loss, epoch=0))
+                print(dict_to_table(f"Best Val Loss", min_val_loss, epoch=0))
+                print(f"[green]time took[/green]={val_time:.4f}")
                 if val_loss["nll"] < min_val_loss["nll"]:
                     print(f"[yellow] Saving checkpoint[/yellow]")
                     self.checkpoint_manager.save(epoch_idx, self.state)
