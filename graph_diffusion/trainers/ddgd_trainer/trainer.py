@@ -153,9 +153,15 @@ from rich.style import Style
 
 def dict_to_table(title: str, data: dict[str, Array], epoch: int | None = None):
     # Create a table with the title "Val Loss"
+    # the title will be the best color, different from the header
     table = Table(
-        title=f"{title} {'epoch=' + str(epoch) if epoch is not None else ''}",
+        title=f"{title}"
+        + (f" [dim](epoch {epoch})[/dim]" if epoch is not None else ""),
+        title_style=Style(color="green", bold=True),
+        header_style=Style(color="magenta", bold=True),
+        show_header=True,
         style=Style(color="green"),
+        # row_styles=["", "dim"],
     )
 
     # Extract feature and structure keys and values
@@ -163,24 +169,37 @@ def dict_to_table(title: str, data: dict[str, Array], epoch: int | None = None):
     structure_keys = [key.replace("str_", "") for key in data if key.startswith("str_")]
 
     # Add columns based on the keys
-    table.add_column("Metrics", style=Style(color="blue", bold=True))
+    table.add_column(
+        "Metrics",
+        style=Style(color="yellow", bold=True),
+    )
+    table.add_column("NLL", style=Style(color="cyan"))
     for key in feature_keys:
-        table.add_column(key, style=Style(color="cyan"))
+        if key != "nll":
+            table.add_column(key, style=Style(color="cyan"))
 
     # Add feature row
-    feature_values = [data[f"feat_{key}"] for key in feature_keys]
+    feature_values = [
+        data.get(f"feat_{key}", data.get("nll"))
+        for key in ["nll"] + [k for k in feature_keys if k != "nll"]
+    ]
     table.add_row(
-        "Features", *[str(val) for val in feature_values], style=Style(color="yellow")
+        "Features",
+        *[str(round(val.item(), 4)) for val in feature_values],
     )
-
     # Add structure row
-    structure_values = [data[f"str_{key}"] for key in structure_keys]
+    structure_values = [
+        data.get(f"str_{key}", data.get("nll"))
+        for key in ["nll"] + [k for k in structure_keys if k != "nll"]
+    ]
     table.add_row(
         "Structure",
-        *[str(val) for val in structure_values],
-        style=Style(color="yellow"),
+        *[str(round(val.item(), 4)) for val in structure_values],
     )
-
+    table.add_row(
+        "Total",
+        str(round(data["nll"].item(), 4)),
+    )
     return table
 
 

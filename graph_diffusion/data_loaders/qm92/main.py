@@ -232,6 +232,7 @@ def load_data(save_dir: str, batch_size: int, onehot: bool = True):
     else:
         print("Loading cache")
         dense_data = pickle.load(open(cache, "rb"))
+        print(f"Done.")
     dataset = get_dataloaders(dense_data, batch_size, onehot)
     return dataset
 

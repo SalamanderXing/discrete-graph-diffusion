@@ -131,7 +131,8 @@ class StructureFirstDDGD(nn.Module):
         p_feature_deterministic = jax.tree_util.Partial(
             self.p_feature, structure=target_structure, deterministic=True
         )
-        losses = []
+        structure_loss = {}
+        feature_loss = {}
         if self.use_structure:
             structure_loss = df.compute_val_loss(
                 target=target_structure,
@@ -140,7 +141,7 @@ class StructureFirstDDGD(nn.Module):
                 p=self.p_structure_deterministic,
                 nodes_dist=self.nodes_dist,
             )
-            losses.append(structure_loss)
+            structure_loss = {f"str_{k}": val for k, val in structure_loss.items()}
         if self.use_feature:
             feature_loss = df.compute_val_loss(
                 target=target_feature,
@@ -149,11 +150,28 @@ class StructureFirstDDGD(nn.Module):
                 p=p_feature_deterministic,
                 nodes_dist=self.nodes_dist,
             )
-            losses.append(feature_loss)
-        return {
-            key: np.mean(np.array(tuple(loss[key] for loss in losses)))
-            for key in losses[0].keys()
-        }
+            feature_loss = {f"feat_{k}": val for k, val in feature_loss.items()}
+        # return {
+        #     key: np.mean(np.array(tuple(loss[key] for loss in losses)))
+        #     for key in losses[0].keys()
+        # }
+        return (
+            feature_loss
+            | structure_loss
+            | {
+                "nll": np.mean(
+                    np.array(
+                        tuple(
+                            loss[f"{prefix}_nll"]
+                            for prefix, loss in zip(
+                                ("str", "feat"), (structure_loss, feature_loss)
+                            )
+                        )
+                    ),
+                    axis=0,
+                )
+            }
+        )
 
     def predict_feature(
         self, g: gd.OneHotGraph, t: Int[Array, "b"], rng: Key
