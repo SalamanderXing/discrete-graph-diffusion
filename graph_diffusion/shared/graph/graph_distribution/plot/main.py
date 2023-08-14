@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import ipdb
 import numpy as np
 import networkx as nx
+import wandb
 from ..graph_distribution import GraphDistribution
 from ..functional import concatenate
 

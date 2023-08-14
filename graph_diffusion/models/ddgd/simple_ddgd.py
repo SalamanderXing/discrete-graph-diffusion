@@ -108,7 +108,7 @@ class SimpleDDGD(nn.Module):
     def sample(self, params: FrozenDict, rng: Key, n_samples: SInt):
         @jit
         def sample_step(rng, t, g):
-            return self.apply(self.state.params, rng, t, g, method=self.sample_step)
+            return self.apply(params, rng, t, g, method=self.sample_step)
 
         return self.apply(params, sample_step, rng, n_samples, method=self._sample)
 
