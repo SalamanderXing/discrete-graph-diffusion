@@ -31,25 +31,6 @@ GetProbabilityType = Callable[
     [gd.GraphDistribution, Int[Array, "batch_size"]], gd.DenseGraphDistribution
 ]
 
-# import sys
-# sys.path.insert(0, "/home/bluesk/Documents/tmp/digress-copy/")
-#
-# # from src.diffusion import diffusion_utils
-# from src import diffusion_model_discrete
-# from src.diffusion import diffusion_utils
-#
-# digress = diffusion_model_discrete.DiscreteDenoisingDiffusion(
-#     cfg=None,
-#     dataset_infos=None,
-#     train_metrics=None,
-#     sampling_metrics=None,
-#     visualization_tools=None,
-#     extra_features=None,
-#     domain_features=None,
-#     reload=True,
-# )
-#
-
 
 def enc(x: str):
     return int(hashlib.md5(x.encode()).hexdigest()[:8], base=16)
@@ -192,7 +173,7 @@ def _compute_lt(
     raw_g_pred: gd.DenseGraphDistribution,
     transition_model: TransitionModel,
 ):
-    raw_g_pred = gd.softmax(raw_g_pred)
+    g_pred = gd.softmax(raw_g_pred)
     posterior_prob_true = posterior_distribution(
         g=g,
         g_t=g_t,
@@ -200,7 +181,7 @@ def _compute_lt(
         t=t,
     )
     posterior_prob_pred = posterior_distribution(
-        g=raw_g_pred,
+        g=g_pred,
         g_t=g_t,
         transition_model=transition_model,
         t=t,

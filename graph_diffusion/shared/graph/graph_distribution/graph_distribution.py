@@ -159,11 +159,14 @@ class GraphDistribution:
     def nodes_counts(self):
         return self.nodes_mask.sum(-1)
 
-    # def pseudo_assert(self):
-    #     is_nodes_dist = np.array(is_dist(self.nodes))
-    #     pseudo_assert(is_nodes_dist)
-    #     is_edges_dist = np.array(is_dist(self.edges))
-    #     pseudo_assert(is_edges_dist)
+    def __str__(self):
+        return {
+            key: f"{np.asarray(val).shape} {np.asarray(val).dtype}"
+            for key, val in self.__dict__.items()
+        }.__str__()
+
+    def __repr__(self):
+        return self.__str__()
 
     @classmethod
     def from_mask(
@@ -234,8 +237,6 @@ class GraphDistribution:
             edges_mask=edges_mask,
         )
 
-        # # overrides the square bracket indexing
-
     def __getitem__(self, key) -> "GraphDistribution":
         new_nodes = self.nodes[key]
         cls = (
@@ -248,14 +249,21 @@ class GraphDistribution:
             edges=self.edges[key],
             nodes_mask=self.nodes_mask[key],
             edges_mask=self.edges_mask[key],
-        )  # , mask=self.mask[key])
+        )
 
-    #
     def __len__(self):
         return self.nodes.shape[0]
 
     def __hash__(self):
         return hash_arrays(self.nodes, self.edges).item()
+
+    def __eq__(self, other):
+        return (
+            (self.nodes == other.nodes).all()
+            and (self.edges == other.edges).all()
+            and (self.nodes_mask == other.nodes_mask).all()
+            and (self.edges_mask == other.edges_mask).all()
+        ).item()
 
     def hashes(self):
         return tuple(
@@ -381,6 +389,20 @@ class OneHotGraph(GraphDistribution):
             edges_mask=edges_mask,
         )
 
+    def __str__(self):
+        return super().__str__()
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __eq__(self, other):
+        return (
+            (self.nodes == other.nodes).all()
+            and (self.edges == other.edges).all()
+            and (self.nodes_mask == other.nodes_mask).all()
+            and (self.edges_mask == other.edges_mask).all()
+        ).item()
+
     @classmethod
     @jaxtyped
     @beartype
@@ -466,6 +488,15 @@ class DenseGraphDistribution(GraphDistribution):
             edges=edges,
             nodes_mask=nodes_mask,
             edges_mask=edges_mask,
+        )
+
+    def scalar_multiply(self, scalar: SFloat | SInt, unsafe=False):
+        return DenseGraphDistribution.create(
+            nodes=self.nodes * scalar,
+            edges=self.edges * scalar,
+            nodes_mask=self.nodes_mask,
+            edges_mask=self.edges_mask,
+            unsafe=unsafe,
         )
 
     @classmethod

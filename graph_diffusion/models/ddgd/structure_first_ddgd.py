@@ -14,6 +14,7 @@ from jaxtyping import jaxtyped
 from jax import jit
 
 from .transition_model import TransitionModel
+from .display import ValidationResultWrapper
 from . import diffusion_functions as df
 from .extra_features.extra_features import compute as compute_extra_features
 from ...shared.graph import graph_distribution as gd
@@ -33,25 +34,24 @@ class GetProbabilityFeature(nn.Module):
         g: gd.OneHotGraph,
         t: Int[Array, "batch_size"],
         structure: gd.OneHotGraph,
+        feature: gd.OneHotGraph,
         deterministic: SBool = False,
     ) -> gd.DenseGraphDistribution:
         g_with_structure = structure.feature_like(g)
         g_input, temporal_embeddings = get_model_input(
             g_with_structure, t, self.use_extra_features, self.transition_model
         )
-        # print(f"{g.shape}")
-        # print(f"{g_input.shape}")
-        try:
-            pred_graph = self.model(
-                g_input, temporal_embeddings, deterministic=deterministic
-            )
-        except:
-            ipdb.set_trace()
+        pred_graph = self.model(
+            g_input, temporal_embeddings, deterministic=deterministic
+        )
         pred_features = pred_graph.feature(unsafe=True)
         graph_with_pred_feature = structure.feature_like(pred_features, unsafe=True)
         pred_features_dense = gd.DenseGraphDistribution.to_dense(
             graph_with_pred_feature.feature(unsafe=True), unsafe=True
         )
+        # pred_features_dense = gd.DenseGraphDistribution.to_dense(
+        #     feature, unsafe=True
+        # ).scalar_multiply(100, unsafe=True)
         return pred_features_dense
 
 
@@ -75,7 +75,7 @@ class StructureFirstDDGD(nn.Module):
     noise_schedule_type: str = "cosine"
     use_extra_features: SBool = False
     use_feature: SBool = True  # useful for debugging
-    use_structure: SBool = True  # useful for debugging
+    use_structure: SBool = False  # useful for debugging
 
     def setup(self):
         feature_edges_prior = (
@@ -121,18 +121,15 @@ class StructureFirstDDGD(nn.Module):
         self,
         target: gd.OneHotGraph,
         rng_key: Key,
-    ):
+    ) -> ValidationResultWrapper:
         """
         Val loss in this case is the mean of the
         structure only diffusion loss and the feature only diffusion loss
         """
 
         target_structure, target_feature = target.decompose_structure_and_feature()
-        p_feature_deterministic = jax.tree_util.Partial(
-            self.p_feature, structure=target_structure, deterministic=True
-        )
-        structure_loss = {}
-        feature_loss = {}
+
+        losses = {}
         if self.use_structure:
             structure_loss = df.compute_val_loss(
                 target=target_structure,
@@ -141,8 +138,14 @@ class StructureFirstDDGD(nn.Module):
                 p=self.p_structure_deterministic,
                 nodes_dist=self.nodes_dist,
             )
-            structure_loss = {f"str_{k}": val for k, val in structure_loss.items()}
+            losses["structure"] = structure_loss
         if self.use_feature:
+            p_feature_deterministic = jax.tree_util.Partial(
+                self.p_feature,
+                structure=target_structure,
+                feature=target_feature,  # FIXME: just for debugging
+                deterministic=True,
+            )
             feature_loss = df.compute_val_loss(
                 target=target_feature,
                 transition_model=self.feature_transition_model,
@@ -150,28 +153,8 @@ class StructureFirstDDGD(nn.Module):
                 p=p_feature_deterministic,
                 nodes_dist=self.nodes_dist,
             )
-            feature_loss = {f"feat_{k}": val for k, val in feature_loss.items()}
-        # return {
-        #     key: np.mean(np.array(tuple(loss[key] for loss in losses)))
-        #     for key in losses[0].keys()
-        # }
-        return (
-            feature_loss
-            | structure_loss
-            | {
-                "nll": np.mean(
-                    np.array(
-                        tuple(
-                            loss[f"{prefix}_nll"]
-                            for prefix, loss in zip(
-                                ("str", "feat"), (structure_loss, feature_loss)
-                            )
-                        )
-                    ),
-                    axis=0,
-                )
-            }
-        )
+            losses["feature"] = feature_loss
+        return ValidationResultWrapper(data=losses)
 
     def predict_feature(
         self, g: gd.OneHotGraph, t: Int[Array, "b"], rng: Key
@@ -220,7 +203,10 @@ class StructureFirstDDGD(nn.Module):
     ):
         target_structure, target_feature = target.decompose_structure_and_feature()
         p_feature_nondeterministic = jax.tree_util.Partial(
-            self.p_feature, structure=target_structure, deterministic=False
+            self.p_feature,
+            structure=target_structure,
+            feature=target_feature,
+            deterministic=False,
         )
         tot_loss = 0
         if self.use_structure:

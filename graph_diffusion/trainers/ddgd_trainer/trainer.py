@@ -122,16 +122,6 @@ def to_one_hot(nodes, edges, _, nodes_counts, device=jax.devices("cpu")[0]):
     )
 
 
-# @jit
-def convert_to_shuffle_conding_metric(
-    val: Float[Array, "v"], target: GraphDistribution
-):
-    tot_edges_mask = target.edges.argmax(-1) > 0
-    edges_count = tot_edges_mask.sum((1, 2))
-    # converts val in log2
-    return val / (edges_count * np.log(2))
-
-
 def shard_graph(g: gd.GraphDistribution):
     num_devices = jax.device_count()
 
@@ -145,62 +135,6 @@ def shard_graph(g: gd.GraphDistribution):
     data = (g.nodes, g.edges, g.nodes_mask, g.edges_mask)
     trimmed_data = tuple(trim_to_divisible(x) for x in data)
     return tuple(x.reshape((num_devices, -1) + x.shape[1:]) for x in trimmed_data)
-
-
-from rich.table import Table
-from rich.style import Style
-
-
-def dict_to_table(title: str, data: dict[str, Array], epoch: int | None = None):
-    # Create a table with the title "Val Loss"
-    # the title will be the best color, different from the header
-    table = Table(
-        title=f"{title}"
-        + (f" [dim](epoch {epoch})[/dim]" if epoch is not None else ""),
-        title_style=Style(color="green", bold=True),
-        header_style=Style(color="magenta", bold=True),
-        show_header=True,
-        style=Style(color="green"),
-        # row_styles=["", "dim"],
-    )
-
-    # Extract feature and structure keys and values
-    feature_keys = [key.replace("feat_", "") for key in data if key.startswith("feat_")]
-    structure_keys = [key.replace("str_", "") for key in data if key.startswith("str_")]
-
-    # Add columns based on the keys
-    table.add_column(
-        "Metrics",
-        style=Style(color="yellow", bold=True),
-    )
-    table.add_column("NLL", style=Style(color="cyan"))
-    for key in feature_keys:
-        if key != "nll":
-            table.add_column(key, style=Style(color="cyan"))
-
-    # Add feature row
-    feature_values = [
-        data.get(f"feat_{key}", data.get("nll"))
-        for key in ["nll"] + [k for k in feature_keys if k != "nll"]
-    ]
-    table.add_row(
-        "Features",
-        *[str(round(val.item(), 4)) for val in feature_values],
-    )
-    # Add structure row
-    structure_values = [
-        data.get(f"str_{key}", data.get("nll"))
-        for key in ["nll"] + [k for k in structure_keys if k != "nll"]
-    ]
-    table.add_row(
-        "Structure",
-        *[str(round(val.item(), 4)) for val in structure_values],
-    )
-    table.add_row(
-        "Total",
-        str(round(data["nll"].item(), 4)),
-    )
-    return table
 
 
 @dataclass
@@ -346,9 +280,10 @@ class Trainer:
         self,
         *,
         rng: Key,
-    ) -> tuple[dict[str, Float[Array, ""]], float]:
-        run_losses: list[dict[str, Float[Array, "batch_size"]]] = []
+    ):  # -> tuple[dict[str, Float[Array, ""]], float]:
+        # run_losses: list[dict[str, Float[Array, "batch_size"]]] = []
         t0 = time()
+        losses = None
         for i, x in enumerate(tqdm(self.val_loader)):
             step_rng = jax.random.fold_in(rng, enc(f"val_step_{i}"))
             one_hot_graph = to_one_hot(*x)
@@ -362,34 +297,24 @@ class Trainer:
             one_hot_graph = one_hot_graph[
                 :new_bs
             ]  # the new exact batch size depends on the number of devices
-            sharded_losses = self.parallel_val_step(
+            new_loss = self.parallel_val_step(
                 sharded_nodes,
                 sharded_edges,
                 sharded_nodes_mask,
                 sharded_edges_mask,
                 params=jax_utils.replicate(self.state.params),
                 val_rng=jax.random.split(step_rng, self.n_devices),
-            )
-            losses = jax.tree_map(
-                lambda x: x.reshape(-1),
-                sharded_losses,
-            )
+            ).unshard()
+            if losses is None:
+                losses = new_loss
+            else:
+                losses += new_loss
             if self.shuffle_coding_metric:
-                losses = {
-                    k: convert_to_shuffle_conding_metric(v, one_hot_graph)
-                    for k, v in losses.items()
-                }
-            run_losses.append(losses)
-        assert len(run_losses) > 0
+                losses = losses.convert_to_shuffle_conding_metric(one_hot_graph)
+        assert losses is not None
         t1 = time()
         total_time = t1 - t0
-        avg_losses = {
-            k: np.concatenate(
-                [(r[k] if len(r[k].shape) > 0 else r[k][None]) for r in run_losses]
-            ).mean()
-            for k in run_losses[0].keys()
-            if k != "kl_prior"
-        }
+        avg_losses = losses.mean()
         return avg_losses, total_time
 
     def __train_epoch(
@@ -403,7 +328,6 @@ class Trainer:
         for i, x in enumerate(tqdm(self.train_loader)):
             one_hot_graph = to_one_hot(*x)
             step_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
-            structure_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
             (
                 sharded_nodes,
                 sharded_edges,
@@ -444,7 +368,7 @@ class Trainer:
     def predict_feature(self):
         self.__restore_checkpoint()
         data = to_one_hot(*next(iter(self.val_loader)))
-        data = data[:5]
+        data = data[:9]
         t = np.ones(data.batch_size, int) * self.diffusion_steps
         rng = jax.random.PRNGKey(pyrandom.randint(0, 100000))
         g_t, g_pred = self.ddgd.apply(
@@ -578,7 +502,6 @@ class Trainer:
 
         return optax.chain(*components) if len(components) > 1 else components[0]
 
-    # @typed
     def train(
         self,
     ):
@@ -607,7 +530,7 @@ class Trainer:
         )
         min_val_loss = val_loss
         min_train_loss = np.inf
-        print(dict_to_table(f"Val Loss (prior training)", val_loss, epoch=0))
+        print(val_loss.to_rich_table(f"Val Loss (prior training)", epoch=0))
         eval_every = 4
         for epoch_idx in range(last_epoch, self.num_epochs + 1):
             val_rng_epoch = jax.random.fold_in(rng, enc(f"val_rng_{epoch_idx}"))
@@ -619,12 +542,9 @@ class Trainer:
             if train_loss < min_train_loss:
                 min_train_loss = train_loss
             wandb.log(
-                {
-                    "main/nll": val_loss["nll"],
-                    "main/structure": val_loss["str_nll"],
-                    "main/feature": val_loss["feat_nll"],
-                }
-                | {f"minor/{key}": val for key, val in val_loss if not "nll" in key}
+                {f"main/{key}": val["nll"] for key, val in val_loss.items()}
+                | {f"main/total": val_loss.nll}
+                | val_loss.flatten()
                 | {"train_losses/train_loss": train_loss},
                 epoch_idx,
             )
@@ -636,17 +556,10 @@ class Trainer:
                 val_loss, val_time = self.__val_epoch(
                     rng=val_rng_epoch,
                 )
-                # print(
-                #     f"""
-                #     current={prettify(val_loss)}
-                #     best={prettify(min_val_loss)}
-                #     time={val_time:.4f}"""
-                # )
-
-                print(dict_to_table(f"Cur Val Loss", val_loss, epoch=0))
-                print(dict_to_table(f"Best Val Loss", min_val_loss, epoch=0))
+                print(val_loss.to_rich_table(f"Cur Val Loss", epoch=0))
+                print(val_loss.to_rich_table(f"Best Val Loss", epoch=0))
                 print(f"[green]time took[/green]={val_time:.4f}")
-                if val_loss["nll"] < min_val_loss["nll"]:
+                if val_loss < min_val_loss:
                     print(f"[yellow] Saving checkpoint[/yellow]")
                     self.checkpoint_manager.save(epoch_idx, self.state)
                     self.sample(
@@ -658,7 +571,7 @@ class Trainer:
                     )
                     min_val_loss = val_loss
 
-        rng, _ = jax.random.split(self.rngs["params"])
+        rng = jax.random.fold_in(self.rngs["params"], enc("final_val"))
         val_loss, val_time = self.__val_epoch(
             rng=rng,
         )

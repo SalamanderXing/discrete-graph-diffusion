@@ -13,7 +13,7 @@ data_key = jax.random.PRNGKey(0)
 
 
 gpu = True
-do_jit = True 
+do_jit = True
 debug_compiles = False
 batch_size = 600
 
@@ -71,7 +71,7 @@ dataset = load_data(
     batch_size=batch_size,
 )
 
-diffusion_steps = 500
+diffusion_steps = 1000
 import random as pyrandom
 
 rngs = {
