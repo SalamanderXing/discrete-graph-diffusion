@@ -141,6 +141,8 @@ def shard_graph(g: gd.GraphDistribution):
 class Trainer:
     class DiffusionType(enum.Enum):
         structure_first = "structure-first"
+        structure_only = "structure-only"
+        feature_only = "feature-only"
         simple = "simple"
 
     model_class: type[nn.Module]
@@ -210,7 +212,11 @@ class Trainer:
                 use_extra_features=self.use_extra_features,
                 n_layers=self.n_layers,
             )
-        elif self.diffusion_type == self.__class__.DiffusionType.structure_first:
+        elif self.diffusion_type in (
+            self.__class__.DiffusionType.structure_first,
+            self.__class__.DiffusionType.structure_only,
+            self.__class__.DiffusionType.feature_only,
+        ):
             assert self.structure_nodes_prior is not None
             assert self.structure_edges_prior is not None
             self.ddgd = StructureFirstDDGD(
@@ -227,6 +233,16 @@ class Trainer:
                 noise_schedule_type=self.noise_schedule_type,
                 use_extra_features=self.use_extra_features,
                 n_layers=self.n_layers,
+                use_structure=self.diffusion_type
+                in (
+                    self.__class__.DiffusionType.structure_only,
+                    self.__class__.DiffusionType.structure_first,
+                ),
+                use_feature=self.diffusion_type
+                in (
+                    self.__class__.DiffusionType.feature_only,
+                    self.__class__.DiffusionType.structure_first,
+                ),
             )
         else:
             raise ValueError(f"Unknown diffusion type {self.diffusion_type}")
@@ -350,8 +366,11 @@ class Trainer:
         tot_time = t1 - t0
         return avg_loss, tot_time  # type: ignore
 
-    def predict_structure(self):
-        self.__restore_checkpoint()
+    def predict_structure(
+        self, restore_checkpoint: bool = True, location: str | None = None
+    ):
+        if restore_checkpoint:
+            self.__restore_checkpoint()
         data = to_one_hot(*next(iter(self.val_loader)))
         data = data[:5]
         t = np.ones(data.batch_size, int) * self.diffusion_steps
@@ -363,10 +382,13 @@ class Trainer:
             rng,
             method=self.ddgd.predict_structure,
         )
-        gd.plot([data, g_pred, g_t], shared_position_option="col")
+        gd.plot([data, g_pred, g_t], shared_position_option="col", location=location)
 
-    def predict_feature(self):
-        self.__restore_checkpoint()
+    def predict_feature(
+        self, restore_checkpoint: bool = True, location: str | None = None
+    ):
+        if restore_checkpoint:
+            self.__restore_checkpoint()
         data = to_one_hot(*next(iter(self.val_loader)))
         data = data[:9]
         t = np.ones(data.batch_size, int) * self.diffusion_steps
@@ -378,7 +400,23 @@ class Trainer:
             rng,
             method=self.ddgd.predict_feature,
         )
-        gd.plot([data, g_pred, g_t], shared_position_option="col")
+        gd.plot([data, g_pred, g_t], shared_position_option="col", location=location)
+
+    def predict(self, restore_checkpoint: bool = True, location: str | None = None):
+        if self.diffusion_type in (
+            self.__class__.DiffusionType.structure_first,
+            self.__class__.DiffusionType.structure_only,
+        ):
+            self.predict_structure(
+                restore_checkpoint=restore_checkpoint, location=location
+            )
+        elif self.diffusion_type in (
+            self.__class__.DiffusionType.structure_first,
+            self.__class__.DiffusionType.structure_only,
+        ):
+            self.predict_feature(
+                restore_checkpoint=restore_checkpoint, location=location
+            )
 
     def plot_preds(
         self,
@@ -562,9 +600,13 @@ class Trainer:
                 if val_loss < min_val_loss:
                     print(f"[yellow] Saving checkpoint[/yellow]")
                     self.checkpoint_manager.save(epoch_idx, self.state)
-                    self.sample(
+                    # self.sample(
+                    #     restore_checkpoint=False,
+                    #     save_to="wandb",
+                    # )
+                    self.predict(
                         restore_checkpoint=False,
-                        save_to="wandb",
+                        location="wandb",
                     )
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
