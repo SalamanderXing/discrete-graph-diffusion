@@ -58,7 +58,7 @@ def install_dependencies():
             continue
         if any(keyword in line for keyword in forbidden_keywords):
             continue
-        run_command(f"pip install {line}")
+        run_command(f"pip install --upgrade {line}")
         print(f"Installed {i+1}/{len(requirements)} packages.")
     run_command(
         "pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html"
