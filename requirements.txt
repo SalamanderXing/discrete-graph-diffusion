@@ -128,5 +128,11 @@ wrapt==1.15.0
 zipp==3.16.2
 jaxtyping==0.2.21
 rdkit
+pandas
+omegaconf
+overrides
+pytorch-lightning
+einops
+matplotlib
 typing_extensions==4.5.0
 
