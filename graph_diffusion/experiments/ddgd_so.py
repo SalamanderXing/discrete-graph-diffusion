@@ -78,7 +78,7 @@ rngs = {
     "params": random.PRNGKey(pyrandom.randint(0, 10000)),
     "dropout": random.PRNGKey(pyrandom.randint(0, 10000)),
 }
-save_path = os.path.join(mate.save_dir, f"{diffusion_steps}_diffusion_steps")
+save_path = os.path.join(mate.results_dir, f"{diffusion_steps}_diffusion_steps")
 os.makedirs(save_path, exist_ok=True)
 os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)
 
