@@ -2,13 +2,13 @@ import subprocess
 import os
 
 
-def run_command(command):
+def run_command(command, cwd=None):
     """
     Executes a command and returns its output.
     """
     try:
         result = subprocess.run(
-            command, check=True, capture_output=True, text=True, shell=True
+            command, check=True, capture_output=True, text=True, shell=True, cwd=cwd
         )
         return result.stdout
     except subprocess.CalledProcessError as e:
@@ -46,17 +46,22 @@ def install_python_311():
 def install_dependencies():
     forbidden_packages = ["jax"]
     forbidden_keywords = ["nvidia"]
-    with open("requirements.txt", "r") as requirements:
-        for line in requirements:
-            package_name = line.split("==")[0]
-            if package_name in forbidden_packages:
-                continue
-            if any(keyword in line for keyword in forbidden_keywords):
-                continue
-            run_command(f"pip install {line}")
+    with open("requirements.txt", "r") as lines:
+        requirements = lines.readlines()
+
+    for i, line in enumerate(requirements):
+        package_name = line.split("==")[0]
+        if package_name in forbidden_packages:
+            continue
+        if any(keyword in line for keyword in forbidden_keywords):
+            continue
+        run_command(f"pip install {line}")
+        print(f"Installed {i+1}/{len(requirements)} packages.")
     run_command(
         "pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html"
     )
+    run_command("git clone https://github.com/salamanderXing/mate")
+    run_command("pip install -e .", cwd="mate")
 
 
 def activate_virtualenv():
