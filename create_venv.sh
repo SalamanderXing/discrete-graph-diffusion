@@ -9,5 +9,4 @@ if ! python3.11 --version &>/dev/null; then
   python3.11 -m pip install virtualenv
   python3.11 -m virtualenv venv
 fi
-pip install -r requirements.txt
 source venv/bin/activate
