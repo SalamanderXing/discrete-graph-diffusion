@@ -15,7 +15,7 @@ data_key = jax.random.PRNGKey(0)
 gpu = True
 do_jit = True
 debug_compiles = False
-batch_size = 8 * 600
+batch_size = 8 * 1000
 
 if not gpu:
     jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
@@ -101,7 +101,7 @@ trainer = Trainer(
     bits_per_edge=False,
     diffusion_steps=diffusion_steps,
     noise_schedule_type="cosine",
-    learning_rate=0.0002,
+    learning_rate=0.0001,
     log_every_steps=4,
     max_num_nodes=dataset.n,
     num_node_features=dataset.max_node_feature,
