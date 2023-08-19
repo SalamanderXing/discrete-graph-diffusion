@@ -35,7 +35,7 @@ def install_python_311():
     run_command("wget https://bootstrap.pypa.io/get-pip.py")
     run_command("python3.11 get-pip.py")
     run_command("python3.11 -m pip install virtualenv")
-    run_command("python3.11 -m virtualenv venv")
+    run_command("python3.11 -m virtualenv ~/venv")
 
     # Add activation line to .bashrc
     with open(os.path.expanduser("~/.bashrc"), "a") as bashrc:
@@ -68,7 +68,7 @@ def activate_virtualenv():
     """
     Activates the virtual environment.
     """
-    activation_script = os.path.join(os.getcwd(), "venv", "bin", "activate_this.py")
+    activation_script = os.path.join("~", "venv", "bin", "activate_this.py")
     with open(activation_script) as f:
         exec(f.read(), {"__file__": activation_script})
 
@@ -77,8 +77,8 @@ def main():
     if not is_python_311_installed():
         print("Python 3.11 is not installed.")
         install_python_311()
-    install_dependencies()
     activate_virtualenv()
+    install_dependencies()
 
 
 if __name__ == "__main__":
