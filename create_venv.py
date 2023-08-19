@@ -71,7 +71,8 @@ def activate_virtualenv():
     """
     Activates the virtual environment.
     """
-    activation_script = os.path.join("~", "venv", "bin", "activate_this.py")
+    #activation_script = os.path.join("~", "venv", "bin", "activate_this.py")
+    activation_script = "~/venv/bin/activate_this.py"
     with open(activation_script) as f:
         exec(f.read(), {"__file__": activation_script})
 
