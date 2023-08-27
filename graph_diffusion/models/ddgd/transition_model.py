@@ -9,9 +9,12 @@ import jax
 import ipdb
 
 import einops as e
+from .q import Q, StructureOnlyQ, FeatureOnlyQ
 from ...shared.graph import graph_distribution as gd
+from enum import Enum
 
-Q, GraphDistribution = gd.Q, gd.GraphDistribution
+GraphDistribution = gd.GraphDistribution
+
 
 @jaxtyped
 @beartype
@@ -51,6 +54,7 @@ def compute_noise_schedule(
     alphas_bar = np.exp(log_alpha_bar)
     return betas, alphas, alphas_bar
 
+
 @jaxtyped
 @beartype
 def get_timestep_embedding(
@@ -80,6 +84,11 @@ class TransitionModel:
     temporal_embeddings: Float[Array, "t1 temporal_embedding_dim"]
     limit_dist: gd.DenseGraphDistribution
 
+    class NoiseType:
+        STRUCTURE_ONLY = "structure_only"
+        FEATURE_ONLY = "feature_only"
+        STRUCTURE_AND_FEATURE = "structure_and_feature"
+
     @classmethod
     @jaxtyped
     @beartype
@@ -93,7 +102,16 @@ class TransitionModel:
         schedule_type: str = "linear",
         adjust_prior=False,
         concat_flag_to_temporal_embeddings: bool | Int[Array, "flag"] = False,
+        noise_type: str = NoiseType.STRUCTURE_AND_FEATURE,
     ) -> "TransitionModel":
+        if noise_type == cls.NoiseType.STRUCTURE_ONLY:
+            q_class = StructureOnlyQ
+        elif noise_type == cls.NoiseType.FEATURE_ONLY:
+            q_class = FeatureOnlyQ
+        elif noise_type == cls.NoiseType.STRUCTURE_AND_FEATURE:
+            q_class = Q
+        else:
+            raise ValueError("noise_type must be one of the defined types")
         prior_type = ""
         if prior_type == "uniform":
             nodes_prior = np.ones(nodes_prior.shape[0]) / nodes_prior.shape[0]
@@ -132,14 +150,14 @@ class TransitionModel:
         else:
             q_nodes = betas * u_nodes + (1 - betas) * In
         q_edges = betas * u_edges + (1 - betas) * Ie
-        qs = Q(nodes=q_nodes, edges=q_edges)
+        qs = q_class(nodes=q_nodes, edges=q_edges)
         betas_bar = 1 - alphas_bar[:, None, None]
         if node_classes == 1:
             q_bar_xs = np.ones((diffusion_steps + 1, 1, 1))
         else:
             q_bar_xs = betas_bar * u_nodes + (1 - betas_bar) * In
         q_bar_es = betas_bar * u_edges + (1 - betas_bar) * Ie
-        q_bars = Q(nodes=q_bar_xs, edges=q_bar_es)
+        q_bars = q_class(nodes=q_bar_xs, edges=q_bar_es)
         temporal_embeddings = get_timestep_embedding(
             np.arange(diffusion_steps), temporal_embedding_dim
         )

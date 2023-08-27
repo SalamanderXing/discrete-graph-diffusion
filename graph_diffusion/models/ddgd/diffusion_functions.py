@@ -25,7 +25,7 @@ import einops as e
 GraphDistribution = gd.GraphDistribution
 EdgeDistribution = gd.EdgeDistribution
 NodeDistribution = gd.NodeDistribution
-Q = gd.Q
+# Q = gd.Q
 
 GetProbabilityType = Callable[
     [gd.GraphDistribution, Int[Array, "batch_size"]], gd.DenseGraphDistribution
@@ -146,7 +146,7 @@ def predict_from_timesteps(
     rng_z: Key,
 ):
     q_t_b = transition_model.q_bars[t]
-    q_t_bar_given_g = gd.matmul(g, q_t_b)
+    q_t_bar_given_g = q_t_b.apply_to(g)  # gd.matmul(g, q_t_b)
     g_t = gd.sample_one_hot(q_t_bar_given_g, rng_z)
     g_pred = p(g_t, t)
     return t, g_t, g_pred
@@ -201,7 +201,7 @@ def compute_reconstruction_logp(
     rng_z = jax.random.fold_in(rng_key, enc("z"))
     t_0 = np.zeros(g.nodes.shape[0], dtype=int)
     q_0 = transition_model.qs[t_0]
-    q_0_given_g = gd.matmul(g, q_0)
+    q_0_given_g = q_0.apply_to(g)  # (g, q_0)
     z_1 = gd.sample_one_hot(q_0_given_g, rng_z)
     g_pred = gd.softmax(p(z_1, t_0))
     return _compute_reconstruction_logp(
@@ -230,7 +230,7 @@ def compute_kl_prior(
     qt_bar_T = transition_model.q_bars[np.array([-1])]
 
     # Compute transition probabilities
-    transition_probs = gd.matmul(target, qt_bar_T)
+    transition_probs = qt_bar_T.apply_to(target)  # (target, qt_bar_T)
 
     limit_dist = transition_model.limit_dist.repeat(target.nodes.shape[0])
     return gd.kl_div(transition_probs, limit_dist)

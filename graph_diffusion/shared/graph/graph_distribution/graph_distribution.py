@@ -15,7 +15,7 @@ from jax.scipy.special import logit
 from jax import random
 
 # from .data_batch import DataBatch
-from .q import Q
+# from .q import Q
 
 from einops import rearrange, reduce, repeat
 

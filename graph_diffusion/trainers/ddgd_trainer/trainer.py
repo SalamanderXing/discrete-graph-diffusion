@@ -367,7 +367,10 @@ class Trainer:
         return avg_loss, tot_time  # type: ignore
 
     def predict_structure(
-        self, restore_checkpoint: bool = True, location: str | None = None
+        self,
+        title: str = "",
+        restore_checkpoint: bool = True,
+        location: str | None = None,
     ):
         if restore_checkpoint:
             self.__restore_checkpoint()
@@ -382,10 +385,18 @@ class Trainer:
             rng,
             method=self.ddgd.predict_structure,
         )
-        gd.plot([data, g_pred, g_t], shared_position_option="col", location=location)
+        gd.plot(
+            [data, g_pred, g_t],
+            title=title,
+            shared_position_option="col",
+            location=location,
+        )
 
     def predict_feature(
-        self, restore_checkpoint: bool = True, location: str | None = None
+        self,
+        title: str = "",
+        restore_checkpoint: bool = True,
+        location: str | None = None,
     ):
         if restore_checkpoint:
             self.__restore_checkpoint()
@@ -400,22 +411,32 @@ class Trainer:
             rng,
             method=self.ddgd.predict_feature,
         )
-        gd.plot([data, g_pred, g_t], shared_position_option="col", location=location)
+        gd.plot(
+            [data, g_pred, g_t],
+            title=title,
+            shared_position_option="col",
+            location=location,
+        )
 
-    def predict(self, restore_checkpoint: bool = True, location: str | None = None):
+    def predict(
+        self,
+        title: str = "",
+        restore_checkpoint: bool = True,
+        location: str | None = None,
+    ):
         if self.diffusion_type in (
             self.__class__.DiffusionType.structure_first,
             self.__class__.DiffusionType.structure_only,
         ):
             self.predict_structure(
-                restore_checkpoint=restore_checkpoint, location=location
+                title=title, restore_checkpoint=restore_checkpoint, location=location
             )
         elif self.diffusion_type in (
             self.__class__.DiffusionType.structure_first,
             self.__class__.DiffusionType.structure_only,
         ):
             self.predict_feature(
-                restore_checkpoint=restore_checkpoint, location=location
+                title=title, restore_checkpoint=restore_checkpoint, location=location
             )
 
     def plot_preds(
@@ -563,10 +584,6 @@ class Trainer:
         stopping_criterion = -5
         rng, _ = jax.random.split(self.rngs["params"])
         rng, rng_this_epoch = jax.random.split(rng)  # TODO use that
-        # self.sample(
-        #     restore_checkpoint=False,
-        #     save_to="wandb",  # os.path.join(self.plot_path, f"raw_sample.png"),
-        # )
         val_loss, val_time = self.__val_epoch(
             rng=rng_this_epoch,
         )
@@ -607,13 +624,10 @@ class Trainer:
                     )
                     print(f"[yellow] Saving checkpoint[/yellow]")
                     self.checkpoint_manager.save(epoch_idx, self.state)
-                    # self.sample(
-                    #     restore_checkpoint=False,
-                    #     save_to="wandb",
-                    # )
                     self.predict(
                         restore_checkpoint=False,
                         location="wandb",
+                        title=f"val nll: {val_loss.nll:.4f}",
                     )
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"

@@ -26,7 +26,8 @@ from typing import Sequence
 from jax import random
 from jax import lax
 from jax.scipy.special import xlogy
-from .q import Q
+
+# from .q import Q
 
 ## only used for testing ##
 import torch.nn.functional as F
@@ -82,7 +83,6 @@ def dense_to_structure_dense(g: DenseGraphDistribution):
         nodes_mask=g.nodes_mask,
         edges_mask=g.edges_mask,
     )
-
 
 
 def one_hot_structure_to_dense(
@@ -291,16 +291,16 @@ def sample_one_hot(g: DenseGraphDistribution, rng_key: Key) -> OneHotGraph:
 
 
 # @jax.jit
-def matmul(g: OneHotGraph, q: Q):
-    x = g.nodes @ q.nodes
-    den_x = np.where(g.nodes_mask, np.sum(x, -1), 1)
-    x /= den_x[..., None]
-    e = g.edges @ q.edges[:, None]
-    den_e = np.where(g.edges_mask, np.sum(e, -1), 1)
-    e /= den_e[..., None]
-    return DenseGraphDistribution.create_and_mask(
-        nodes=x, edges=e, nodes_mask=g.nodes_mask, edges_mask=g.edges_mask
-    )
+# def matmul(g: OneHotGraph, q: Q):
+#     x = g.nodes @ q.nodes
+#     den_x = np.where(g.nodes_mask, np.sum(x, -1), 1)
+#     x /= den_x[..., None]
+#     e = g.edges @ q.edges[:, None]
+#     den_e = np.where(g.edges_mask, np.sum(e, -1), 1)
+#     e /= den_e[..., None]
+#     return DenseGraphDistribution.create_and_mask(
+#         nodes=x, edges=e, nodes_mask=g.nodes_mask, edges_mask=g.edges_mask
+#     )
 
 
 def sum(g: GraphDistribution) -> Array:

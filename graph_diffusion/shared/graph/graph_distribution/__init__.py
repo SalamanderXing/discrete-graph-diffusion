@@ -5,7 +5,7 @@ from .graph_distribution import (
     StructureOneHotGraph,
     FeatureOneHotGraph
 )
-from .q import Q
+# from .q import Q
 from .functional import *
 from .plot import plot
 from .variational_graph_distribution import (

@@ -44,15 +44,16 @@ class GetProbabilityFeature(nn.Module):
         pred_graph = self.model(
             g_input, temporal_embeddings, deterministic=deterministic
         )
-        pred_features = pred_graph.feature(unsafe=True)
-        graph_with_pred_feature = structure.feature_like(pred_features, unsafe=True)
-        pred_features_dense = gd.DenseGraphDistribution.to_dense(
-            graph_with_pred_feature.feature(unsafe=True), unsafe=True
-        )
+        # pred_features = pred_graph.feature(unsafe=True)
+        # graph_with_pred_feature = structure.feature_like(pred_features, unsafe=True)
+        # pred_features_dense = gd.DenseGraphDistribution.to_dense(
+        #     graph_with_pred_feature.feature(unsafe=True), unsafe=True
+        # )
         # pred_features_dense = gd.DenseGraphDistribution.to_dense(
         #     feature, unsafe=True
         # ).scalar_multiply(100, unsafe=True)
-        return pred_features_dense
+        # return pred_features_dense
+        return pred_graph
 
 
 from typing import Callable
@@ -88,6 +89,7 @@ class StructureFirstDDGD(nn.Module):
             diffusion_steps=self.structure_diffusion_steps,
             temporal_embedding_dim=self.temporal_embedding_dim,
             n=self.n,
+            noise_type=TransitionModel.NoiseType.STRUCTURE_ONLY,
         )
         # assert np.sum(np.array(self.structure_transition_model.qs.nodes.shape[1:])) == 2
         self.feature_transition_model = TransitionModel.create(
@@ -97,6 +99,7 @@ class StructureFirstDDGD(nn.Module):
             diffusion_steps=self.feature_diffusion_steps,
             temporal_embedding_dim=self.temporal_embedding_dim,
             n=self.n,
+            # noise_type=TransitionModel.NoiseType.FEATURE_ONLY,
         )
         self.p_structure = GetProbability(
             transition_model=self.structure_transition_model,
