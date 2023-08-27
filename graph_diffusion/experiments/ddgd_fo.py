@@ -15,8 +15,8 @@ data_key = jax.random.PRNGKey(0)
 gpu = True
 do_jit = True
 debug_compiles = False
-#batch_size = 8 * 1000
-batch_size = 500
+# batch_size = 8 * 1000
+
 
 if not gpu:
     jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
@@ -58,6 +58,7 @@ from rich import print
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
 
 device = xla_bridge.get_backend().platform
+
 print(f"Using device: [yellow]{device} [/yellow]")
 if device.lower() == "cpu":
     print("[red]WARNING: :skull:[/red] Running on CPU. This will be slow.")
@@ -65,8 +66,10 @@ if device.lower() == "cpu":
 if not do_jit:
     print("[red]WARNING: :skull:[/red] Running without JIT. This will be slow.")
 
-
-ds_name = "QM9"  # "PTC_MR"# "MUTAG"
+if device in ["gpu", "cpu"]:
+    batch_size = 512
+else:
+    batch_size = 8 * 1000
 dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
