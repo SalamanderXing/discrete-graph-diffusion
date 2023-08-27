@@ -1,1 +1,1 @@
-from .ddgd import Trainer
+from .trainer import Trainer

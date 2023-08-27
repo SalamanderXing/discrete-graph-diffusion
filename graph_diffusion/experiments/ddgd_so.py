@@ -15,7 +15,7 @@ data_key = jax.random.PRNGKey(0)
 gpu = True
 do_jit = True
 debug_compiles = False
-batch_size = 512
+
 
 if not gpu:
     jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
@@ -27,32 +27,15 @@ jax.config.update("jax_debug_nans", True)
 import jax
 from jax import config
 from jax.lib import xla_bridge
-
-
 from mate import mate
-
-# from ..data_loaders.qm9_digress import load_data
 import os
-
-
-from ..data_loaders.qm92 import load_data
-from ..models.gt_digress import GraphTransformer
-from ..trainers.ddgd_trainer import Trainer
-
 from jax import numpy as np
 from jax import random
 from rich import print
-
-# data_module = QM9DataModule(
-#     mate.data_dir,
-#     remove_h=True,
-#     train_batch_size=32,
-#     val_batch_size=32,
-#     test_batch_size=32,
-# )
-# data_module.prepare_data()
-#
-# ds_infos = QM9Infos(data_module, remove_h=True)
+import random as pyrandom
+from ..data_loaders.qm92 import load_data
+from ..models.gt_digress import GraphTransformer
+from ..trainers.ddgd_trainer import Trainer
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
 
@@ -63,8 +46,10 @@ if device.lower() == "cpu":
 
 if not do_jit:
     print("[red]WARNING: :skull:[/red] Running without JIT. This will be slow.")
-
-
+if device in ["gpu", "cpu"]:
+    batch_size = 512
+else:
+    batch_size = 8 * 1000
 ds_name = "QM9"  # "PTC_MR"# "MUTAG"
 dataset = load_data(
     save_dir=mate.data_dir,
@@ -72,7 +57,6 @@ dataset = load_data(
 )
 
 diffusion_steps = 1000
-import random as pyrandom
 
 rngs = {
     "params": random.PRNGKey(pyrandom.randint(0, 10000)),
@@ -101,13 +85,13 @@ trainer = Trainer(
     bits_per_edge=False,
     diffusion_steps=diffusion_steps,
     noise_schedule_type="cosine",
-    learning_rate=0.0002,
+    learning_rate=0.0001,
     log_every_steps=4,
     max_num_nodes=dataset.n,
     num_node_features=dataset.max_node_feature,
     num_edge_features=dataset.max_edge_feature,
     train_smiles=dataset.train_smiles,
-    diffusion_type=Trainer.DiffusionType.simple,
+    diffusion_type=Trainer.DiffusionType.structure_only,
 )
 with jax.disable_jit(not do_jit):
     mate.bind(trainer)

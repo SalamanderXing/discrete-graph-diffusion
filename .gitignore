@@ -2,6 +2,9 @@ pytorch/data/*
 pytorch/outputs/*
 .mate/*/venv
 .mate/tmp
+data/
+
+venv/*
 results/*
 results_working_full_epochs/*
 

@@ -15,7 +15,8 @@ data_key = jax.random.PRNGKey(0)
 gpu = True
 do_jit = True
 debug_compiles = False
-batch_size = 512
+#batch_size = 8 * 1000
+batch_size = 500
 
 if not gpu:
     jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
@@ -107,7 +108,7 @@ trainer = Trainer(
     num_node_features=dataset.max_node_feature,
     num_edge_features=dataset.max_edge_feature,
     train_smiles=dataset.train_smiles,
-    diffusion_type=Trainer.DiffusionType.simple,
+    diffusion_type=Trainer.DiffusionType.feature_only,
 )
 with jax.disable_jit(not do_jit):
     mate.bind(trainer)

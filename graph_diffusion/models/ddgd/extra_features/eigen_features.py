@@ -96,7 +96,9 @@ def compute_laplacian(adjacency: Array, normalize: bool) -> Array:
     """
     diag = np.sum(adjacency, axis=-1)  # (bs, n)
     n = diag.shape[-1]
-    D = np.diag(diag)  # Degree matrix      # (bs, n, n)
+    # D = np.diag(diag)  # Degree matrix      # (bs, n, n)
+    eye = np.eye(n)
+    D = diag[:, :, None] * eye[None, :, :]
     combinatorial = D - adjacency  # (bs, n, n)
 
     if not normalize:

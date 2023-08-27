@@ -233,9 +233,7 @@ class NodeEdgeBlock(nn.Module):
         # .flatten(start_axis=3)  # bs, n, n, dx
         ye1 = rearrange(y_e_add(y), "bs de -> bs 1 1 de")
         # .unsqueeze(1).unsqueeze(1)  # bs, 1, 1, de
-        ye2 = rearrange(
-            y_e_mul(y), "bs de -> bs 1 1 de"
-        )  # .unsqueeze(1).unsqueeze(1)
+        ye2 = rearrange(y_e_mul(y), "bs de -> bs 1 1 de")  # .unsqueeze(1).unsqueeze(1)
         newE = ye1 + (ye2 + 1) * newE
 
         # Output E
@@ -297,6 +295,9 @@ class HiddenDims:
     dim_ffy: int
 
 
+from mate.jax import SBool
+
+
 @no_type_check
 class GraphTransformer(nn.Module):
     n_layers: int
@@ -336,7 +337,7 @@ class GraphTransformer(nn.Module):
     @jaxtyped
     @beartype
     @nn.compact
-    def __call__(self, g: gd.GraphDistribution, y, deterministic: bool):
+    def __call__(self, g: gd.GraphDistribution, y, deterministic: SBool):
         act_fn_in = nn.relu
         act_fn_out = nn.relu
         X = g.nodes
@@ -431,4 +432,5 @@ class GraphTransformer(nn.Module):
             edges=E,
             nodes_mask=g.nodes_mask,
             edges_mask=g.edges_mask,
+            unsafe=True,
         )

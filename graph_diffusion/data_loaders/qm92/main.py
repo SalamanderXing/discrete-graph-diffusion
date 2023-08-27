@@ -8,9 +8,13 @@ from typing import Iterable
 from dataclasses import dataclass
 from jaxtyping import Float, Array
 from jax import numpy as jnp
+import tensorflow as tf
+from tensorflow.data import Dataset
 from mate.jax import SFloat
+from .qm9_dataset import QM9DataModule, QM9infos, get_train_smiles
 from ...shared.graph import graph_distribution as gd, graph
 
+tf.config.experimental.set_visible_devices([], "GPU")
 GraphDistribution = gd.GraphDistribution
 
 
@@ -22,8 +26,12 @@ class QM9Dataset:
     max_edge_feature: int
     n: int
     nodes_dist: Float[Array, "k"]
-    node_prior: Float[Array, "m"]
-    edge_prior: Float[Array, "l"]
+    feature_node_prior: Float[Array, "m"]
+    feature_edge_prior: Float[Array, "l"]
+    structure_node_prior: Float[Array, "k"]
+    structure_edge_prior: Float[Array, "k"]
+    infos: QM9infos
+    train_smiles: Iterable[str]
     mean_edge_count: SFloat = 0.0
     mean_node_count: SFloat = 0.0
     var_edge_count: SFloat = 0.0
@@ -65,38 +73,10 @@ def to_dense_numpy(dataloader):
     es = np.concatenate(es, axis=0)
     es[np.where(es.sum(-1) == 0)] = np.eye(es.shape[-1])[0]
     nodes_counts = np.concatenate(nodes_counts, axis=0)
-
-    # zero_node = np.zeros_like(xs)[..., 0][..., None]
-    # zero_edge = np.zeros_like(es)[..., 0][..., None]
-    # xs_ = np.concatenate([zero_node, xs], axis=-1)
-    # es_ = np.concatenate([zero_edge, es], axis=-1)
-    # xs_[np.where(xs.sum(-1) == 0)] = np.eye(xs_.shape[-1])[0]
-    # es_[np.where(es.sum(-1) == 0)] = np.eye(es_.shape[-1])[0]
-    # assert np.all(xs_.sum(-1) == 1)
-    # assert np.all(es_.sum(-1) == 1)
-    # return xs_, es, nodes_counts
     return xs, es, nodes_counts
 
 
 def create_graph(nodes, edges, edges_counts, nodes_counts, onehot: bool, train=False):
-    nodes = np.asarray(nodes)
-    edges = np.asarray(edges)
-    nodes_counts = np.asarray(nodes_counts)
-    edges_counts = np.asarray(edges_counts)
-    assert nodes_counts.shape == edges_counts.shape and len(nodes_counts.shape) == 1
-    if len(nodes.shape) > 3:
-        nodes = nodes.squeeze(-1)
-    if train:
-        batch_size, n, _ = nodes.shape
-        # SOME DATA AUGMENTATION HERE
-
-    nodes = jnp.asarray(nodes)
-
-    edges = jnp.asarray(edges)
-    edges_counts = jnp.asarray(edges_counts)
-    # assert len(nodes_counts.shape) == 1
-    nodes_counts = jnp.asarray(nodes_counts)
-    # assert len(nodes_counts.shape) == 1
     return (
         graph.Graph.create(
             nodes=nodes.argmax(-1).astype(int),
@@ -107,17 +87,15 @@ def create_graph(nodes, edges, edges_counts, nodes_counts, onehot: bool, train=F
             edge_vocab_size=edges.shape[-1],
         )
         if not onehot
-        else gd.create_one_hot_from_counts(
-            nodes=nodes,
-            edges=edges,
-            nodes_counts=nodes_counts,
+        else gd.OneHotGraph.create_from_counts(
+            nodes=jnp.asarray(nodes),
+            edges=jnp.asarray(edges),
+            nodes_counts=jnp.asarray(nodes_counts),
         )
     )
 
 
 def get_dense_data(save_dir: str, batch_size: int, onehot: bool = True):
-    from .qm9_dataset import QM9DataModule, QM9infos, get_train_smiles
-
     cfg = Bunch.from_dict(
         {
             "dataset": {
@@ -137,18 +115,16 @@ def get_dense_data(save_dir: str, batch_size: int, onehot: bool = True):
     datamodule = QM9DataModule(cfg)
     dataset_infos = QM9infos(datamodule=datamodule, cfg=cfg)
     datamodule.prepare_data()
-    # train_smiles = get_train_smiles(
-    #     cfg=cfg,
-    #     train_dataloader=datamodule.train_dataloader(),
-    #     dataset_infos=dataset_infos,
-    #     evaluate_dataset=False,
-    # )
     train_dataloader = datamodule.train_dataloader()
     test_dataloader = datamodule.test_dataloader()
     train_nodes, train_edges, train_nodes_counts = to_dense_numpy(train_dataloader)
     test_nodes, test_edges, test_nodes_counts = to_dense_numpy(test_dataloader)
-    node_prior, edge_prior = compute_priors(
-        train_nodes, train_edges, train_nodes_counts
+    priors = compute_priors(train_nodes, train_edges, train_nodes_counts)
+    train_smiles = get_train_smiles(
+        cfg=cfg,
+        train_dataloader=datamodule.train_dataloader(),
+        dataset_infos=dataset_infos,
+        evaluate_dataset=False,
     )
     return Bunch.from_dict(
         {
@@ -158,34 +134,51 @@ def get_dense_data(save_dir: str, batch_size: int, onehot: bool = True):
             "test_nodes": test_nodes,
             "test_edges": test_edges,
             "test_nodes_counts": test_nodes_counts,
-            "node_prior": node_prior,
-            "edge_prior": edge_prior,
+            "feature_node_prior": priors.feature_node_prior,
+            "feature_edge_prior": priors.feature_edge_prior,
+            "structure_node_prior": priors.structure_node_prior,
+            "structure_edge_prior": priors.structure_edge_prior,
             "nodes_dist": dataset_infos.n_nodes.numpy(),
+            "infos": dataset_infos,
+            "train_smiles": train_smiles,
         }
     )
 
 
 def compute_priors(train_nodes, train_edges, train_nodes_counts):
-    node_prior = np.zeros(train_nodes.shape[-1])
-    edge_prior = np.zeros(train_edges.shape[-1])
+    feature_node_prior = np.zeros(train_nodes.shape[-1])
+    feature_edge_prior = np.zeros(train_edges.shape[-1])
+    structure_node_prior = np.zeros(2)  # any feature is present or not
+    structure_edge_prior = np.zeros(2)  # any feature is present or not
     for i in range(train_nodes.shape[0]):
-        node_prior += train_nodes[i, : train_nodes_counts[i]].sum(0)
-        edge_prior += (
-            train_edges[i, : train_nodes_counts[i], : train_nodes_counts[i]]
-            .sum(0)
-            .sum(0)
+        current_nodes = train_nodes[i, : train_nodes_counts[i]]
+        current_edges = train_edges[i, : train_nodes_counts[i], : train_nodes_counts[i]]
+        nodes_feature_sum = current_nodes.sum(0)
+        edges_feature_sum = current_edges.sum(0).sum(0)
+        feature_node_prior += nodes_feature_sum
+        feature_edge_prior += edges_feature_sum
+        structure_node_prior += np.stack(
+            [nodes_feature_sum[0], nodes_feature_sum[1:].sum()]
         )
-    node_prior = node_prior / node_prior.sum()
-    edge_prior = edge_prior / edge_prior.sum()
-    return node_prior, edge_prior
+        structure_edge_prior += np.stack(
+            [edges_feature_sum[0], edges_feature_sum[1:].sum()]
+        )
+
+    structure_node_prior = structure_node_prior / structure_node_prior.sum()
+    structure_edge_prior = structure_edge_prior / structure_edge_prior.sum()
+    feature_node_prior = feature_node_prior / feature_node_prior.sum()
+    feature_edge_prior = feature_edge_prior / feature_edge_prior.sum()
+    return Bunch.from_dict(
+        dict(
+            feature_node_prior=feature_node_prior,
+            feature_edge_prior=feature_edge_prior,
+            structure_node_prior=structure_node_prior,
+            structure_edge_prior=structure_edge_prior,
+        )
+    )
 
 
 def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
-    import tensorflow as tf
-
-    tf.config.experimental.set_visible_devices([], "GPU")
-    from tensorflow.data import Dataset
-
     train_loader = (
         Dataset.zip(
             (
@@ -196,9 +189,7 @@ def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
                 Dataset.from_tensor_slices(bunch.train_nodes_counts),
             )
         )
-        # .drop_remainder(True)
         .shuffle(1000)
-        .repeat()
         .batch(batch_size)
     )
     test_loader = (
@@ -212,26 +203,20 @@ def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
             )
         )
         # .drop_remainder(True)
-        .shuffle(1000)
-        .repeat()
-        .batch(batch_size)
-    )
-    train_loader = map(
-        lambda x: create_graph(*x, onehot=onehot, train=True),
-        train_loader,
-    )
-    test_loader = map(
-        lambda x: create_graph(*x, onehot=onehot),
-        test_loader,
+        .shuffle(1000).batch(batch_size)
     )
     return QM9Dataset(
         train_loader=train_loader,
         test_loader=test_loader,
-        node_prior=jnp.array(bunch.node_prior),
-        edge_prior=jnp.array(bunch.edge_prior),
+        feature_node_prior=jnp.array(bunch.feature_node_prior),
+        feature_edge_prior=jnp.array(bunch.feature_edge_prior),
+        structure_node_prior=jnp.array(bunch.structure_node_prior),
+        structure_edge_prior=jnp.array(bunch.structure_edge_prior),
         nodes_dist=jnp.array(bunch.nodes_dist),
         max_node_feature=bunch.train_nodes.shape[-1],
         max_edge_feature=bunch.train_edges.shape[-1],
+        infos=bunch.infos,
+        train_smiles=bunch.train_smiles,
         n=bunch.train_nodes.shape[1],
     )
 
@@ -247,6 +232,7 @@ def load_data(save_dir: str, batch_size: int, onehot: bool = True):
     else:
         print("Loading cache")
         dense_data = pickle.load(open(cache, "rb"))
+        print(f"Done.")
     dataset = get_dataloaders(dense_data, batch_size, onehot)
     return dataset
 
