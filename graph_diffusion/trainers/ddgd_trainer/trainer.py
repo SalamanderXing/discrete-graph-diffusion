@@ -599,7 +599,7 @@ class Trainer:
                     rng=val_rng_epoch,
                 )
                 print(val_loss.to_rich_table(f"Cur Val Loss", epoch=0))
-                print(val_loss.to_rich_table(f"Best Val Loss", epoch=0))
+                print(min_val_loss.to_rich_table(f"Best Val Loss", epoch=0))
                 print(f"[green]time took[/green]={val_time:.4f}")
                 if val_loss < min_val_loss:
                     print(
