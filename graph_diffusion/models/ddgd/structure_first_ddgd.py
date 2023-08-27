@@ -44,7 +44,7 @@ class GetProbabilityFeature(nn.Module):
         pred_graph = self.model(
             g_input, temporal_embeddings, deterministic=deterministic
         )
-        # pred_features = pred_graph.feature(unsafe=True)
+        pred_features = pred_graph.feature(unsafe=True)
         # graph_with_pred_feature = structure.feature_like(pred_features, unsafe=True)
         # pred_features_dense = gd.DenseGraphDistribution.to_dense(
         #     graph_with_pred_feature.feature(unsafe=True), unsafe=True
@@ -53,7 +53,7 @@ class GetProbabilityFeature(nn.Module):
         #     feature, unsafe=True
         # ).scalar_multiply(100, unsafe=True)
         # return pred_features_dense
-        return pred_graph
+        return pred_features
 
 
 from typing import Callable
