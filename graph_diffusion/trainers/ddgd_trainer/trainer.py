@@ -376,17 +376,26 @@ class Trainer:
             self.__restore_checkpoint()
         data = to_one_hot(*next(iter(self.val_loader)))
         data = data[:5]
-        t = np.ones(data.batch_size, int) * self.diffusion_steps
-        rng = jax.random.PRNGKey(pyrandom.randint(0, 100000))
-        g_t, g_pred = self.ddgd.apply(
+        t_0 = np.ones(data.batch_size, int)
+        rng_0 = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+        g_t_0, g_pred_0 = self.ddgd.apply(
             self.params,
             data,
-            t,
-            rng,
+            t_0,
+            rng_0,
+            method=self.ddgd.predict_structure,
+        )
+        t_mid = np.ones(data.batch_size, int) * 20
+        rng_mid = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+        g_t_mid, g_pred_mid = self.ddgd.apply(
+            self.params,
+            data,
+            t_mid,
+            rng_mid,
             method=self.ddgd.predict_structure,
         )
         gd.plot(
-            [data, g_pred, g_t],
+            [data, g_pred_0, g_t_0, g_pred_mid, g_t_mid],
             title=title,
             shared_position_option="col",
             location=location,
@@ -402,17 +411,26 @@ class Trainer:
             self.__restore_checkpoint()
         data = to_one_hot(*next(iter(self.val_loader)))
         data = data[:9]
-        t = np.ones(data.batch_size, int) * self.diffusion_steps
-        rng = jax.random.PRNGKey(pyrandom.randint(0, 100000))
-        g_t, g_pred = self.ddgd.apply(
+        t_0 = np.ones(data.batch_size, int)
+        rng_0 = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+        g_t_0, g_pred_0 = self.ddgd.apply(
             self.params,
             data,
-            t,
-            rng,
+            t_0,
+            rng_0,
+            method=self.ddgd.predict_feature,
+        )
+        t_mid = np.ones(data.batch_size, int) * 20
+        rng_mid = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+        g_t_mid, g_pred_mid = self.ddgd.apply(
+            self.params,
+            data,
+            t_mid,
+            rng_mid,
             method=self.ddgd.predict_feature,
         )
         gd.plot(
-            [data, g_pred, g_t],
+            [data, g_pred_0, g_t_0, g_pred_mid, g_t_mid],
             title=title,
             shared_position_option="col",
             location=location,
