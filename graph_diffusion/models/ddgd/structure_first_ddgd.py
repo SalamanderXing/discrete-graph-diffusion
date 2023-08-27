@@ -53,7 +53,7 @@ class GetProbabilityFeature(nn.Module):
         #     feature, unsafe=True
         # ).scalar_multiply(100, unsafe=True)
         # return pred_features_dense
-        return pred_features
+        return gd.DenseGraphDistribution.to_dense(pred_features)
 
 
 from typing import Callable
