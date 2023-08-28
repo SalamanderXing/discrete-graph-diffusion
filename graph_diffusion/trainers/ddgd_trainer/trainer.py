@@ -71,8 +71,9 @@ def single_train_step(
     g: gd.OneHotGraph,
     state: TrainState,
     rng: Key,
+    use_structure: bool = True,
+    use_feature: bool = True,
 ):
-    # print(f"[red]{g.nodes.device()}[/red]")
     train_rng = jax.random.fold_in(rng, enc("train"))
     dropout_rng = jax.random.fold_in(rng, enc("dropout"))
 
@@ -81,6 +82,8 @@ def single_train_step(
             params,
             target=g,
             rng_key=train_rng,
+            use_structure=use_structure,
+            use_feature=use_feature,
             rngs={"dropout": dropout_rng},
         ).mean()
         return loss, None
@@ -98,6 +101,8 @@ def parallel_train_step(
     sharded_edges_mask,
     state: TrainState,
     rng: Key,
+    use_structure: SBool = True,
+    use_feature: SBool = True,
 ):
     graph = gd.OneHotGraph.create(
         nodes=sharded_nodes,
@@ -105,7 +110,13 @@ def parallel_train_step(
         nodes_mask=sharded_nodes_mask,
         edges_mask=sharded_edges_mask,
     )
-    return single_train_step(g=graph, state=state, rng=rng)
+    return single_train_step(
+        g=graph,
+        state=state,
+        rng=rng,
+        use_structure=use_structure,
+        use_feature=use_feature,
+    )
 
 
 # def to_one_hot(nodes, edges, _, nodes_counts, device=jax.devices("cpu")[0]):
@@ -386,6 +397,7 @@ class Trainer:
         self,
         *,
         key: Key,
+        epoch: int,
     ) -> tuple[float, float]:
         run_losses = []
         t0 = time()
@@ -406,6 +418,8 @@ class Trainer:
                 sharded_edges_mask,
                 state=jax_utils.replicate(self.state),
                 rng=jax.random.split(step_key, self.n_devices),
+                use_structure=jax_utils.replicate(epoch % 2 == 0),
+                use_features=jax_utils.replicate(epoch % 2 != 0),
             )
             grads, loss = jax.tree_map(lambda x: x.mean(0), result)
             self.state = self.state.apply_gradients(grads=grads)
@@ -666,6 +680,7 @@ class Trainer:
             print(f"[green bold]Epoch[/green bold]: {epoch_idx}")
             train_loss, train_time = self.__train_epoch(
                 key=train_rng_epoch,
+                epoch=epoch_idx,
             )
             if train_loss < min_train_loss:
                 min_train_loss = train_loss
