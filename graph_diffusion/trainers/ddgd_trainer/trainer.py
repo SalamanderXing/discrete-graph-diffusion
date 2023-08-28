@@ -333,6 +333,43 @@ class Trainer:
         avg_losses = losses.mean()
         return avg_losses, total_time
 
+    def sample_structure(
+        self,
+        *,
+        restore_checkpoint: bool = True,
+    ):
+        rng = jax.random.fold_in(self.rngs["params"], enc("sample_structure"))
+        n_samples = 9
+        if restore_checkpoint:
+            self.__restore_checkpoint()
+        result = self.ddgd.sample_structure(
+            self.state.params,
+            rng,
+            n_samples,
+        )
+        gd.plot(
+            result,
+        )
+
+    def sample(
+        self,
+        *,
+        restore_checkpoint: bool = True,
+    ):
+        rng = jax.random.fold_in(self.rngs["params"], enc("sample_structure"))
+        n_samples = 9
+        if restore_checkpoint:
+            self.__restore_checkpoint()
+
+        result = self.ddgd.sample(
+            self.state.params,
+            rng,
+            n_samples,
+        )
+        gd.plot(
+            result,
+        )
+
     def __train_epoch(
         self,
         *,
@@ -513,7 +550,6 @@ class Trainer:
             )
             self.learning_rate = state_dict["lr"]
             # ipdb.set_trace()
-            ipdb.set_trace()
             self.state = TrainState(
                 tx=self.__get_optimizer(),
                 apply_fn=self.state.apply_fn,
@@ -750,45 +786,45 @@ class Trainer:
         model_samples = _sample_steps(self.transition_model, model, rng)
         gd.plot([model_samples], shared_position="row", location=save_to)
 
-    def sample(
-        self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 10
-    ):
-        print(f"Saving samples to: {save_to}")
-        if restore_checkpoint:
-            self.__restore_checkpoint()
-        import random
-
-        rng_model = jax.random.PRNGKey(random.randint(0, 1000000))
-        rng_sample = jax.random.fold_in(rng_model, enc("sample"))
-
-        model_samples = self.ddgd.sample(self.state.params, rng_sample, n)
-        data_sample = None
-        rnd_i = random.randint(0, len(self.val_loader) - 1)
-        for i, x in enumerate(self.val_loader):
-            if i == rnd_i:
-                data_sample = to_one_hot(*x)[:n]
-                break
-        assert data_sample is not None
-        # prior_sample = gd.sample_one_hot(
-        #     self.transition_model.limit_dist.repeat(n), rng_sample
-        # )
-        title = "A Title"
-        if self.sampling_metric is not None:
-            metrics = self.sampling_metric(model_samples)
-            print(
-                f"Relaxed validity: {metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
-            )
-            title = f"{metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
-        gd.plot(
-            [
-                data_sample,
-                model_samples,
-                # prior_sample,
-            ],
-            shared_position_option=None,  # prior_sample,  # prior_sample,
-            location=save_to,
-            title=title,
-        )
+    # def sample(
+    #     self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 10
+    # ):
+    #     print(f"Saving samples to: {save_to}")
+    #     if restore_checkpoint:
+    #         self.__restore_checkpoint()
+    #     import random
+    #
+    #     rng_model = jax.random.PRNGKey(random.randint(0, 1000000))
+    #     rng_sample = jax.random.fold_in(rng_model, enc("sample"))
+    #
+    #     model_samples = self.ddgd.sample(self.state.params, rng_sample, n)
+    #     data_sample = None
+    #     rnd_i = random.randint(0, len(self.val_loader) - 1)
+    #     for i, x in enumerate(self.val_loader):
+    #         if i == rnd_i:
+    #             data_sample = to_one_hot(*x)[:n]
+    #             break
+    #     assert data_sample is not None
+    #     # prior_sample = gd.sample_one_hot(
+    #     #     self.transition_model.limit_dist.repeat(n), rng_sample
+    #     # )
+    #     title = "A Title"
+    #     if self.sampling_metric is not None:
+    #         metrics = self.sampling_metric(model_samples)
+    #         print(
+    #             f"Relaxed validity: {metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
+    #         )
+    #         title = f"{metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
+    #     gd.plot(
+    #         [
+    #             data_sample,
+    #             model_samples,
+    #             # prior_sample,
+    #         ],
+    #         shared_position_option=None,  # prior_sample,  # prior_sample,
+    #         location=save_to,
+    #         title=title,
+    #     )
 
 
 # # @typed
