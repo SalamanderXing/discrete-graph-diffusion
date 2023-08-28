@@ -34,7 +34,6 @@ class GetProbabilityFeature(nn.Module):
         g: gd.OneHotGraph,
         t: Int[Array, "batch_size"],
         structure: gd.OneHotGraph,
-        feature: gd.OneHotGraph,
         deterministic: SBool = False,
     ) -> gd.DenseGraphDistribution:
         g_with_structure = structure.feature_like(g)
@@ -146,7 +145,6 @@ class StructureFirstDDGD(nn.Module):
             p_feature_deterministic = jax.tree_util.Partial(
                 self.p_feature,
                 structure=target_structure,
-                feature=target_feature,  # FIXME: just for debugging
                 deterministic=True,
             )
             feature_loss = df.compute_val_loss(
@@ -208,7 +206,6 @@ class StructureFirstDDGD(nn.Module):
         p_feature_nondeterministic = jax.tree_util.Partial(
             self.p_feature,
             structure=target_structure,
-            feature=target_feature,
             deterministic=False,
         )
         tot_loss = 0
@@ -313,22 +310,30 @@ class StructureFirstDDGD(nn.Module):
         )
         return g, g_prior
 
-    def sample(self, params: FrozenDict, rng: Key, n_samples: SInt):
+    def sample_structure(self, params: FrozenDict, rng: Key, n_samples: SInt):
         sample_step_structure = jit(
             jax.tree_util.Partial(
                 self.apply, params, method=self._sample_step_structure
             )
         )
-        sample_step_feature = jit(
-            jax.tree_util.Partial(self.apply, params, method=self._sample_step_feature)
-        )
-
         sampled_structure, sample_structure_rior = self.apply(
             params,
             sample_step_structure,
             rng,
             n_samples,
             method=self._sample_structure,
+        )
+        return sampled_structure
+
+    def sample_feature(
+        self,
+        params: FrozenDict,
+        sampled_structure: gd.GraphDistribution,
+        rng: Key,
+        n_samples: SInt,
+    ):
+        sample_step_feature = jit(
+            jax.tree_util.Partial(self.apply, params, method=self._sample_step_feature)
         )
         sampled_feature, sample_feature_prior = self.apply(
             params,
@@ -338,6 +343,11 @@ class StructureFirstDDGD(nn.Module):
             n_samples,
             method=self._sample_feature,
         )
+        return sampled_feature
+
+    def sample(self, params: FrozenDict, rng: Key, n_samples: SInt):
+        sampled_structure = self.sample_structure(params, rng, n_samples)
+        sampled_feature = self.sample_feature(params, sampled_structure, rng, n_samples)
         return sampled_feature
 
     def get_model_input(self, g: gd.GraphDistribution, t: Int[Array, "bs"]):
