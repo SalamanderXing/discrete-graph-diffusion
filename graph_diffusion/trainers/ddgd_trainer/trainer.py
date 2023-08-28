@@ -637,7 +637,10 @@ class Trainer:
 
         assert last_epoch is not None
         assert last_epoch <= self.num_epochs, "Already trained for this many epochs."
-
+        self.sample_structure(
+            restore_checkpoint=False,
+            location="wandb",
+        )
         current_patience = self.patience
         stopping_criterion = -5
         rng, _ = jax.random.split(self.rngs["params"])
