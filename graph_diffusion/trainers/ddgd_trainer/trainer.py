@@ -337,6 +337,7 @@ class Trainer:
         self,
         *,
         restore_checkpoint: bool = True,
+        location: str | None = None,
     ):
         rng = jax.random.fold_in(self.rngs["params"], enc("sample_structure"))
         n_samples = 9
@@ -349,12 +350,14 @@ class Trainer:
         )
         gd.plot(
             result,
+            location=location,
         )
 
     def sample(
         self,
         *,
         restore_checkpoint: bool = True,
+        location: str | None = None,
     ):
         rng = jax.random.fold_in(self.rngs["params"], enc("sample_structure"))
         n_samples = 9
@@ -368,6 +371,7 @@ class Trainer:
         )
         gd.plot(
             result,
+            location=location,
         )
 
     def __train_epoch(
@@ -678,11 +682,28 @@ class Trainer:
                     )
                     print(f"[yellow] Saving checkpoint[/yellow]")
                     self.checkpoint_manager.save(epoch_idx, self.state)
-                    self.predict(
-                        restore_checkpoint=False,
-                        location="wandb",
-                        title=f"val nll: {val_loss.nll:.4f}",
-                    )
+                    # self.predict(
+                    #     restore_checkpoint=False,
+                    #     location="wandb",
+                    #     title=f"val nll: {val_loss.nll:.4f}",
+                    # )
+                    if (
+                        self.diffusion_type
+                        == self.__class__.DiffusionType.structure_first
+                    ):
+                        self.sample_structure(
+                            restore_checkpoint=False,
+                            location="wandb",
+                        )
+                    elif (
+                        self.diffusion_type
+                        == self.__class__.DiffusionType.structure_first
+                    ):
+                        self.sample_structure(
+                            restore_checkpoint=False,
+                            location="wandb",
+                        )
+
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )
