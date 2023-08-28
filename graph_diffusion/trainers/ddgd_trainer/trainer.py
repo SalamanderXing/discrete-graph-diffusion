@@ -702,7 +702,7 @@ class Trainer:
                         self.diffusion_type
                         == self.__class__.DiffusionType.structure_first
                     ):
-                        self.sample_structure(
+                        self.sample(
                             restore_checkpoint=False,
                             location="wandb",
                         )
