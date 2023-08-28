@@ -411,6 +411,8 @@ class Trainer:
                 sharded_nodes_mask,
                 sharded_edges_mask,
             ) = shard_graph(one_hot_graph)
+            use_stucture = jax_utils.replicate(epoch % 2 == 0)
+            use_feature = np.logical_not(use_stucture)
             result = self.parallel_train_step(
                 sharded_nodes,
                 sharded_edges,
@@ -418,8 +420,8 @@ class Trainer:
                 sharded_edges_mask,
                 state=jax_utils.replicate(self.state),
                 rng=jax.random.split(step_key, self.n_devices),
-                use_structure=jax_utils.replicate(epoch % 2 == 0),
-                use_features=jax_utils.replicate(epoch % 2 != 0),
+                use_structure=use_stucture,
+                use_feature=use_feature,
             )
             grads, loss = jax.tree_map(lambda x: x.mean(0), result)
             self.state = self.state.apply_gradients(grads=grads)
