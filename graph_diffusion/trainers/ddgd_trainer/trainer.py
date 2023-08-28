@@ -357,9 +357,8 @@ class Trainer:
         self,
         *,
         restore_checkpoint: bool = True,
-        location: str | None = None,
-    ):
-        rng = jax.random.fold_in(self.rngs["params"], enc("sample_structure"))
+    ) -> gd.GraphDistribution:
+        rng = jax.random.fold_in(self.rngs["params"], enc("sample"))
         n_samples = 9
         if restore_checkpoint:
             self.__restore_checkpoint()
@@ -369,6 +368,15 @@ class Trainer:
             rng,
             n_samples,
         )
+        return result
+
+    def sample_and_plot(
+        self,
+        *,
+        restore_checkpoint: bool = True,
+        location: str | None = None,
+    ):
+        result = self.sample(restore_checkpoint=restore_checkpoint)
         gd.plot(
             result,
             location=location,
@@ -809,6 +817,16 @@ class Trainer:
         )
         model_samples = _sample_steps(self.transition_model, model, rng)
         gd.plot([model_samples], shared_position="row", location=save_to)
+
+    def compute_metrics(self):
+        assert self.sampling_metric is not None
+        model_samples = self.sample(restore_checkpoint=True)
+        # gd.plot(model_samples)
+        metrics = self.sampling_metric(model_samples)
+        print(
+            f"Relaxed validity: {metrics['relaxed_validity']:.3f}\nUniqueness: {metrics['uniqueness']:.3f}"
+        )
+        # title = f"{metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
 
     # def sample(
     #     self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 10
