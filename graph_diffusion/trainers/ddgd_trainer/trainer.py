@@ -692,7 +692,7 @@ class Trainer:
                     # )
                     if (
                         self.diffusion_type
-                        == self.__class__.DiffusionType.structure_first
+                        == self.__class__.DiffusionType.structure_only
                     ):
                         self.sample_structure(
                             restore_checkpoint=False,
