@@ -623,7 +623,7 @@ class Trainer:
                 self.checkpoint_manager.latest_step()
             )
             self.learning_rate = state_dict["lr"]
-            # ipdb.set_trace()
+            state_dict["step"] = state_dict["step"].item()
             self.state = TrainState(
                 tx=self.__get_optimizer(),
                 apply_fn=self.state.apply_fn,
