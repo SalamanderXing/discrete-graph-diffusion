@@ -5,10 +5,9 @@ from jax import numpy as np, Array
 from flax.training import train_state
 import matplotlib.pyplot as plt
 import flax.linen as nn
-from jaxtyping import Float, Int, Bool
+from jaxtyping import Float, Int, Bool, PRNGKeyArray
 from time import time
 import numpy as nnp
-from jaxtyping import jaxtyped
 from flax.struct import dataclass as flax_dataclass
 from functools import partial
 import jax
@@ -61,7 +60,7 @@ GraphDistribution = gd.GraphDistribution
 
 
 class TrainState(train_state.TrainState):
-    key: jax.random.PRNGKey
+    key: Key
     lr: SFloat
     last_loss: SFloat
 
@@ -90,7 +89,6 @@ def single_train_step(
 
     gradient_fn = jax.value_and_grad(loss_fn, has_aux=True)
     (loss, _), grads = gradient_fn(state.params)
-    # state = state.apply_gradients(grads=grads)
     return grads, loss
 
 
@@ -101,8 +99,8 @@ def parallel_train_step(
     sharded_edges_mask,
     state: TrainState,
     rng: Key,
-    use_structure: SBool = True,
-    use_feature: SBool = True,
+    use_structure=True,
+    use_feature=True,
 ):
     graph = gd.OneHotGraph.create(
         nodes=sharded_nodes,
@@ -269,7 +267,7 @@ class Trainer:
             params=FrozenDict(self.params),
             tx=self.__get_optimizer(),
             key=self.rngs["dropout"],
-            last_loss=1000000,
+            last_loss=np.inf,
             lr=self.learning_rate,
         )
 
@@ -348,7 +346,6 @@ class Trainer:
         self,
         *,
         restore_checkpoint: bool = True,
-        location: str | None = None,
     ):
         rng = jax.random.fold_in(self.rngs["params"], enc("sample_structure"))
         n_samples = 9
@@ -359,9 +356,55 @@ class Trainer:
             rng,
             n_samples,
         )
+        # gd.plot(
+        #     result,
+        #     location=location,
+        # )
+        return result
+
+    def sample_feature(
+        self,
+        *,
+        restore_checkpoint: bool = True,
+        g: gd.GraphDistribution | None = None,
+    ):
+        rng = jax.random.fold_in(self.rngs["params"], enc("sample_structure"))
+        n_samples = 5
+        if restore_checkpoint:
+            self.__restore_checkpoint()
+
+        if g is None:
+            # extracts a batch from the val set
+            g = to_one_hot(*next(iter(self.val_loader)))[: np.array(n_samples)]
+        structure = g.structure_one_hot()
+        result = self.ddgd.sample_feature(
+            params=self.state.params,
+            sampled_structure=structure,
+            rng=rng,
+            n_samples=n_samples,
+        )
+        return g, result
+
+    def sample_structure_and_plot(
+        self,
+        *,
+        restore_checkpoint: bool = True,
+        location: str | None = None,
+    ):
+        result = self.sample_structure(restore_checkpoint=restore_checkpoint)
+        gd.plot(result, location=location, shared_position_option="col")
+
+    def sample_feature_and_plot(
+        self,
+        *,
+        restore_checkpoint: bool = True,
+        location: str | None = None,
+    ):
+        result = self.sample_feature(restore_checkpoint=restore_checkpoint)
         gd.plot(
             result,
             location=location,
+            shared_position_option="col",
         )
 
     def sample(
@@ -402,6 +445,10 @@ class Trainer:
         run_losses = []
         t0 = time()
         print(f"[pink] LR={round(np.array(self.state.lr).tolist(), 7)} [/pink]")
+        use_structure_this_epoch = epoch < 30
+        print(f"Using structure: {use_structure_this_epoch}")
+        use_stucture = jax_utils.replicate(use_structure_this_epoch)
+        use_feature = np.logical_not(use_stucture)
         for i, x in enumerate(tqdm(self.train_loader)):
             one_hot_graph = to_one_hot(*x)
             step_key = jax.random.fold_in(key, enc(f"train_step_{i}"))
@@ -411,8 +458,7 @@ class Trainer:
                 sharded_nodes_mask,
                 sharded_edges_mask,
             ) = shard_graph(one_hot_graph)
-            use_stucture = jax_utils.replicate(epoch % 2 == 0)
-            use_feature = np.logical_not(use_stucture)
+
             result = self.parallel_train_step(
                 sharded_nodes,
                 sharded_edges,
