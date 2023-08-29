@@ -200,7 +200,6 @@ def kl_div(input: DenseGraphDistribution, target: DenseGraphDistribution):
     return res
 
 
-@jit
 def softmax(g: DenseGraphDistribution) -> DenseGraphDistribution:
     return DenseGraphDistribution.create(
         nodes=jax.nn.softmax(g.nodes) * g.nodes_mask[..., None],
