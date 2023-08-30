@@ -61,8 +61,6 @@ GraphDistribution = gd.GraphDistribution
 
 class TrainState(train_state.TrainState):
     key: Key
-    lr: SFloat
-    last_loss: SFloat
 
 
 def single_train_step(
@@ -117,12 +115,6 @@ def parallel_train_step(
     )
 
 
-# def to_one_hot(nodes, edges, _, nodes_counts, device=jax.devices("cpu")[0]):
-#     return gd.OneHotGraph.create_from_counts(
-#         nodes=jax.device_put(nnp.array(nodes), device=device),
-#         edges=jax.device_put(nnp.array(edges), device=device),
-#         nodes_counts=jax.device_put(nnp.array(nodes_counts), device=device),
-#     )
 def to_one_hot(nodes, edges, _, nodes_counts, device=jax.devices("cpu")[0]):
     return gd.OneHotGraph.create_from_counts(
         nodes=np.array(nodes),
@@ -267,8 +259,6 @@ class Trainer:
             params=FrozenDict(self.params),
             tx=self.__get_optimizer(),
             key=self.rngs["dropout"],
-            last_loss=np.inf,
-            lr=self.learning_rate,
         )
 
         @jit
@@ -605,8 +595,6 @@ class Trainer:
         corr = np.corrcoef(val_losses, np.arange(len(self.transition_model.q_bars)))[
             0, 1
         ]
-        # ipdb.set_trace()
-        # corr = 0.5
         if epoch > -1:
             wandb.log({"corr_t_vs_elbo": corr}, step=epoch)
         model_samples = model_probs.argmax()
@@ -623,6 +611,7 @@ class Trainer:
                 self.checkpoint_manager.latest_step()
             )
             self.learning_rate = state_dict["lr"]
+            state_dict = jax.tree_map(np.asarray, state_dict)
             state_dict["step"] = state_dict["step"].item()
             self.state = TrainState(
                 tx=self.__get_optimizer(),
@@ -630,6 +619,7 @@ class Trainer:
                 **{
                     k: v if not isinstance(v, dict) else FrozenDict(v)
                     for k, v in state_dict.items()
+                    if not k in ("last_loss", "lr")
                 },
             )
             print(
@@ -648,7 +638,7 @@ class Trainer:
 
         @dataclass
         class Dummy:
-            def __call__(self, x, t):
+            def __call__(self, x, t):  # dfsewfrd
                 return gd.create_dense(
                     nodes=x.nodes,
                     edges=x.edges,
@@ -668,12 +658,10 @@ class Trainer:
             )
             run_losses.append(losses)
         t1 = time()
-        total_time = t1 - t0
         avg_losses = {
             k: np.mean(np.array([r[k] for r in run_losses]))
             for k in run_losses[0].keys()
         }
-        # avg_loss = np.mean(np.array(run_loss)).tolist()
         print(avg_losses)
 
     def restart(self):
@@ -765,7 +753,7 @@ class Trainer:
                         self.diffusion_type
                         == self.__class__.DiffusionType.structure_only
                     ):
-                        self.sample_structure(
+                        self.sample_structure_and_plot(
                             restore_checkpoint=False,
                             location="wandb",
                         )
@@ -773,7 +761,14 @@ class Trainer:
                         self.diffusion_type
                         == self.__class__.DiffusionType.structure_first
                     ):
-                        self.sample(
+                        self.sample_and_plot(
+                            restore_checkpoint=False,
+                            location="wandb",
+                        )
+                    elif (
+                        self.diffusion_type == self.__class__.DiffusionType.feature_only
+                    ):
+                        self.sample_feature_and_plot(
                             restore_checkpoint=False,
                             location="wandb",
                         )

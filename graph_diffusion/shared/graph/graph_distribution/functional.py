@@ -17,7 +17,6 @@ from .graph_distribution import (
     EdgeDistribution,
     OneHotGraph,
     DenseGraphDistribution,
-    StructureOneHotGraph,
 )
 from beartype import beartype
 import einops as e
@@ -86,7 +85,7 @@ def dense_to_structure_dense(g: DenseGraphDistribution):
 
 
 def one_hot_structure_to_dense(
-    structure: StructureOneHotGraph, node_feature_count: SInt, edge_feature_count: SInt
+    structure: OneHotGraph, node_feature_count: SInt, edge_feature_count: SInt
 ) -> DenseGraphDistribution:
     node_structure_mask = structure.nodes.argmax(-1)
     edge_structure_mask = structure.edges.argmax(-1)

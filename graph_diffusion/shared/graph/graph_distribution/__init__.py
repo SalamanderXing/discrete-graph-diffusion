@@ -2,9 +2,9 @@ from .graph_distribution import (
     GraphDistribution,
     EdgeDistribution,
     NodeDistribution,
-    StructureOneHotGraph,
-    FeatureOneHotGraph
+    FeatureOneHotGraph,
 )
+
 # from .q import Q
 from .functional import *
 from .plot import plot

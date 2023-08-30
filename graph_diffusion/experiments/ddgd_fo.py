@@ -44,17 +44,6 @@ from jax import numpy as np
 from jax import random
 from rich import print
 
-# data_module = QM9DataModule(
-#     mate.data_dir,
-#     remove_h=True,
-#     train_batch_size=32,
-#     val_batch_size=32,
-#     test_batch_size=32,
-# )
-# data_module.prepare_data()
-#
-# ds_infos = QM9Infos(data_module, remove_h=True)
-
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
 
 device = xla_bridge.get_backend().platform

@@ -160,10 +160,14 @@ class GraphDistribution:
         return self.nodes_mask.sum(-1)
 
     def __str__(self):
-        return {
-            key: f"{np.asarray(val).shape} {np.asarray(val).dtype}"
+        key_vals = {
+            key: f"{np.asarray(val).dtype}{np.asarray(val).shape}"
             for key, val in self.__dict__.items()
-        }.__str__()
+            if not key.startswith("_")
+        }
+        nl = "\n"
+        tab = " " * 4
+        return f"{self.__class__.__name__}({nl}{nl.join(f'{tab}{key}: {val}' for key, val in key_vals.items())}{nl})"
 
     def __repr__(self):
         return self.__str__()
@@ -239,12 +243,7 @@ class GraphDistribution:
 
     def __getitem__(self, key) -> "GraphDistribution":
         new_nodes = self.nodes[key]
-        cls = (
-            self.__class__
-            if self.__class__ != StructureOneHotGraph
-            else GraphDistribution
-        )
-        return cls.create(
+        return self.__class__.create(
             nodes=new_nodes,
             edges=self.edges[key],
             nodes_mask=self.nodes_mask[key],
@@ -340,13 +339,11 @@ class GraphDistribution:
             jax.nn.one_hot((self.edges.argmax(-1) != 0).astype(float), 2)
             * self.edges_mask[..., None]
         )
-        return StructureOneHotGraph.create(
-            OneHotGraph.create(
-                nodes=new_nodes,
-                edges=new_edges,
-                nodes_mask=self.nodes_mask,
-                edges_mask=self.edges_mask,
-            )
+        return OneHotGraph.create(
+            nodes=new_nodes,
+            edges=new_edges,
+            nodes_mask=self.nodes_mask,
+            edges_mask=self.edges_mask,
         )
 
     def feature(self, unsafe: SBool = False):
@@ -611,27 +608,6 @@ class DenseGraphDistribution(GraphDistribution):
         )
 
 
-class StructureOneHotGraph(OneHotGraph):
-    nodes: Float[Array, "b n 2"]
-    edges: Float[Array, "b n n 2"]
-    nodes_mask: Bool[Array, "b n 2"]
-    edges_mask: Bool[Array, "b n n 2"]
-
-    @classmethod
-    def create(
-        cls,
-        g: OneHotGraph,
-    ):
-        assert_valid_graph(g.nodes, g.edges, g.nodes_mask, g.edges_mask)
-        return cls(
-            nodes=g.nodes,
-            edges=g.edges,
-            nodes_mask=g.nodes_mask,
-            edges_mask=g.edges_mask,
-            _created_internally=True,
-        )
-
-
 class FeatureOneHotGraph(OneHotGraph):
     @classmethod
     @jaxtyped
@@ -646,7 +622,7 @@ class FeatureOneHotGraph(OneHotGraph):
             _created_internally=True,
         )
 
-    def apply_structure(self, structure: StructureOneHotGraph):
+    def apply_structure(self, structure: OneHotGraph):
         structure_nodes = structure.nodes.argmax(-1)
         structure_edges = structure.edges.argmax(-1)
         null_node = np.eye(self.nodes.shape[-1])[0]
@@ -660,9 +636,7 @@ class FeatureOneHotGraph(OneHotGraph):
             edges_mask=self.edges_mask,
         )
 
-    def restore_structure(
-        self, structure: StructureOneHotGraph
-    ) -> DenseGraphDistribution:
+    def restore_structure(self, structure: OneHotGraph) -> DenseGraphDistribution:
         structure_nodes = structure.nodes.argmax(-1)
         structure_edges = structure.edges.argmax(-1)
         # puts a zero in the first position of the last dimension

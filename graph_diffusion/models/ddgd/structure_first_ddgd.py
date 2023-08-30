@@ -201,6 +201,8 @@ class StructureFirstDDGD(nn.Module):
         self,
         target: gd.OneHotGraph,
         rng_key: Key,
+        use_structure: SBool = True,
+        use_feature: SBool = True,
     ):
         target_structure, target_feature = target.decompose_structure_and_feature()
         p_feature_nondeterministic = jax.tree_util.Partial(
@@ -209,7 +211,7 @@ class StructureFirstDDGD(nn.Module):
             deterministic=False,
         )
         tot_loss = 0
-        if self.use_structure:
+        if use_structure and self.use_structure:
             structure_loss = df.compute_train_loss(
                 target=target_structure,
                 transition_model=self.structure_transition_model,
@@ -217,7 +219,7 @@ class StructureFirstDDGD(nn.Module):
                 get_probability=self.p_structure_nondeterministic,
             )
             tot_loss += structure_loss
-        if self.use_feature:
+        if use_feature and self.use_feature:
             feature_loss = df.compute_train_loss(
                 target=target_feature,
                 transition_model=self.feature_transition_model,
@@ -239,7 +241,7 @@ class StructureFirstDDGD(nn.Module):
 
     def _sample_step_feature(
         self,
-        target_structure: gd.OneHotGraph,
+        target_structure: gd.GraphDistribution,
         rng: Key,
         t: Int[Array, "b"],
         g: gd.OneHotGraph,
@@ -328,7 +330,7 @@ class StructureFirstDDGD(nn.Module):
     def sample_feature(
         self,
         params: FrozenDict,
-        sampled_structure: gd.GraphDistribution,
+        sampled_structure: gd.OneHotGraph,
         rng: Key,
         n_samples: SInt,
     ):

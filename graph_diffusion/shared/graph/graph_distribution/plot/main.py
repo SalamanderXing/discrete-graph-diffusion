@@ -10,19 +10,22 @@ from ..graph_distribution import GraphDistribution
 from ..functional import concatenate
 
 
-def get_position(G, j, positions, position_option_option):
-    if position_option_option is None:
-        return nx.spring_layout(G)
-
-    if positions[j] is None:
-        if j > 0 and position_option_option in (
-            "row",
-            "all",
-        ):
-            positions[j] = positions[0]
-        else:
-            positions[j] = nx.spring_layout(G)  # positions for all nodes
-    position = positions[j]
+def get_position(G, i: int, j: int, positions, position_option: str | None):
+    if position_option is None:
+        positions[i][j] = nx.spring_layout(G)
+    if positions[i][j] is None:
+        if position_option == "all" and i + j > 0:
+            positions[i][j] = positions[0][0]
+        elif position_option == None:
+            positions[i][j] = nx.spring_layout(G)
+        elif position_option == "row" and j > 0:
+            positions[i][j] = positions[i][0]
+        elif position_option == "col" and i > 0:
+            ipdb.set_trace()
+            positions[i][j] = positions[0][j]
+    if positions[i][j] is None:
+        positions[i][j] = nx.spring_layout(G)
+    position = positions[i][j]
     return position
 
 
@@ -71,8 +74,7 @@ def plot(
         # node will be black
         cmap_node = np.array([[0, 0, 0, 1]])
     node_size = 10.0
-    positions = [None] * len(rows[0])
-
+    positions = [[None] * len(rows[0])] * len(rows)
     for i, (row, ax_row) in enumerate(zip(rows, axs)):
         node_values = row.nodes.argmax(-1)
         edge_values = row.edges.argmax(-1)
@@ -86,10 +88,10 @@ def plot(
             mask = edge_features.flatten() != 0
             edges = indices[mask]
             G = nx.Graph()
-            for i in range(n_nodes):
-                G.add_node(i)
-            for i in range(edges.shape[0]):
-                G.add_edge(edges[i, 0].tolist(), edges[i, 1].tolist())
+            for i_node in range(n_nodes):
+                G.add_node(i_node)
+            for i_edge in range(edges.shape[0]):
+                G.add_edge(edges[i_edge, 0].tolist(), edges[i_edge, 1].tolist())
             color_nodes = (
                 np.array([cmap_node[i - 1] for i in nodes])
                 if rows[0].nodes.shape[-1] > 2
@@ -98,7 +100,7 @@ def plot(
             color_edges = np.array(
                 [cmap_edge[edge_features[i, j]] for (i, j) in G.edges]
             )
-            position = get_position(G, j, positions, shared_position_option)
+            position = get_position(G, i, j, positions, shared_position_option)
             nx.draw(
                 G,
                 position,
