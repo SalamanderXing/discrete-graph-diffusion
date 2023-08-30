@@ -58,7 +58,10 @@ def enc(x: str):
 DataLoader = Iterable[gd.OneHotGraph]
 GraphDistribution = gd.GraphDistribution
 
+from typing import no_type_check
 
+
+@no_type_check
 class TrainState(train_state.TrainState):
     key: Key
 
@@ -79,8 +82,6 @@ def single_train_step(
             params,
             target=g,
             rng_key=train_rng,
-            use_structure=use_structure,
-            use_feature=use_feature,
             rngs={"dropout": dropout_rng},
         ).mean()
         return loss, None
@@ -332,7 +333,7 @@ class Trainer:
         avg_losses = losses.mean()
         return avg_losses, total_time
 
-    def sample_structure(
+    def __sample_structure(
         self,
         *,
         restore_checkpoint: bool = True,
@@ -346,13 +347,9 @@ class Trainer:
             rng,
             n_samples,
         )
-        # gd.plot(
-        #     result,
-        #     location=location,
-        # )
         return result
 
-    def sample_feature(
+    def __sample_feature(
         self,
         *,
         restore_checkpoint: bool = True,
@@ -375,29 +372,29 @@ class Trainer:
         )
         return g, result
 
-    def sample_structure_and_plot(
+    def __sample_structure_and_plot(
         self,
         *,
         restore_checkpoint: bool = True,
         location: str | None = None,
     ):
-        result = self.sample_structure(restore_checkpoint=restore_checkpoint)
+        result = self.__sample_structure(restore_checkpoint=restore_checkpoint)
         gd.plot(result, location=location, shared_position_option="col")
 
-    def sample_feature_and_plot(
+    def __sample_feature_and_plot(
         self,
         *,
         restore_checkpoint: bool = True,
         location: str | None = None,
     ):
-        result = self.sample_feature(restore_checkpoint=restore_checkpoint)
+        result = self.__sample_feature(restore_checkpoint=restore_checkpoint)
         gd.plot(
             result,
             location=location,
             shared_position_option="col",
         )
 
-    def sample(
+    def __sample(
         self,
         *,
         restore_checkpoint: bool = True,
@@ -414,13 +411,13 @@ class Trainer:
         )
         return result
 
-    def sample_and_plot(
+    def __sample_and_plot(
         self,
         *,
         restore_checkpoint: bool = True,
         location: str | None = None,
     ):
-        result = self.sample(restore_checkpoint=restore_checkpoint)
+        result = self.__sample(restore_checkpoint=restore_checkpoint)
         gd.plot(
             result,
             location=location,
@@ -434,7 +431,7 @@ class Trainer:
     ) -> tuple[float, float]:
         run_losses = []
         t0 = time()
-        print(f"[pink] LR={round(np.array(self.state.lr).tolist(), 7)} [/pink]")
+        # print(f"[pink] LR={round(np.array(self.state.lr).tolist(), 7)} [/pink]")
         use_structure_this_epoch = epoch < 30
         print(f"Using structure: {use_structure_this_epoch}")
         use_stucture = jax_utils.replicate(use_structure_this_epoch)
@@ -695,7 +692,7 @@ class Trainer:
 
         assert last_epoch is not None
         assert last_epoch <= self.num_epochs, "Already trained for this many epochs."
-        self.sample_structure(
+        self.sample_and_plot(
             restore_checkpoint=False,
             location="wandb",
         )
@@ -749,30 +746,11 @@ class Trainer:
                     #     location="wandb",
                     #     title=f"val nll: {val_loss.nll:.4f}",
                     # )
-                    if (
-                        self.diffusion_type
-                        == self.__class__.DiffusionType.structure_only
-                    ):
-                        self.sample_structure_and_plot(
-                            restore_checkpoint=False,
-                            location="wandb",
-                        )
-                    elif (
-                        self.diffusion_type
-                        == self.__class__.DiffusionType.structure_first
-                    ):
-                        self.sample_and_plot(
-                            restore_checkpoint=False,
-                            location="wandb",
-                        )
-                    elif (
-                        self.diffusion_type == self.__class__.DiffusionType.feature_only
-                    ):
-                        self.sample_feature_and_plot(
-                            restore_checkpoint=False,
-                            location="wandb",
-                        )
 
+                    self.sample_and_plot(
+                        restore_checkpoint=False,
+                        location="wandb",
+                    )
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
                     )
@@ -785,6 +763,25 @@ class Trainer:
         print(
             f"Final loss: {val_loss:.4f} best={min(val_loss):.5f} time: {val_time:.4f}"
         )
+
+    def sample_and_plot(
+        self, restore_checkpoint: bool = True, location: str | None = None
+    ):
+        if self.diffusion_type == self.__class__.DiffusionType.structure_only:
+            self.__sample_structure_and_plot(
+                restore_checkpoint=restore_checkpoint,
+                location=location,
+            )
+        elif self.diffusion_type == self.__class__.DiffusionType.structure_first:
+            self.__sample_and_plot(
+                restore_checkpoint=restore_checkpoint,
+                location=location,
+            )
+        elif self.diffusion_type == self.__class__.DiffusionType.feature_only:
+            self.__sample_feature_and_plot(
+                restore_checkpoint=restore_checkpoint,
+                location=location,
+            )
 
     def __plot_targets(self, save_to: str | None = None):
         """
@@ -878,7 +875,7 @@ class Trainer:
 
     def compute_metrics(self):
         assert self.sampling_metric is not None
-        model_samples = self.sample(restore_checkpoint=True)
+        model_samples = self.__sample(restore_checkpoint=True)
         # gd.plot(model_samples)
         metrics = self.sampling_metric(model_samples)
         print(

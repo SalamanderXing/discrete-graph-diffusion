@@ -95,4 +95,3 @@ trainer = Trainer(
 )
 with jax.disable_jit(not do_jit):
     mate.bind(trainer)
-# mate.result({f"{ds_name} best_val_loss": best_val_loss})
