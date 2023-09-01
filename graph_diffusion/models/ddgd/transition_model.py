@@ -84,10 +84,14 @@ class TransitionModel:
     temporal_embeddings: Float[Array, "t1 temporal_embedding_dim"]
     limit_dist: gd.DenseGraphDistribution
 
-    class NoiseType:
+    class NoiseType(Enum):
         STRUCTURE_ONLY = "structure_only"
         FEATURE_ONLY = "feature_only"
         STRUCTURE_AND_FEATURE = "structure_and_feature"
+
+    class PriorType(Enum):
+        FROM_DATA = "from_data"
+        UNIFORM = "uniform"
 
     @classmethod
     @jaxtyped
@@ -102,7 +106,8 @@ class TransitionModel:
         schedule_type: str = "linear",
         adjust_prior=False,
         concat_flag_to_temporal_embeddings: bool | Int[Array, "flag"] = False,
-        noise_type: str = NoiseType.STRUCTURE_AND_FEATURE,
+        noise_type: NoiseType = NoiseType.STRUCTURE_AND_FEATURE,
+        prior_type: PriorType = PriorType.FROM_DATA,
     ) -> "TransitionModel":
         if noise_type == cls.NoiseType.STRUCTURE_ONLY:
             q_class = StructureOnlyQ
@@ -112,20 +117,14 @@ class TransitionModel:
             q_class = Q
         else:
             raise ValueError("noise_type must be one of the defined types")
-        prior_type = ""
-        if prior_type == "uniform":
+        if not prior_type == cls.PriorType.FROM_DATA:
             nodes_prior = np.ones(nodes_prior.shape[0]) / nodes_prior.shape[0]
             edge_prior = np.ones(edge_prior.shape[0]) / edge_prior.shape[0]
-        elif prior_type == "reload":
-            nodes_prior = np.array([0.7230, 0.1151, 0.1593, 0.0026])
-            edge_prior = np.array([0.7261, 0.2384, 0.0274, 0.0081, 0.0000])
-
         if adjust_prior:
             x_prior_adj = np.where(nodes_prior > 0, nodes_prior, 1e-6)
             nodes_prior = x_prior_adj / x_prior_adj.sum()
             e_prior_adj = np.where(edge_prior > 0, edge_prior, 1e-6)
             edge_prior = e_prior_adj / e_prior_adj.sum()
-        # prior = Distribution(x=x_priors, e=e_priors)
 
         node_classes = len(nodes_prior)
         edge_classes = len(edge_prior)

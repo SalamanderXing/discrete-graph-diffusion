@@ -1,27 +1,9 @@
-"""
-```yaml
-tags:
-- rocket 
-```
-"""
 from jax import random
 
 import jax
 
 # has to be done at the beginning to allow JAX to take control of the GPU memory.
 data_key = jax.random.PRNGKey(0)
-
-
-gpu = True
-do_jit = True
-debug_compiles = False
-
-
-if not gpu:
-    jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
-
-jax.config.update("jax_log_compiles", debug_compiles)
-jax.config.update("jax_debug_nans", True)
 
 
 import jax
@@ -36,7 +18,20 @@ import random as pyrandom
 from ..data_loaders.qm92 import load_data
 from ..models.gt_digress import GraphTransformer
 from ..trainers.ddgd_trainer import Trainer
+import ipdb
 
+assert mate is not None
+
+diffusion_type = mate.diffusion_type
+force_cpu = mate.force_cpu
+do_jit = mate.do_jit
+debug_compiles = mate.debug_compiles
+
+if force_cpu:
+    jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
+
+jax.config.update("jax_log_compiles", debug_compiles)
+jax.config.update("jax_debug_nans", True)
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # Disable TF info/warnings # nopep8
 
 device = xla_bridge.get_backend().platform
@@ -50,7 +45,7 @@ if device in ["gpu", "cpu"]:
     batch_size = 512
 else:
     batch_size = 8 * 1000
-ds_name = "QM9"  # "PTC_MR"# "MUTAG"
+print(f"{batch_size=}")
 dataset = load_data(
     save_dir=mate.data_dir,
     batch_size=batch_size,
@@ -65,7 +60,6 @@ rngs = {
 save_path = os.path.join(mate.results_dir, f"{diffusion_steps}_diffusion_steps")
 os.makedirs(save_path, exist_ok=True)
 os.makedirs(os.path.join(save_path, "plots"), exist_ok=True)
-
 
 trainer = Trainer(
     model_class=GraphTransformer,
@@ -95,3 +89,6 @@ trainer = Trainer(
 )
 with jax.disable_jit(not do_jit):
     mate.bind(trainer)
+
+
+# mate.result({f"{ds_name} best_val_loss": best_val_loss})
