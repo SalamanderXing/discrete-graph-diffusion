@@ -15,34 +15,34 @@ def run_command(command, cwd=None):
         return None
 
 
-def is_python_311_installed():
+def is_python_312_installed():
     """
-    Checks if Python 3.11 is installed.
+    Checks if Python 3.12 is installed.
     """
-    return run_command("python3.11 --version") is not None
+    return run_command("python3.12 --version") is not None
 
 
-def install_python_311():
+def install_python_312():
     """
-    Installs Python 3.11 and related packages.
+    Installs Python 3.12 and related packages.
     """
     run_command("sudo apt update -y && sudo apt upgrade -y")
     run_command(
         "sudo apt install -y wget build-essential libncursesw5-dev libssl-dev libsqlite3-dev tk-dev libgdbm-dev libc6-dev libbz2-dev libffi-dev zlib1g-dev"
     )
     run_command("sudo add-apt-repository ppa:deadsnakes/ppa")
-    run_command("sudo apt install -y python3.11")
+    run_command("sudo apt install -y python3.12")
     run_command("wget https://bootstrap.pypa.io/get-pip.py")
-    run_command("python3.11 get-pip.py")
-    run_command("python3.11 -m pip install virtualenv")
+    run_command("python3.12 get-pip.py")
+    run_command("python3.12 -m pip install virtualenv")
 
 
 def create_virtualenv():
-    run_command("python3.11 -m virtualenv ~/venv")
+    run_command("python3.12 -m virtualenv ~/venv")
 
     # Add activation line to .bashrc
     with open(os.path.expanduser("~/.bashrc"), "a") as bashrc:
-        bashrc.write("\n# Activate Python 3.11 virtual environment\n")
+        bashrc.write("\n# Activate Python 3.12 virtual environment\n")
         bashrc.write("source ~/venv/bin/activate\n")
 
 
@@ -78,9 +78,9 @@ def activate_virtualenv():
 
 
 def main():
-    if not is_python_311_installed():
-        print("Python 3.11 is not installed.")
-        install_python_311()
+    if not is_python_312_installed():
+        print("Python 3.12 is not installed.")
+        install_python_312()
     if not os.path.exists("~/venv"):
         create_virtualenv()
     activate_virtualenv()
