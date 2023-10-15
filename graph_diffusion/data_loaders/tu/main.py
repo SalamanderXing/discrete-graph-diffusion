@@ -12,7 +12,7 @@ from jax import numpy as jnp
 from jaxtyping import Int, Float
 from tensorflow.data import Dataset
 from torch_geometric.datasets import TUDataset as PyTUDataset
-from typing import Iterable
+from collections.abc import Iterable
 import tensorflow as tf
 
 tf.config.experimental.set_visible_devices([], "GPU")

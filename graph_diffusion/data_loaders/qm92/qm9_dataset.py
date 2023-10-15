@@ -2,22 +2,32 @@ import os
 import os.path as osp
 import ipdb
 import pathlib
-from typing import Any, Sequence
+from typing import Any
+from collections.abc import Sequence
 
-import torch
-import torch.nn.functional as F
-from rdkit import Chem, RDLogger
-from rdkit.Chem.rdchem import BondType as BT
-from tqdm import tqdm
+# from jax import numpy as np
+
 import numpy as np
-import pandas as pd
-from torch_geometric.data import Data, InMemoryDataset, download_url, extract_zip
-from torch_geometric.utils import subgraph
 
+import pickle
+from tqdm import tqdm
+
+# import torch
+# import torch.nn.functional as F
+# from torch_geometric.data import Data, InMemoryDataset, download_url, extract_zip
+# from torch_geometric.utils import subgraph
+# import numpy as np
+import jax
+import pandas as pd
 from . import utils
 from .abstract_dataset import MolecularDataModule, AbstractDatasetInfos
 from .analysis.rdkit_functions import mol2smiles, build_molecule_with_partial_charges
 from .analysis.rdkit_functions import compute_molecular_metrics
+from rdkit import Chem, RDLogger
+from rdkit.Chem.rdchem import BondType as BT
+from ...shared.jax_geometric.utils import subgraph
+from ...shared.jax_geometric.data import download_url, extract_zip
+from rdkit.Chem import rdchem as RDChem
 
 
 def files_exist(files) -> bool:
@@ -35,7 +45,7 @@ def to_list(value: Any) -> Sequence:
 
 class RemoveYTransform:
     def __call__(self, data):
-        data.y = torch.zeros((1, 0), dtype=torch.float)
+        data.y = np.zeros((1, 0), dtype=float)
         return data
 
 
@@ -51,7 +61,25 @@ class SelectHOMOTransform:
         return data
 
 
-class QM9Dataset(InMemoryDataset):
+class Bunch:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+    def __getitem__(self, key):
+        return self.__dict__[key]
+
+    @classmethod
+    def from_dict(cls, dictionary):
+        bunch = cls()
+        for key, value in dictionary.items():
+            if isinstance(value, dict):
+                bunch.__dict__[key] = cls.from_dict(value)
+            else:
+                bunch.__dict__[key] = value
+        return bunch
+
+
+class QM9Dataset:
     raw_url = (
         "https://deepchemdata.s3-us-west-1.amazonaws.com/datasets/"
         "molnet_publish/qm9.zip"
@@ -69,19 +97,36 @@ class QM9Dataset(InMemoryDataset):
         pre_transform=None,
         pre_filter=None,
     ):
+        # self.target_prop = target_prop
+        # self.stage = stage
+        # if self.stage == "train":
+        #     self.file_idx = 0
+        # elif self.stage == "val":
+        #     self.file_idx = 1
+        # else:
+        #     self.file_idx = 2
+        # self.remove_h = remove_h
+        # # self.raw_dir = os.path.join(root, "raw")
+        # super().__init__()  # root, transform, pre_transform, pre_filter)
+        # self.root = root
+        # with open(self.processed_paths[self.file_idx], "rb") as f:
+        #     self.data, self.slices = pickle.load(f)
+        # # self.data, self.slices = torch.load()
         self.target_prop = target_prop
         self.stage = stage
-        if self.stage == "train":
-            self.file_idx = 0
-        elif self.stage == "val":
-            self.file_idx = 1
-        else:
-            self.file_idx = 2
-        self.remove_h = remove_h
-        # self.raw_dir = os.path.join(root, "raw")
-        super().__init__(root, transform, pre_transform, pre_filter)
         self.root = root
-        self.data, self.slices = torch.load(self.processed_paths[self.file_idx])
+        self.remove_h = remove_h
+        self.transform = transform
+        self.pre_transform = pre_transform
+        self.pre_filter = pre_filter
+        # File indices based on stage
+        self.file_idx = {"train": 0, "val": 1, "test": 2}[stage]
+        self.raw_dir = os.path.join(root, "raw")
+        self.processed_dir = os.path.join(root, "processed")
+
+        # Download and process the dataset
+        self.download()
+        self.data_list = self.process()
 
     @property
     def raw_file_names(self):
@@ -105,10 +150,54 @@ class QM9Dataset(InMemoryDataset):
         else:
             return ["proc_tr_h.pt", "proc_val_h.pt", "proc_test_h.pt"]
 
+    def __len__(self):
+        return len(self.data_list)
+
+    def __iter__(self):
+        for data in self.data_list:
+            yield Bunch.from_dict(data)
+
     def download(self):
-        """
-        Download raw qm9 files. Taken from PyG QM9 class
-        """
+        # """
+        # Download raw qm9 files. Taken from PyG QM9 class
+        # """
+        # try:
+        #     import rdkit  # noqa
+        #
+        #     file_path = download_url(self.raw_url, self.raw_dir)
+        #     extract_zip(file_path, self.raw_dir)
+        #     os.unlink(file_path)
+        #
+        #     file_path = download_url(self.raw_url2, self.raw_dir)
+        #     os.rename(
+        #         osp.join(self.raw_dir, "3195404"),
+        #         osp.join(self.raw_dir, "uncharacterized.txt"),
+        #     )
+        # except ImportError:
+        #     path = download_url(self.processed_url, self.raw_dir)
+        #     extract_zip(path, self.raw_dir)
+        #     os.unlink(path)
+        #
+        # if files_exist(self.split_paths):
+        #     return
+        #
+        # dataset = pd.read_csv(self.raw_paths[1])
+        #
+        # n_samples = len(dataset)
+        # n_train = 100000
+        # n_test = int(0.1 * n_samples)
+        # n_val = n_samples - (n_train + n_test)
+        #
+        # # Shuffle dataset with df.sample, then split
+        # train, val, test = np.split(
+        #     dataset.sample(frac=1, random_state=42), [n_train, n_val + n_train]
+        # )
+        #
+        # train.to_csv(os.path.join(self.raw_dir, "train.csv"))
+        # val.to_csv(os.path.join(self.raw_dir, "val.csv"))
+        # test.to_csv(os.path.join(self.raw_dir, "test.csv"))
+        if files_exist(self.split_paths):
+            return
         try:
             import rdkit  # noqa
 
@@ -126,10 +215,7 @@ class QM9Dataset(InMemoryDataset):
             extract_zip(path, self.raw_dir)
             os.unlink(path)
 
-        if files_exist(self.split_paths):
-            return
-
-        dataset = pd.read_csv(self.raw_paths[1])
+        dataset = pd.read_csv(osp.join(self.raw_dir, "gdb9.sdf.csv"))
 
         n_samples = len(dataset)
         n_train = 100000
@@ -141,68 +227,130 @@ class QM9Dataset(InMemoryDataset):
             dataset.sample(frac=1, random_state=42), [n_train, n_val + n_train]
         )
 
-        train.to_csv(os.path.join(self.raw_dir, "train.csv"))
-        val.to_csv(os.path.join(self.raw_dir, "val.csv"))
-        test.to_csv(os.path.join(self.raw_dir, "test.csv"))
+        train.to_csv(osp.join(self.raw_dir, "train.csv"))
+        val.to_csv(osp.join(self.raw_dir, "val.csv"))
+        test.to_csv(osp.join(self.raw_dir, "test.csv"))
 
     def process(self):
-        RDLogger.DisableLog("rdApp.*")
-
+        # RDLogger.DisableLog("rdApp.*")
+        #
+        # types = {"H": 0, "C": 1, "N": 2, "O": 3, "F": 4}
+        # bonds = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
+        #
+        # target_df = pd.read_csv(self.split_paths[self.file_idx], index_col=0)
+        # target_df.drop(columns=["mol_id"], inplace=True)
+        #
+        # with open(self.raw_paths[-1], "r") as f:
+        #     skip = [int(x.split()[0]) - 1 for x in f.read().split("\n")[9:-2]]
+        #
+        # suppl = Chem.SDMolSupplier(self.raw_paths[0], removeHs=False, sanitize=False)
+        #
+        # data_list = []
+        # for i, mol in enumerate(tqdm(suppl)):
+        #     if i in skip or i not in target_df.index:
+        #         continue
+        #
+        #     N = mol.GetNumAtoms()
+        #
+        #     type_idx = []
+        #     for atom in mol.GetAtoms():
+        #         type_idx.append(types[atom.GetSymbol()])
+        #
+        #     row, col, edge_type = [], [], []
+        #     for bond in mol.GetBonds():
+        #         start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
+        #         row += [start, end]
+        #         col += [end, start]
+        #         edge_type += 2 * [bonds[bond.GetBondType()] + 1]
+        #
+        #     edge_index = np.array([row, col])  # , dtype=torch.)
+        #     edge_type = np.array(edge_type)  # , dtype=torch.long)
+        #     edge_attr = jax.nn.one_hot(edge_type, num_classes=len(bonds) + 1).astype(
+        #         float
+        #     )  # .to(torch.float)
+        #
+        #     perm = (edge_index[0] * N + edge_index[1]).argsort()
+        #     edge_index = edge_index[:, perm]
+        #     edge_attr = edge_attr[perm]
+        #
+        #     x = jax.nn.one_hot(np.array(type_idx), num_classes=len(types)).float()
+        #     y = np.zeros((1, 0), dtype=float)
+        #
+        #     if self.remove_h:
+        #         type_idx = np.array(type_idx)  # .long()
+        #         to_keep = type_idx > 0
+        #         edge_index, edge_attr = subgraph(
+        #             to_keep,
+        #             edge_index,
+        #             edge_attr,
+        #             relabel_nodes=True,
+        #             num_nodes=len(to_keep),
+        #         )
+        #         x = x[to_keep]
+        #         # Shift onehot encoding to match atom decoder
+        #         x = x[:, 1:]
+        #
+        #     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y, idx=i)
+        #
+        #     if self.pre_filter is not None and not self.pre_filter(data):
+        #         continue
+        #     if self.pre_transform is not None:
+        #         data = self.pre_transform(data)
+        #
+        #     data_list.append(data)
+        #
+        # torch.save(self.collate(data_list), self.processed_paths[self.file_idx])
+        # Your processing logic
+        RDChem.BondType.names
         types = {"H": 0, "C": 1, "N": 2, "O": 3, "F": 4}
-        bonds = {BT.SINGLE: 0, BT.DOUBLE: 1, BT.TRIPLE: 2, BT.AROMATIC: 3}
+        bonds = {
+            RDChem.BondType.SINGLE: 0,
+            RDChem.BondType.DOUBLE: 1,
+            RDChem.BondType.TRIPLE: 2,
+            RDChem.BondType.AROMATIC: 3,
+        }
 
-        target_df = pd.read_csv(self.split_paths[self.file_idx], index_col=0)
-        target_df.drop(columns=["mol_id"], inplace=True)
+        # Read your split file
+        target_df = pd.read_csv(
+            os.path.join(self.raw_dir, f"{self.stage}.csv"), index_col=0
+        )
 
-        with open(self.raw_paths[-1], "r") as f:
-            skip = [int(x.split()[0]) - 1 for x in f.read().split("\n")[9:-2]]
-
-        suppl = Chem.SDMolSupplier(self.raw_paths[0], removeHs=False, sanitize=False)
+        suppl = Chem.SDMolSupplier(
+            os.path.join(self.raw_dir, "gdb9.sdf"), removeHs=False, sanitize=False
+        )
 
         data_list = []
         for i, mol in enumerate(tqdm(suppl)):
-            if i in skip or i not in target_df.index:
+            if i not in target_df.index:
                 continue
 
             N = mol.GetNumAtoms()
 
-            type_idx = []
-            for atom in mol.GetAtoms():
-                type_idx.append(types[atom.GetSymbol()])
+            type_idx = np.array([types[atom.GetSymbol()] for atom in mol.GetAtoms()])
+            x = np.eye(len(types))[type_idx]
 
             row, col, edge_type = [], [], []
             for bond in mol.GetBonds():
                 start, end = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
                 row += [start, end]
                 col += [end, start]
-                edge_type += 2 * [bonds[bond.GetBondType()] + 1]
+                edge_type += 2 * [bonds[bond.GetBondType()]]
 
-            edge_index = torch.tensor([row, col], dtype=torch.long)
-            edge_type = torch.tensor(edge_type, dtype=torch.long)
-            edge_attr = F.one_hot(edge_type, num_classes=len(bonds) + 1).to(torch.float)
+            edge_index = np.array([row, col])
+            edge_type = np.array(edge_type)
+            edge_attr = np.eye(len(bonds))[edge_type]
 
-            perm = (edge_index[0] * N + edge_index[1]).argsort()
-            edge_index = edge_index[:, perm]
-            edge_attr = edge_attr[perm]
+            y = np.zeros((1, 0), dtype=np.float32)
 
-            x = F.one_hot(torch.tensor(type_idx), num_classes=len(types)).float()
-            y = torch.zeros((1, 0), dtype=torch.float)
-
-            if self.remove_h:
-                type_idx = torch.tensor(type_idx).long()
-                to_keep = type_idx > 0
-                edge_index, edge_attr = subgraph(
-                    to_keep,
-                    edge_index,
-                    edge_attr,
-                    relabel_nodes=True,
-                    num_nodes=len(to_keep),
-                )
-                x = x[to_keep]
-                # Shift onehot encoding to match atom decoder
-                x = x[:, 1:]
-
-            data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y, idx=i)
+            batch = np.full((N,), i, dtype=int)
+            data = {
+                "x": x,
+                "edge_index": edge_index,
+                "edge_attr": edge_attr,
+                "y": y,
+                "idx": i,
+                "batch": batch,
+            }
 
             if self.pre_filter is not None and not self.pre_filter(data):
                 continue
@@ -211,7 +359,7 @@ class QM9Dataset(InMemoryDataset):
 
             data_list.append(data)
 
-        torch.save(self.collate(data_list), self.processed_paths[self.file_idx])
+        return data_list
 
 
 class QM9DataModule(MolecularDataModule):
@@ -236,6 +384,7 @@ class QM9DataModule(MolecularDataModule):
         # base_path = pathlib.Path(os.path.realpath(__file__)).parents[2]
         # root_path = os.path.join(base_path, self.datadir)
         root_path = self.datadir
+        print("Getting datasets.")
         datasets = {
             "train": QM9Dataset(
                 stage="train",
@@ -278,7 +427,7 @@ class QM9infos(AbstractDatasetInfos):
             self.atom_weights = {0: 12, 1: 14, 2: 16, 3: 19}
             self.max_n_nodes = 9
             self.max_weight = 150
-            self.n_nodes = torch.tensor(
+            self.n_nodes = np.array(
                 [
                     0,
                     2.2930e-05,
@@ -292,12 +441,15 @@ class QM9infos(AbstractDatasetInfos):
                     0.83337,
                 ]
             )
-            self.node_types = torch.tensor([0.7230, 0.1151, 0.1593, 0.0026])
-            self.edge_types = torch.tensor([0.7261, 0.2384, 0.0274, 0.0081, 0.0])
+            self.node_types = np.array([0.7230, 0.1151, 0.1593, 0.0026])
+            self.edge_types = np.array([0.7261, 0.2384, 0.0274, 0.0081, 0.0])
 
             super().complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
-            self.valency_distribution = torch.zeros(3 * self.max_n_nodes - 2)
-            self.valency_distribution[0:6] = torch.tensor(
+            self.valency_distribution = np.zeros(3 * self.max_n_nodes - 2)
+            # self.valency_distribution = self.valency_distribution.at[0:6].set(
+            #     np.array([2.6071e-06, 0.163, 0.352, 0.320, 0.16313, 0.00073])
+            # )
+            self.valency_distribution[0:6] = np.array(
                 [2.6071e-06, 0.163, 0.352, 0.320, 0.16313, 0.00073]
             )
         else:
@@ -308,7 +460,7 @@ class QM9infos(AbstractDatasetInfos):
             self.max_n_nodes = 29
             self.max_weight = 390
             self.atom_weights = {0: 1, 1: 12, 2: 14, 3: 16, 4: 19}
-            self.n_nodes = torch.tensor(
+            self.n_nodes = np.array(
                 [
                     0,
                     0,
@@ -343,14 +495,12 @@ class QM9infos(AbstractDatasetInfos):
                 ]
             )
 
-            self.node_types = torch.tensor([0.5122, 0.3526, 0.0562, 0.0777, 0.0013])
-            self.edge_types = torch.tensor(
-                [0.88162, 0.11062, 5.9875e-03, 1.7758e-03, 0]
-            )
+            self.node_types = np.array([0.5122, 0.3526, 0.0562, 0.0777, 0.0013])
+            self.edge_types = np.array([0.88162, 0.11062, 5.9875e-03, 1.7758e-03, 0])
 
             super().complete_infos(n_nodes=self.n_nodes, node_types=self.node_types)
-            self.valency_distribution = torch.zeros(3 * self.max_n_nodes - 2)
-            self.valency_distribution[0:6] = torch.tensor(
+            self.valency_distribution = np.array(3 * self.max_n_nodes - 2)
+            self.valency_distribution[0:6] = np.array(
                 [0, 0.5136, 0.0840, 0.0554, 0.3456, 0.0012]
             )
 
@@ -404,7 +554,7 @@ def get_train_smiles(cfg, train_dataloader, dataset_infos, evaluate_dataset=Fals
             X, E = dense_data.X, dense_data.E
 
             for k in range(X.size(0)):
-                n = int(torch.sum((X != -1)[k, :]))
+                n = int(np.sum((X != -1)[k, :]))
                 atom_types = X[k, :n].cpu()
                 edge_types = E[k, :n, :n].cpu()
                 all_molecules.append([atom_types, edge_types])
@@ -442,7 +592,7 @@ def compute_qm9_smiles(atom_decoder, train_dataloader, remove_h):
         dense_data = dense_data.mask(node_mask, collapse=True)
         X, E = dense_data.X, dense_data.E
 
-        n_nodes = [int(torch.sum((X != -1)[j, :])) for j in range(X.size(0))]
+        n_nodes = [int(np.sum((X != -1)[j, :])) for j in range(X.shape[0])]
 
         molecule_list = []
         for k in range(X.size(0)):

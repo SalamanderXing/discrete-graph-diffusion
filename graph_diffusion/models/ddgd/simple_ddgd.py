@@ -8,7 +8,8 @@ from flax.training.train_state import TrainState
 from jaxtyping import Float, Int
 from mate.jax import Key, SBool
 import ipdb
-from typing import Protocol, runtime_checkable, no_type_check, Callable
+from typing import Protocol, runtime_checkable, no_type_check
+from collections.abc import Callable
 from beartype import beartype
 from jaxtyping import jaxtyped
 from jax import jit

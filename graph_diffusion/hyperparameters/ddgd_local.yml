@@ -1,0 +1,7 @@
+experiment: ddgd
+diffusion_type: simple
+force_cpu: false 
+do_jit: true
+debug_compiles: false
+local_batch_size: 400
+remote_batch_size: 8000

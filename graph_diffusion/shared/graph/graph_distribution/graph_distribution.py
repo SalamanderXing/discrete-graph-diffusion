@@ -8,7 +8,7 @@ import ipdb
 from flax.struct import dataclass
 from mate.jax import SFloat, SInt, SBool
 from jaxtyping import Float, Bool, Int, PRNGKeyArray as Key, jaxtyped
-from typing import Sequence
+from collections.abc import Sequence
 import traceback
 from beartype import beartype
 from jax.scipy.special import logit

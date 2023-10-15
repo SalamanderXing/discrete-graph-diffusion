@@ -6,12 +6,13 @@ import networkx as nx
 import optax
 from rich import print
 import ipdb
-import wandb
+
+# import wandb
 
 # import jax_dataclasses as jdc
 from mate.jax import SFloat, SInt, SBool, Key
 from jaxtyping import Float, Bool, Int, jaxtyped
-from typing import Sequence
+from collections.abc import Sequence
 from .graph_distribution import (
     GraphDistribution,
     EdgeDistribution,
@@ -20,8 +21,6 @@ from .graph_distribution import (
 )
 from beartype import beartype
 import einops as e
-
-from typing import Sequence
 from jax import random
 from jax import lax
 from jax.scipy.special import xlogy
@@ -29,8 +28,6 @@ from jax.scipy.special import xlogy
 # from .q import Q
 
 ## only used for testing ##
-import torch.nn.functional as F
-import torch as t
 from typing import TypeVar
 
 NodeDistribution = Float[Array, "b n en"]
@@ -253,9 +250,6 @@ def to_symmetric(edges: EdgeDistribution) -> EdgeDistribution:
 @typed
 def diag_to_zero(edges: EdgeDistribution) -> EdgeDistribution:
     return np.where(np.eye(edges.shape[1])[None, :, :, None], 0, edges)
-
-
-import torch as t
 
 
 @typed

@@ -1,8 +1,10 @@
 from rich import print
 import functools
 import os
-from typing import Any, Iterable
-import wandb
+from typing import Any
+from collections.abc import Iterable
+
+# import wandb
 import chex
 from clu import periodic_actions
 from clu import parameter_overview

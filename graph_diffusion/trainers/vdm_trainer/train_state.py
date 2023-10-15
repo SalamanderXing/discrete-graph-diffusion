@@ -21,7 +21,8 @@ But with added EMA of the parameters.
 """
 
 import copy
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from flax import core
 from flax import struct

@@ -5,7 +5,8 @@ from jax import random
 from flax import linen as nn
 import ipdb
 from flax.core.frozen_dict import FrozenDict
-from typing import Callable
+
+from collections.abc import Callable
 from mate.jax import typed, SBool
 
 from einops import rearrange, repeat

@@ -1,5 +1,4 @@
-from typing import Callable, Optional, Iterable
-
+from collections.abc import Callable
 import chex
 import flax
 from flax import linen as nn

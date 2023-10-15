@@ -9,7 +9,7 @@ from mate.jax import typed, Key, SInt, SBool
 from mate.types import Interface
 import jax
 from jax import numpy as jnp
-from typing import Sequence
+from collections.abc import Sequence
 import ipdb
 
 # from .graph import Masks, Graph, pseudo_assert

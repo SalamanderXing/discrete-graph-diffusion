@@ -1,11 +1,11 @@
 from jaxtyping import jaxtyped
 from beartype import beartype
-from typing import Sequence
+from collections.abc import Sequence
 import matplotlib.pyplot as plt
 import ipdb
 import numpy as np
 import networkx as nx
-import wandb
+#import wandb
 from ..graph_distribution import GraphDistribution
 from ..functional import concatenate
 

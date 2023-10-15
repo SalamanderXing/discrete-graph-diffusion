@@ -8,7 +8,8 @@ import imageio
 import networkx as nx
 import numpy as np
 import rdkit.Chem
-import wandb
+
+# import wandb
 import matplotlib.pyplot as plt
 
 

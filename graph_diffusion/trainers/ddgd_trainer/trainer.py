@@ -13,8 +13,9 @@ from functools import partial
 import jax
 from jax import jit
 import optax
-import wandb
-from typing import Iterable
+
+# import wandb
+from collections.abc import Iterable
 from dataclasses import dataclass
 import enum
 from flax import jax_utils
@@ -398,7 +399,7 @@ class Trainer:
         self,
         *,
         restore_checkpoint: bool = True,
-    ) -> gd.GraphDistribution:
+    ):  # -> tuple[gd.GraphDistribution, gd.GraphDistribution]:
         rng = jax.random.fold_in(self.rngs["params"], enc("sample"))
         n_samples = 9
         if restore_checkpoint:
@@ -416,10 +417,13 @@ class Trainer:
         *,
         restore_checkpoint: bool = True,
         location: str | None = None,
+        compute_metrics: bool = True,
     ):
-        result = self.__sample(restore_checkpoint=restore_checkpoint)
+        sample, _ = self.__sample(restore_checkpoint=restore_checkpoint)
+        if compute_metrics:
+            self.__print_metrics(sample, title="Sample")
         gd.plot(
-            result,
+            sample,
             location=location,
         )
 
@@ -592,8 +596,9 @@ class Trainer:
         corr = np.corrcoef(val_losses, np.arange(len(self.transition_model.q_bars)))[
             0, 1
         ]
-        if epoch > -1:
-            wandb.log({"corr_t_vs_elbo": corr}, step=epoch)
+        # FIXME
+        # if epoch > -1:
+        #     wandb.log({"corr_t_vs_elbo": corr}, step=epoch)
         model_samples = model_probs.argmax()
         gd.plot(
             [posterior_samples, model_samples],
@@ -694,7 +699,7 @@ class Trainer:
         assert last_epoch <= self.num_epochs, "Already trained for this many epochs."
         self.sample_and_plot(
             restore_checkpoint=False,
-            location="wandb",
+            location=self.plot_path,
         )
         current_patience = self.patience
         stopping_criterion = -5
@@ -717,7 +722,8 @@ class Trainer:
             )
             if train_loss < min_train_loss:
                 min_train_loss = train_loss
-            wandb.log(
+            # wandb.log( FIXME
+            print(
                 {f"main/{key}": val["nll"] for key, val in val_loss.items()}
                 | {f"main/total": val_loss.nll}
                 | val_loss.flatten()
@@ -749,7 +755,7 @@ class Trainer:
 
                     self.sample_and_plot(
                         restore_checkpoint=False,
-                        location="wandb",
+                        location=self.plot_path,
                     )
                     print(
                         f"[yellow] Saved to {os.path.join(str(self.checkpoint_manager.directory), str(self.checkpoint_manager.latest_step()))} [/yellow]"
@@ -782,159 +788,27 @@ class Trainer:
                 restore_checkpoint=restore_checkpoint,
                 location=location,
             )
-
-    def __plot_targets(self, save_to: str | None = None):
-        """
-        This function was useful for debugging.
-        """
-        batch = self.a_val_batch
-        import random
-
-        rng = jax.random.PRNGKey(random.randint(0, 1000000))
-        model = GetProbabilityFromState(
-            self.state,
-            rng,
-            self.transition_model,
-            extra_features=self.use_extra_features,
-        )
-        t = np.array([400] * batch.nodes.shape[0])
-        q_bars = self.transition_model.q_bars[t]
-        noisy_batch = gd.sample_one_hot(gd.matmul(batch, q_bars), rng)
-        preds = gd.softmax(model(batch, t))
-        edges_flat = einop(
-            batch.edges,
-            "b n1 n2 ne -> (b n1 n2) ne",
-        )
-        pred_edges_flat = einop(
-            preds.edges,
-            "b n1 n2 ne -> (b n1 n2) ne",
-        )
-        noisy_edges_flat = einop(
-            noisy_batch.edges,
-            "b n1 n2 ne -> (b n1 n2) ne",
-        )
-
-        import matplotlib.pyplot as plt
-
-        indices = np.where(
-            np.argmax(edges_flat, axis=-1) != np.argmax(noisy_edges_flat, axis=-1)
-        )[0][:10]
-        edges_flat = edges_flat[indices]
-        pred_edges_flat = pred_edges_flat[indices]
-        noisy_edges_flat = noisy_edges_flat[indices]
-        fig, axs = plt.subplots(10, 1, figsize=(15, 5))
-        for i in range(10):
-            x = np.arange(pred_edges_flat.shape[-1])
-            axs[i].hlines(
-                pred_edges_flat[i],
-                x - 0.2,
-                x + 0.2,
-                label="prediction",
-                color="blue",
-                linewidth=2,
+        elif self.diffusion_type == self.__class__.DiffusionType.simple:
+            self.__sample_and_plot(
+                restore_checkpoint=restore_checkpoint,
+                location=location,
             )
-            argmax = np.argmax(pred_edges_flat[i])
-            axs[i].hlines(
-                pred_edges_flat[i][argmax],
-                x[argmax] - 0.1,
-                x[argmax] + 0.1,
-                color="orange",
-                linewidth=2,
-            )
-            # plots a vertical line at the position of the target (where the target is 1)
-            axs[i].axvline(np.argmax(edges_flat[i]), color="green", label="target")
-            # does the same for the noisy target
-            axs[i].axvline(
-                np.argmax(noisy_edges_flat[i]), color="red", label="noisy target"
-            )
-            axs[i].set_xticks(np.arange(edges_flat.shape[-1]))
-            axs[i].set_ylim(0, 1)
-            axs[i].grid()
-
-        plt.legend()
-
-        if save_to is not None:
-            plt.savefig(save_to, dpi=500)
-        else:
-            plt.show()
-
-    def sample_steps(self, restore_checkpoint: bool = True, save_to: str | None = None):
-        if restore_checkpoint:
-            self.__restore_checkpoint()
-        import random
-
-        rng = jax.random.PRNGKey(random.randint(0, 1000000))
-        model = GetProbabilityFromState(
-            self.state,
-            rng,
-            self.transition_model,
-            extra_features=self.use_extra_features,
-        )
-        model_samples = _sample_steps(self.transition_model, model, rng)
-        gd.plot([model_samples], shared_position="row", location=save_to)
 
     def compute_metrics(self):
         assert self.sampling_metric is not None
-        model_samples = self.__sample(restore_checkpoint=True)
-        # gd.plot(model_samples)
-        metrics = self.sampling_metric(model_samples)
+        model_samples, _ = self.__sample(restore_checkpoint=True)
+        self.__print_metrics(model_samples, "Sampled")
+
+    def __print_metrics(self, sample: gd.GraphDistribution, title: str):
+        # metrics = self.sampling_metric(sample)
+        # wandb.log(metrics, step=self.state.step)
+        # print(f"{title}: {metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}")
+        assert self.sampling_metric is not None
+        metrics = self.sampling_metric(sample)
+        print(metrics, f"step={self.state.step}")
         print(
             f"Relaxed validity: {metrics['relaxed_validity']:.3f}\nUniqueness: {metrics['uniqueness']:.3f}"
         )
-        # title = f"{metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
-
-    # def sample(
-    #     self, restore_checkpoint: bool = True, save_to: str | None = None, n: int = 10
-    # ):
-    #     print(f"Saving samples to: {save_to}")
-    #     if restore_checkpoint:
-    #         self.__restore_checkpoint()
-    #     import random
-    #
-    #     rng_model = jax.random.PRNGKey(random.randint(0, 1000000))
-    #     rng_sample = jax.random.fold_in(rng_model, enc("sample"))
-    #
-    #     model_samples = self.ddgd.sample(self.state.params, rng_sample, n)
-    #     data_sample = None
-    #     rnd_i = random.randint(0, len(self.val_loader) - 1)
-    #     for i, x in enumerate(self.val_loader):
-    #         if i == rnd_i:
-    #             data_sample = to_one_hot(*x)[:n]
-    #             break
-    #     assert data_sample is not None
-    #     # prior_sample = gd.sample_one_hot(
-    #     #     self.transition_model.limit_dist.repeat(n), rng_sample
-    #     # )
-    #     title = "A Title"
-    #     if self.sampling_metric is not None:
-    #         metrics = self.sampling_metric(model_samples)
-    #         print(
-    #             f"Relaxed validity: {metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
-    #         )
-    #         title = f"{metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}"
-    #     gd.plot(
-    #         [
-    #             data_sample,
-    #             model_samples,
-    #             # prior_sample,
-    #         ],
-    #         shared_position_option=None,  # prior_sample,  # prior_sample,
-    #         location=save_to,
-    #         title=title,
-    #     )
-
-
-# # @typed
-# def plot_noised_graphs(train_loader, transition_model: TransitionModel, save_path: str):
-#     print(f"Plotting noised graphs to {save_path}")
-#     T = len(transition_model.q_bars)
-#     g_batch = next(iter(train_loader))
-#     g = g_batch[np.array([0])].repeat(len(transition_model.q_bars))
-#     rng = jax.random.PRNGKey(0)
-#     q_bars = transition_model.q_bars  # [timesteps]
-#     probs = (g @ q_bars).sample_one_hot(rng)
-#     probs.plot()
-#
 
 
 def prettify(val: dict[str, Float[Array, ""]]) -> dict[str, float]:

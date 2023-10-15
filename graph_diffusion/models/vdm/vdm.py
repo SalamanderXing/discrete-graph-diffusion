@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Iterable, Any
+from collections.abc import Callable
 
 from jax import Array
 import flax

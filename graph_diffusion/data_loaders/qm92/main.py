@@ -1,20 +1,20 @@
 # import ipdb;ipdb.set_trace()
 import os
-import numpy as np
+from jax import jit
+import random
 from tqdm import tqdm
 import pickle
 import ipdb
-from typing import Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from jaxtyping import Float, Array
-from jax import numpy as jnp
-import tensorflow as tf
-from tensorflow.data import Dataset
+
+from jax import numpy as np
 from mate.jax import SFloat
 from .qm9_dataset import QM9DataModule, QM9infos, get_train_smiles
 from ...shared.graph import graph_distribution as gd, graph
+from flax.struct import dataclass as flax_dataclass
 
-tf.config.experimental.set_visible_devices([], "GPU")
 GraphDistribution = gd.GraphDistribution
 
 
@@ -42,6 +42,9 @@ class Bunch:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
+    def __getitem__(self, key):
+        return self.__dict__[key]
+
     @classmethod
     def from_dict(cls, dictionary):
         bunch = cls()
@@ -53,25 +56,82 @@ class Bunch:
         return bunch
 
 
-def to_dense_numpy(dataloader):
-    from . import utils
+print("Converting to dense numpy")
 
+
+from . import utils
+
+
+# def to_dense_numpy(dataloader):
+#     xs = []
+#     es = []
+#     nodes_counts = []
+#     for data in tqdm(dataloader):
+#         dense_data, node_mask = utils.to_dense(
+#             data.x, data.edge_index, data.edge_attr, data.batch
+#         )
+#         dense_data = dense_data.mask(node_mask)
+#         X, E = dense_data.X, dense_data.E
+#         if X.shape[1] == 9:  # for some reason in one case there are only 8 nodes
+#             xs.append(X)
+#             es.append(E)
+#             nodes_counts.append(node_mask.sum(-1))
+#     xs = np.concatenate(xs, axis=0)
+#     es = np.concatenate(es, axis=0)
+#     # es[np.where(es.sum(-1) == 0)] = np.eye(es.shape[-1])[0]
+#     es = np.where(es.sum(-1) == 0, np.eye(es.shape[-1])[0], es)
+#     nodes_counts = np.concatenate(nodes_counts, axis=0)
+#     return xs, es, nodes_counts
+
+from jaxtyping import Int
+
+
+@flax_dataclass
+class DataItem:
+    x: Array
+    edge_index: Array
+    edge_attr: Array
+    batch: Array
+
+
+def data_loader_to_data_items(dataloader):
+    print("Converting to JAX data items")
+    res = [
+        DataItem(
+            x=np.asarray(data.x),
+            edge_index=np.asarray(data.edge_index),
+            edge_attr=np.asarray(data.edge_attr),
+            batch=np.asarray(data.batch),
+        )
+        for data in dataloader
+    ]
+    print("Done converting to JAX data items")
+    return res
+
+
+def to_dense_numpy(data_items: Iterable[DataItem]):
     xs = []
     es = []
     nodes_counts = []
-    for data in tqdm(dataloader):
-        dense_data, node_mask = utils.to_dense(
+    for data in tqdm(data_items):
+        # dense_data, node_mask = utils.to_dense(
+        #     data.x, data.edge_index, data.edge_attr, data.batch
+        # )
+        # dense_data = dense_data.mask(node_mask)
+        # removes self loops
+        # X, E = dense_data.X, dense_data.E
+        X, E, node_mask = utils.to_dense(
             data.x, data.edge_index, data.edge_attr, data.batch
         )
-        dense_data = dense_data.mask(node_mask)
-        X, E = dense_data.X.numpy(), dense_data.E.numpy()
+        # FIXME: remove self loops!
         if X.shape[1] == 9:  # for some reason in one case there are only 8 nodes
             xs.append(X)
             es.append(E)
-            nodes_counts.append(node_mask.sum(-1).numpy())
+            nodes_counts.append(node_mask.sum(-1))
     xs = np.concatenate(xs, axis=0)
     es = np.concatenate(es, axis=0)
-    es[np.where(es.sum(-1) == 0)] = np.eye(es.shape[-1])[0]
+    # es[np.where(es.sum(-1) == 0)] = np.eye(es.shape[-1])[0]
+    es = np.where(es.sum(-1) == 0, np.eye(es.shape[-1])[0], es)
     nodes_counts = np.concatenate(nodes_counts, axis=0)
     return xs, es, nodes_counts
 
@@ -95,7 +155,7 @@ def create_graph(nodes, edges, edges_counts, nodes_counts, onehot: bool, train=F
     )
 
 
-def get_dense_data(save_dir: str, batch_size: int, onehot: bool = True):
+def get_dense_data(save_dir: str, batch_size: int, cache_dir: str, onehot: bool = True):
     cfg = Bunch.from_dict(
         {
             "dataset": {
@@ -112,20 +172,64 @@ def get_dense_data(save_dir: str, batch_size: int, onehot: bool = True):
             },
         }
     )
-    datamodule = QM9DataModule(cfg)
-    dataset_infos = QM9infos(datamodule=datamodule, cfg=cfg)
-    datamodule.prepare_data()
-    train_dataloader = datamodule.train_dataloader()
-    test_dataloader = datamodule.test_dataloader()
-    train_nodes, train_edges, train_nodes_counts = to_dense_numpy(train_dataloader)
-    test_nodes, test_edges, test_nodes_counts = to_dense_numpy(test_dataloader)
+    intermediate_cache = os.path.join(cache_dir, "intermediate_cache.pt")
+    raw_cache = os.path.join(cache_dir, "raw_cache.pt")
+    if not os.path.exists(intermediate_cache):
+        print(f"Getting datamodule")
+        datamodule = QM9DataModule(cfg)
+        print(f"Got datamodule")
+        dataset_infos = QM9infos(datamodule=datamodule, cfg=cfg)
+        print(f"Got dataset infos, preparing data")
+        datamodule.prepare_data()
+        print(f"Prepared data")
+        print("\nGetting train dataloader")
+        train_dataloader = datamodule.train_dataloader()
+        print(f"Got train dataloader\nGetting test dataloader")
+        test_dataloader = datamodule.test_dataloader()
+        jax_train_data = data_loader_to_data_items(train_dataloader)
+        jax_test_data = data_loader_to_data_items(test_dataloader)
+        train_smiles = get_train_smiles(
+            cfg=cfg,
+            train_dataloader=datamodule.train_dataloader(),
+            dataset_infos=dataset_infos,
+            evaluate_dataset=False,
+        )
+        with open(intermediate_cache, "wb") as f:
+            pickle.dump(
+                {
+                    "train": jax_train_data,
+                    "test": jax_test_data,
+                    "infos": dataset_infos,
+                    "train_smiles": train_smiles,
+                },
+                f,
+            )
+    else:
+        print(f"Loading intermediate cache from {intermediate_cache}")
+        with open(intermediate_cache, "rb") as f:
+            intermediate_cache_dict = pickle.load(f)
+        jax_train_data = intermediate_cache_dict["train"]
+        jax_test_data = intermediate_cache_dict["test"]
+        dataset_infos = intermediate_cache_dict["infos"]
+        train_smiles = intermediate_cache_dict["train_smiles"]
+    if not os.path.exists(raw_cache):
+        assert False, f"Raw cache {raw_cache} does not exist"
+        print(f"Got test dataloader\nConverting to dense numpy")
+        train_nodes, train_edges, train_nodes_counts = to_dense_numpy(jax_train_data)
+        print(f"Converted train dataloader\nConverting to dense numpy")
+        test_nodes, test_edges, test_nodes_counts = to_dense_numpy(jax_test_data)
+    else:
+        print(f"Loading raw cache from {raw_cache}")
+        with open(raw_cache, "rb") as f:
+            raw_cache_dict = pickle.load(f)
+        train_nodes = raw_cache_dict["train_nodes"]
+        train_edges = raw_cache_dict["train_edges"]
+        train_nodes_counts = raw_cache_dict["train_nodes_counts"]
+        test_nodes = raw_cache_dict["test_nodes"]
+        test_edges = raw_cache_dict["test_edges"]
+        test_nodes_counts = raw_cache_dict["test_nodes_counts"]
     priors = compute_priors(train_nodes, train_edges, train_nodes_counts)
-    train_smiles = get_train_smiles(
-        cfg=cfg,
-        train_dataloader=datamodule.train_dataloader(),
-        dataset_infos=dataset_infos,
-        evaluate_dataset=False,
-    )
+    print(f"Computed priors\nGetting train smiles")
     return Bunch.from_dict(
         {
             "train_nodes": train_nodes,
@@ -138,7 +242,7 @@ def get_dense_data(save_dir: str, batch_size: int, onehot: bool = True):
             "feature_edge_prior": priors.feature_edge_prior,
             "structure_node_prior": priors.structure_node_prior,
             "structure_edge_prior": priors.structure_edge_prior,
-            "nodes_dist": dataset_infos.n_nodes.numpy(),
+            "nodes_dist": dataset_infos.n_nodes,
             "infos": dataset_infos,
             "train_smiles": train_smiles,
         }
@@ -178,41 +282,75 @@ def compute_priors(train_nodes, train_edges, train_nodes_counts):
     )
 
 
+class CustomDataLoader:
+    def __init__(self, *datasets, batch_size=32, shuffle=True):
+        self.datasets = datasets
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.indices = list(range(len(datasets[0])))
+        if shuffle:
+            random.shuffle(self.indices)
+        self.indices = np.array(self.indices)
+
+    def __iter__(self):
+        for i in range(0, len(self.indices), self.batch_size):
+            batch_indices = self.indices[i : i + self.batch_size]
+            batch = tuple([dataset[batch_indices] for dataset in self.datasets])
+            yield batch
+
+    def __len__(self):
+        return len(self.indices) // self.batch_size
+
+
 def get_dataloaders(bunch: Bunch, batch_size: int, onehot: bool) -> QM9Dataset:
-    train_loader = (
-        Dataset.zip(
-            (
-                # Dataset.from_tensor_slices(indices_train),
-                Dataset.from_tensor_slices(bunch.train_nodes),
-                Dataset.from_tensor_slices(bunch.train_edges),
-                Dataset.from_tensor_slices(np.ones_like(bunch.train_nodes_counts)),
-                Dataset.from_tensor_slices(bunch.train_nodes_counts),
-            )
-        )
-        .shuffle(1000)
-        .batch(batch_size)
+    # train_loader = (
+    #     Dataset.zip(
+    #         (
+    #             # Dataset.from_tensor_slices(indices_train),
+    #             Dataset.from_tensor_slices(bunch.train_nodes),
+    #             Dataset.from_tensor_slices(bunch.train_edges),
+    #             Dataset.from_tensor_slices(np.ones_like(bunch.train_nodes_counts)),
+    #             Dataset.from_tensor_slices(bunch.train_nodes_counts),
+    #         )
+    #     )
+    #     .shuffle(1000)
+    #     .batch(batch_size)
+    # )
+    # test_loader = (
+    #     Dataset.zip(
+    #         (
+    #             # Dataset.from_tensor_slices(indices_train),
+    #             Dataset.from_tensor_slices(bunch.test_nodes),
+    #             Dataset.from_tensor_slices(bunch.test_edges),
+    #             Dataset.from_tensor_slices(np.ones_like(bunch.test_nodes_counts)),
+    #             Dataset.from_tensor_slices(bunch.test_nodes_counts),
+    #         )
+    #     )
+    #     # .drop_remainder(True)
+    #     .shuffle(1000).batch(batch_size)
+    # )
+    train_loader = CustomDataLoader(
+        bunch.train_nodes,
+        bunch.train_edges,
+        np.ones_like(bunch.train_nodes_counts),
+        bunch.train_nodes_counts,
+        batch_size=batch_size,
     )
-    test_loader = (
-        Dataset.zip(
-            (
-                # Dataset.from_tensor_slices(indices_train),
-                Dataset.from_tensor_slices(bunch.test_nodes),
-                Dataset.from_tensor_slices(bunch.test_edges),
-                Dataset.from_tensor_slices(np.ones_like(bunch.test_nodes_counts)),
-                Dataset.from_tensor_slices(bunch.test_nodes_counts),
-            )
-        )
-        # .drop_remainder(True)
-        .shuffle(1000).batch(batch_size)
+    test_loader = CustomDataLoader(
+        bunch.test_nodes,
+        bunch.test_edges,
+        np.ones_like(bunch.test_nodes_counts),
+        bunch.test_nodes_counts,
+        batch_size=batch_size,
     )
     return QM9Dataset(
         train_loader=train_loader,
         test_loader=test_loader,
-        feature_node_prior=jnp.array(bunch.feature_node_prior),
-        feature_edge_prior=jnp.array(bunch.feature_edge_prior),
-        structure_node_prior=jnp.array(bunch.structure_node_prior),
-        structure_edge_prior=jnp.array(bunch.structure_edge_prior),
-        nodes_dist=jnp.array(bunch.nodes_dist),
+        feature_node_prior=np.array(bunch.feature_node_prior),
+        feature_edge_prior=np.array(bunch.feature_edge_prior),
+        structure_node_prior=np.array(bunch.structure_node_prior),
+        structure_edge_prior=np.array(bunch.structure_edge_prior),
+        nodes_dist=np.array(bunch.nodes_dist),
         max_node_feature=bunch.train_nodes.shape[-1],
         max_edge_feature=bunch.train_edges.shape[-1],
         infos=bunch.infos,
@@ -227,7 +365,7 @@ def load_data(save_dir: str, batch_size: int, onehot: bool = True):
     cache = os.path.join(save_dir, "qm9.pt")
     if not os.path.exists(cache):
         print("Creating cache")
-        dense_data = get_dense_data(save_dir, batch_size, onehot=False)
+        dense_data = get_dense_data(save_dir, batch_size, save_dir, onehot=False)
         pickle.dump(dense_data, open(cache, "wb"))
     else:
         print("Loading cache")

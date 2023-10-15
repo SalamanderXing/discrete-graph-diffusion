@@ -22,11 +22,18 @@ import ipdb
 
 assert mate is not None
 
-diffusion_type = mate.diffusion_type
+diffusion_type = getattr(Trainer.DiffusionType, mate.diffusion_type)
 force_cpu = mate.force_cpu
 do_jit = mate.do_jit
 debug_compiles = mate.debug_compiles
 
+
+# def run(
+#     diffusion_type: Trainer.DiffusionType,
+#     force_cpu: bool,
+#     do_jit: bool,
+#     debug_compiles: bool,
+# ):
 if force_cpu:
     jax.config.update("jax_platform_name", "cpu")  # run on CPU for now.
 
@@ -42,9 +49,9 @@ if device.lower() == "cpu":
 if not do_jit:
     print("[red]WARNING: :skull:[/red] Running without JIT. This will be slow.")
 if device in ["gpu", "cpu"]:
-    batch_size = 512
+    batch_size = mate.local_batch_size
 else:
-    batch_size = 8 * 1000
+    batch_size = mate.remote_batch_size
 print(f"{batch_size=}")
 dataset = load_data(
     save_dir=mate.data_dir,
@@ -85,7 +92,7 @@ trainer = Trainer(
     num_node_features=dataset.max_node_feature,
     num_edge_features=dataset.max_edge_feature,
     train_smiles=dataset.train_smiles,
-    diffusion_type=Trainer.DiffusionType.structure_only,
+    diffusion_type=diffusion_type,
 )
 with jax.disable_jit(not do_jit):
     mate.bind(trainer)

@@ -12,6 +12,7 @@ from typing import Protocol, runtime_checkable, no_type_check
 from beartype import beartype
 from jaxtyping import jaxtyped
 from jax import jit
+from collections.abc import Callable
 
 from .transition_model import TransitionModel
 from .display import ValidationResultWrapper
@@ -53,9 +54,6 @@ class GetProbabilityFeature(nn.Module):
         # ).scalar_multiply(100, unsafe=True)
         # return pred_features_dense
         return gd.DenseGraphDistribution.to_dense(pred_features)
-
-
-from typing import Callable
 
 
 @no_type_check

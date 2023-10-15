@@ -5,3 +5,5 @@ do_jit: true
 debug_compiles: false
 ssh_command: 'gcloud compute tpus tpu-vm ssh --zone=us-central1-a tpu-giulio-dev'
 remote_dir: '/home/bluesk/discrete-graph-diffusion/'
+local_batch_size: 400
+remote_batch_size: 8000

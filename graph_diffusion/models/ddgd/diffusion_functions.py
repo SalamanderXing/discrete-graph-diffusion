@@ -236,43 +236,63 @@ def compute_kl_prior(
     return gd.kl_div(transition_probs, limit_dist)
 
 
+# # TODO: simplify this function. Make it so it takes lambda
+# def compute_train_loss(
+#     *,
+#     target: gd.OneHotGraph,
+#     transition_model: TransitionModel,
+#     get_probability: GetProbabilityType,
+#     rng_key: Key,
+# ):  # -> Float[Array, "batch_size"]:
+#     rng_sample = jax.random.fold_in(rng_key, enc("sample"))
+#     rng_reclogp = jax.random.fold_in(rng_key, enc("train_reclogp"))
+#     t, g_t, g_pred = predict_from_random_timesteps(
+#         get_probability, target, transition_model, rng_sample
+#     )
+#     loss_type = "ce_minimal"
+#     # loss_type = "elbo"
+#     if "ce" in loss_type:
+#         ce_term = gd.softmax_cross_entropy(g_pred, target).mean()
+#     if "elbo" in loss_type or loss_type == "ce_minimal":
+#         loss_all_t = _compute_lt(
+#             t=t, g=target, g_t=g_t, raw_g_pred=g_pred, transition_model=transition_model
+#         ).mean()
+#         if loss_type == "ce_minimal":
+#             tot_loss = loss_all_t + ce_term
+#         if "elbo" in loss_type:
+#             reconstruction_logp = compute_reconstruction_logp(
+#                 rng_key=rng_reclogp,
+#                 p=get_probability,
+#                 transition_model=transition_model,
+#                 g=target,
+#             ).mean()
+#             if loss_type == "elbo_ce":
+#                 tot_loss = loss_all_t - reconstruction_logp + ce_term
+#             elif loss_type == "elbo":
+#                 tot_loss = loss_all_t - reconstruction_logp
+#     elif loss_type == "ce":
+#         tot_loss = ce_term
+#     elif loss_type == "digress":
+#         tot_loss = gd.softmax_cross_entropy(g_pred, target, np.array([1.0, 5.0]))
+#     return tot_loss
 def compute_train_loss(
     *,
     target: gd.OneHotGraph,
     transition_model: TransitionModel,
     get_probability: GetProbabilityType,
+    lambda_: Float[Array, ""] = np.array(0.5),
     rng_key: Key,
-):  # -> Float[Array, "batch_size"]:
+):
     rng_sample = jax.random.fold_in(rng_key, enc("sample"))
     rng_reclogp = jax.random.fold_in(rng_key, enc("train_reclogp"))
     t, g_t, g_pred = predict_from_random_timesteps(
         get_probability, target, transition_model, rng_sample
     )
-    loss_type = "elbo_ce"
-    # loss_type = "elbo"
-    if "ce" in loss_type:
-        ce_term = gd.softmax_cross_entropy(g_pred, target).mean()
-    if "elbo" in loss_type or loss_type == "ce_minimal":
-        loss_all_t = _compute_lt(
-            t=t, g=target, g_t=g_t, raw_g_pred=g_pred, transition_model=transition_model
-        ).mean()
-        if loss_type == "ce_minimal":
-            tot_loss = loss_all_t + ce_term
-        if "elbo" in loss_type:
-            reconstruction_logp = compute_reconstruction_logp(
-                rng_key=rng_reclogp,
-                p=get_probability,
-                transition_model=transition_model,
-                g=target,
-            ).mean()
-            if loss_type == "elbo_ce":
-                tot_loss = loss_all_t - reconstruction_logp + ce_term
-            elif loss_type == "elbo":
-                tot_loss = loss_all_t - reconstruction_logp
-    elif loss_type == "ce":
-        tot_loss = ce_term
-    elif loss_type == "digress":
-        tot_loss = gd.softmax_cross_entropy(g_pred, target, np.array([1.0, 5.0]))
+    ce_term = gd.softmax_cross_entropy(g_pred, target).mean()
+    loss_all_t = _compute_lt(
+        t=t, g=target, g_t=g_t, raw_g_pred=g_pred, transition_model=transition_model
+    ).mean()
+    tot_loss = lambda_ * loss_all_t - (1 - lambda_) * ce_term
     return tot_loss
 
 
