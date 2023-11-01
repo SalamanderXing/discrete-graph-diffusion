@@ -1,25 +1,5 @@
 # Discrete Graph Diffusion
 
-## Project Structure
-
-- `pytorch` $\rightarrow$ Almost identical to the [original code](https://github.com/cvignac/DiGress), adapted for debugging.
-- `graph_diffusion` $\rightarrow$ new code in JAX
-
-### The `graph_diffusion` folder
-
-All the code regarding diffusion lies in the `trainers/ddd_trainer` folder. 
-The entrypoint is the file `trainers/ddd_trainer/discrete_denoising_diffusion.py`
-
-## Status
-
-- Graph transformer: looks like its working
-- Data loader: I kept the same from the original code.
-- Trainer (diffusion stuff): only training seems to work.
-
-## Running the code
-
-The project is created with Mate, which is just a way to run a project organized into isolated python modules.
-
 #### Install Mate
 
 Somewhere on your machine:

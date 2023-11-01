@@ -64,7 +64,6 @@ class Watcher:
                 "--command",
                 f"tar -xz -C {self.remote_path}",
             ]
-
             tar_process = subprocess.Popen(tar_command, stdout=subprocess.PIPE)
             subprocess.run(ssh_command, stdin=tar_process.stdout)
             tar_process.wait()

@@ -5,14 +5,22 @@ import matplotlib.pyplot as plt
 import ipdb
 import numpy as np
 import networkx as nx
-#import wandb
+
+# import wandb
 from ..graph_distribution import GraphDistribution
 from ..functional import concatenate
 
 
 def get_position(G, i: int, j: int, positions, position_option: str | None):
+    try:
+        position = positions[i][j]
+    except:
+        ipdb.set_trace()
     if position_option is None:
-        positions[i][j] = nx.spring_layout(G)
+        try:
+            positions[i][j] = nx.spring_layout(G)
+        except:
+            ipdb.set_trace()
     if positions[i][j] is None:
         if position_option == "all" and i + j > 0:
             positions[i][j] = positions[0][0]
@@ -24,7 +32,10 @@ def get_position(G, i: int, j: int, positions, position_option: str | None):
             ipdb.set_trace()
             positions[i][j] = positions[0][j]
     if positions[i][j] is None:
-        positions[i][j] = nx.spring_layout(G)
+        try:
+            positions[i][j] = nx.spring_layout(G)
+        except:
+            ipdb.set_trace()
     position = positions[i][j]
     return position
 
@@ -34,10 +45,12 @@ def plot(
     location: str | None = None,
     shared_position_option: str | None = None,
     title: str | None = None,
+    max_width: int = 5,
 ):
     if isinstance(rows, GraphDistribution):
         rows = [rows]
     assert isinstance(rows, Sequence)
+    assert len(rows) > 0
     assert shared_position_option in [None, "row", "col", "all"]
     location = (
         (
@@ -49,7 +62,7 @@ def plot(
         else "wandb"
     )
     original_len = len(rows[0])
-    skip = (len(rows[0]) // 15) if len(rows[0]) > 15 else 1
+    skip = (len(rows[0]) // max_width) if len(rows[0]) > max_width else 1
     rows_skips = [(row[::skip], row[np.array([-1])]) for row in rows]
     rows = [concatenate(row) for row in rows_skips]
     lrows = len(rows)
@@ -59,6 +72,7 @@ def plot(
         lcolumn,
         figsize=(100, 10),
     )
+    plt.subplots_adjust(left=0, right=0.5, bottom=0, top=1, wspace=0.1)
     if len(axs.shape) == 1:
         axs = axs[None, :]
 
@@ -80,10 +94,10 @@ def plot(
         edge_values = row.edges.argmax(-1)
         current_node_counts = row.nodes_counts
         for j, ax in enumerate(ax_row):
-            j *= skip
-            n_nodes = current_node_counts[j]
-            nodes = node_values[j, :n_nodes]
-            edge_features = edge_values[j, :n_nodes, :n_nodes]
+            j_original = j
+            n_nodes = current_node_counts[j_original]
+            nodes = node_values[j_original, :n_nodes]
+            edge_features = edge_values[j_original, :n_nodes, :n_nodes]
             indices = np.indices(edge_features.shape).reshape(2, -1).T
             mask = edge_features.flatten() != 0
             edges = indices[mask]
@@ -100,7 +114,7 @@ def plot(
             color_edges = np.array(
                 [cmap_edge[edge_features[i, j]] for (i, j) in G.edges]
             )
-            position = get_position(G, i, j, positions, shared_position_option)
+            position = get_position(G, i, j_original, positions, shared_position_option)
             nx.draw(
                 G,
                 position,
@@ -109,11 +123,11 @@ def plot(
                 node_color=color_nodes,
                 ax=ax,
             )
-            ax.set_title(f"t={j*skip if not j == len(row)-1 else original_len-1}")
+            ax.set_title(
+                f"t={j_original*skip if not j_original == len(row)-1 else original_len-1}"
+            )
             ax.set_aspect("equal")
             ax.set_axis_off()
-
-    plt.subplots_adjust(left=0, right=1, bottom=0, top=1)
 
     if title is not None:
         plt.suptitle(title, fontsize=16)

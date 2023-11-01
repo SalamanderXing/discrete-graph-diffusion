@@ -14,7 +14,7 @@ from beartype import beartype
 from jaxtyping import jaxtyped
 from jax import jit
 
-from .transition_model import TransitionModel
+from .transition_model import GraphDistribution, TransitionModel
 from . import diffusion_functions as df
 from .extra_features.extra_features import compute as compute_extra_features
 from .display import ValidationResultWrapper
@@ -117,6 +117,42 @@ class SimpleDDGD(nn.Module):
             return self.apply(params, rng, t, g, method=self.sample_step)
 
         return self.apply(params, sample_step, rng, n_samples, method=self._sample)
+
+    def _predict_for_all_timesteps(
+        self,
+        g: gd.OneHotGraph,
+        rng: Key,
+    ):
+        g_dists = self.transition_model.q_bars.apply_to(g)
+        g_t = gd.sample_one_hot(g_dists, rng)[:-1]
+        timesteps = np.arange(self.diffusion_steps)
+        losses = df.compute_val_loss(
+            target=g,
+            transition_model=self.transition_model,
+            rng_key=rng,
+            p=self.p_deterministic,
+            nodes_dist=self.nodes_dist,
+        )
+        preds = self.p_deterministic(
+            g=g_t,
+            t=timesteps,
+        )
+        return g_t, preds, losses
+
+    def predict_for_all_timesteps(
+        self,
+        params: FrozenDict,
+        g: gd.OneHotGraph,
+        rng: Key,
+    ):
+        assert g.nodes.shape[0] == 1
+        g_t, res, losses = self.apply(
+            params,
+            g.repeat(self.diffusion_steps + 1),
+            rng,
+            method=self._predict_for_all_timesteps,
+        )
+        return g_t, res, losses
 
     def get_model_input(self, g: gd.GraphDistribution, t: Int[Array, "bs"]):
         return get_model_input(g, t, self.use_extra_features, self.transition_model)

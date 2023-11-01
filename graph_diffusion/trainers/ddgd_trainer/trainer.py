@@ -24,13 +24,15 @@ from rich import print as print
 from tqdm import tqdm
 from flax.core.frozen_dict import FrozenDict
 from mate.jax import SFloat, SInt, SBool, Key
-from orbax import checkpoint
+
+# from orbax import checkpoint
 from einops import rearrange, reduce, repeat
 import hashlib
 from beartype import beartype
 from jax import pmap
 import random as pyrandom
 from .extra_features.extra_features import compute as compute_extra_features
+from .checkpoint_manager import CheckpointManager
 from ...shared.graph import graph_distribution as gd
 from ...models.ddgd import DDGD, SimpleDDGD, StructureFirstDDGD
 
@@ -72,8 +74,6 @@ def single_train_step(
     g: gd.OneHotGraph,
     state: TrainState,
     rng: Key,
-    use_structure: bool = True,
-    use_feature: bool = True,
 ):
     train_rng = jax.random.fold_in(rng, enc("train"))
     dropout_rng = jax.random.fold_in(rng, enc("dropout"))
@@ -99,8 +99,6 @@ def parallel_train_step(
     sharded_edges_mask,
     state: TrainState,
     rng: Key,
-    use_structure=True,
-    use_feature=True,
 ):
     graph = gd.OneHotGraph.create(
         nodes=sharded_nodes,
@@ -112,8 +110,6 @@ def parallel_train_step(
         g=graph,
         state=state,
         rng=rng,
-        use_structure=use_structure,
-        use_feature=use_feature,
     )
 
 
@@ -187,11 +183,13 @@ class Trainer:
         self,
     ):
         self.plot_path = os.path.join(self.save_path, "plots")
-        orbax_checkpointer = checkpoint.PyTreeCheckpointer()
-        options = checkpoint.CheckpointManagerOptions(max_to_keep=2, create=True)
-        self.checkpoint_manager = checkpoint.CheckpointManager(
-            self.save_path, orbax_checkpointer, options
-        )
+        # orbax_checkpointer = checkpoint.PyTreeCheckpointer()
+        # options = checkpoint.CheckpointManagerOptions(max_to_keep=2, create=True)
+        # self.checkpoint_manager = checkpoint.CheckpointManager(
+        #     self.save_path, orbax_checkpointer, options
+        # )
+        self.checkpoint_manager = CheckpointManager(self.save_path)
+
         self.a_val_batch = None
         if self.train_smiles is not None and self.dataset_infos is not None:
             self.sampling_metric = SamplingMolecularMetrics(
@@ -292,6 +290,7 @@ class Trainer:
         self.parallel_train_step = pmap(parallel_train_step)
         self.n_devices = jax.local_device_count()
         self.cpu_device = jax.devices("cpu")[0]
+        self.best_validity = {}
 
     def __val_epoch(
         self,
@@ -401,7 +400,7 @@ class Trainer:
         restore_checkpoint: bool = True,
     ):  # -> tuple[gd.GraphDistribution, gd.GraphDistribution]:
         rng = jax.random.fold_in(self.rngs["params"], enc("sample"))
-        n_samples = 9
+        n_samples = 100
         if restore_checkpoint:
             self.__restore_checkpoint()
 
@@ -437,7 +436,6 @@ class Trainer:
         t0 = time()
         # print(f"[pink] LR={round(np.array(self.state.lr).tolist(), 7)} [/pink]")
         use_structure_this_epoch = epoch < 30
-        print(f"Using structure: {use_structure_this_epoch}")
         use_stucture = jax_utils.replicate(use_structure_this_epoch)
         use_feature = np.logical_not(use_stucture)
         for i, x in enumerate(tqdm(self.train_loader)):
@@ -457,8 +455,6 @@ class Trainer:
                 sharded_edges_mask,
                 state=jax_utils.replicate(self.state),
                 rng=jax.random.split(step_key, self.n_devices),
-                use_structure=use_stucture,
-                use_feature=use_feature,
             )
             grads, loss = jax.tree_map(lambda x: x.mean(0), result)
             self.state = self.state.apply_gradients(grads=grads)
@@ -468,75 +464,75 @@ class Trainer:
         tot_time = t1 - t0
         return avg_loss, tot_time  # type: ignore
 
-    def predict_structure(
-        self,
-        title: str = "",
-        restore_checkpoint: bool = True,
-        location: str | None = None,
-    ):
-        if restore_checkpoint:
-            self.__restore_checkpoint()
-        data = to_one_hot(*next(iter(self.val_loader)))
-        data = data[:5]
-        t_0 = np.ones(data.batch_size, int)
-        rng_0 = jax.random.PRNGKey(pyrandom.randint(0, 100000))
-        g_t_0, g_pred_0 = self.ddgd.apply(
-            self.params,
-            data,
-            t_0,
-            rng_0,
-            method=self.ddgd.predict_structure,
-        )
-        t_mid = np.ones(data.batch_size, int) * 20
-        rng_mid = jax.random.PRNGKey(pyrandom.randint(0, 100000))
-        g_t_mid, g_pred_mid = self.ddgd.apply(
-            self.params,
-            data,
-            t_mid,
-            rng_mid,
-            method=self.ddgd.predict_structure,
-        )
-        gd.plot(
-            [data, g_pred_0, g_t_0, g_pred_mid, g_t_mid],
-            title=title,
-            shared_position_option="col",
-            location=location,
-        )
+    # def predict_structure(
+    #     self,
+    #     title: str = "",
+    #     restore_checkpoint: bool = True,
+    #     location: str | None = None,
+    # ):
+    #     if restore_checkpoint:
+    #         self.__restore_checkpoint()
+    #     data = to_one_hot(*next(iter(self.val_loader)))
+    #     data = data[:5]
+    #     t_0 = np.ones(data.batch_size, int)
+    #     rng_0 = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+    #     g_t_0, g_pred_0 = self.ddgd.apply(
+    #         self.params,
+    #         data,
+    #         t_0,
+    #         rng_0,
+    #         method=self.ddgd.predict_structure,
+    #     )
+    #     t_mid = np.ones(data.batch_size, int) * 20
+    #     rng_mid = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+    #     g_t_mid, g_pred_mid = self.ddgd.apply(
+    #         self.params,
+    #         data,
+    #         t_mid,
+    #         rng_mid,
+    #         method=self.ddgd.predict_structure,
+    #     )
+    #     gd.plot(
+    #         [data, g_pred_0, g_t_0, g_pred_mid, g_t_mid],
+    #         title=title,
+    #         shared_position_option="col",
+    #         location=location,
+    #     )
 
-    def predict_feature(
-        self,
-        title: str = "",
-        restore_checkpoint: bool = True,
-        location: str | None = None,
-    ):
-        if restore_checkpoint:
-            self.__restore_checkpoint()
-        data = to_one_hot(*next(iter(self.val_loader)))
-        data = data[:9]
-        t_0 = np.ones(data.batch_size, int)
-        rng_0 = jax.random.PRNGKey(pyrandom.randint(0, 100000))
-        g_t_0, g_pred_0 = self.ddgd.apply(
-            self.params,
-            data,
-            t_0,
-            rng_0,
-            method=self.ddgd.predict_feature,
-        )
-        t_mid = np.ones(data.batch_size, int) * 20
-        rng_mid = jax.random.PRNGKey(pyrandom.randint(0, 100000))
-        g_t_mid, g_pred_mid = self.ddgd.apply(
-            self.params,
-            data,
-            t_mid,
-            rng_mid,
-            method=self.ddgd.predict_feature,
-        )
-        gd.plot(
-            [data, g_pred_0, g_t_0, g_pred_mid, g_t_mid],
-            title=title,
-            shared_position_option="col",
-            location=location,
-        )
+    # def predict_feature(
+    #     self,
+    #     title: str = "",
+    #     restore_checkpoint: bool = True,
+    #     location: str | None = None,
+    # ):
+    #     if restore_checkpoint:
+    #         self.__restore_checkpoint()
+    #     data = to_one_hot(*next(iter(self.val_loader)))
+    #     data = data[:9]
+    #     t_0 = np.ones(data.batch_size, int)
+    #     rng_0 = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+    #     g_t_0, g_pred_0 = self.ddgd.apply(
+    #         self.params,
+    #         data,
+    #         t_0,
+    #         rng_0,
+    #         method=self.ddgd.predict_feature,
+    #     )
+    #     t_mid = np.ones(data.batch_size, int) * 20
+    #     rng_mid = jax.random.PRNGKey(pyrandom.randint(0, 100000))
+    #     g_t_mid, g_pred_mid = self.ddgd.apply(
+    #         self.params,
+    #         data,
+    #         t_mid,
+    #         rng_mid,
+    #         method=self.ddgd.predict_feature,
+    #     )
+    #     gd.plot(
+    #         [data, g_pred_0, g_t_0, g_pred_mid, g_t_mid],
+    #         title=title,
+    #         shared_position_option="col",
+    #         location=location,
+    #     )
 
     def predict(
         self,
@@ -565,70 +561,95 @@ class Trainer:
         load_from_disk: bool = True,
         epoch: int = -1,
     ):
+        from scipy.stats import spearmanr
+
         rng = jax.random.PRNGKey(pyrandom.randint(0, 100000))
-        if load_from_disk:
-            self.__restore_checkpoint()
-        p = GetProbabilityFromState(
-            self.state,
-            rng,
-            self.transition_model,
-            extra_features=self.use_extra_features,
-        )
-        print(f"Plotting noised graphs to {plot_path}")
-        g_batch = None
-        for i, x in enumerate(tqdm(self.val_loader)):
-            g_batch = to_one_hot(x)
-            break
-        assert not g_batch is None
-        mean_loss, _ = self.__val_epoch(rng=jax.random.fold_in(rng, enc("val")))
-        g = g_batch[np.array([0])].repeat(len(self.transition_model.q_bars))
-        q_bars = self.transition_model.q_bars  # [timesteps]
-        posterior_samples = gd.sample_one_hot(gd.matmul(g, q_bars), rng)
-        timesteps = np.arange(len(self.transition_model.q_bars))
-        model_probs = p(posterior_samples, timesteps)
-        val_losses = df.compute_val_loss(
-            target=posterior_samples,
-            transition_model=self.transition_model,
-            p=p,
-            nodes_dist=self.nodes_dist,
-            rng_key=jax.random.PRNGKey(random.randint(0, 100000)),
-        )["nll"]
-        corr = np.corrcoef(val_losses, np.arange(len(self.transition_model.q_bars)))[
-            0, 1
-        ]
-        # FIXME
-        # if epoch > -1:
-        #     wandb.log({"corr_t_vs_elbo": corr}, step=epoch)
-        model_samples = model_probs.argmax()
-        gd.plot(
-            [posterior_samples, model_samples],
-            location=plot_path,
-            shared_position="all",
-            title=f"{round(mean_loss['nll'].tolist(), 2)} Correlation: {corr:.3f}",
-        )
+        n_samples = 4
+        g_batch = to_one_hot(*next(iter(self.val_loader)))[:n_samples]
+        correlations = []
+        for s in range(n_samples):
+            rng_s = jax.random.fold_in(rng, s)
+            g_t, preds, losses = self.ddgd.predict_for_all_timesteps(
+                self.state.params,
+                g_batch[np.array([s])],
+                rng_s,
+            )
+            preds = gd.sample_one_hot(
+                gd.softmax(preds), jax.random.fold_in(rng_s, enc("sample"))
+            )
+            losses = losses["nll"]
+
+            correlation, p_value = spearmanr(np.arange(len(losses)), losses)
+            correlations.append(correlation)
+            current_plot_path = plot_path + f"_{s}" if plot_path else None
+            print(f"Plotting preds to: {current_plot_path}")
+            gd.plot(
+                [g_t, preds],
+                location=current_plot_path,
+                shared_position_option="all",
+                # title=f"{round(mean_loss['nll'].tolist(), 2)} Correlation: {corr:.3f}",
+            )
+        correlation = np.mean(np.array(correlations))
+        print(f"{correlation=}")
+        # if load_from_disk:
+        #     self.__restore_checkpoint()
+        # p = GetProbabilityFromState(
+        #     self.state,
+        #     rng,
+        #     self.transition_model,
+        #     extra_features=self.use_extra_features,
+        # )
+        # print(f"Plotting noised graphs to {plot_path}")
+        # g_batch = None
+        # for i, x in enumerate(tqdm(self.val_loader)):
+        #     g_batch = to_one_hot(x)
+        #     break
+        # assert not g_batch is None
+        # mean_loss, _ = self.__val_epoch(rng=jax.random.fold_in(rng, enc("val")))
+        # g = g_batch[np.array([0])].repeat(len(self.transition_model.q_bars))
+        # q_bars = self.transition_model.q_bars  # [timesteps]
+        # posterior_samples = gd.sample_one_hot(gd.matmul(g, q_bars), rng)
+        # timesteps = np.arange(len(self.transition_model.q_bars))
+        # model_probs = p(posterior_samples, timesteps)
+        # val_losses = df.compute_val_loss(
+        #     target=posterior_samples,
+        #     transition_model=self.transition_model,
+        #     p=p,
+        #     nodes_dist=self.nodes_dist,
+        #     rng_key=jax.random.PRNGKey(random.randint(0, 100000)),
+        # )["nll"]
+        # corr = np.corrcoef(val_losses, np.arange(len(self.transition_model.q_bars)))[
+        #     0, 1
+        # ]
+        # # FIXME
+        # # if epoch > -1:
+        # #     wandb.log({"corr_t_vs_elbo": corr}, step=epoch)
+        # model_samples = model_probs.argmax()
 
     def __restore_checkpoint(self):
-        if self.checkpoint_manager.latest_step() is not None:
-            state_dict = self.checkpoint_manager.restore(
-                self.checkpoint_manager.latest_step()
-            )
-            self.learning_rate = state_dict["lr"]
-            state_dict = jax.tree_map(np.asarray, state_dict)
-            state_dict["step"] = state_dict["step"].item()
-            self.state = TrainState(
-                tx=self.__get_optimizer(),
-                apply_fn=self.state.apply_fn,
-                **{
-                    k: v if not isinstance(v, dict) else FrozenDict(v)
-                    for k, v in state_dict.items()
-                    if not k in ("last_loss", "lr")
-                },
-            )
-            print(
-                f"[yellow]Restored from epoch {self.checkpoint_manager.latest_step()}[/yellow]"
-            )
-        else:
-            print("[yellow]No checkpoint found, starting from scratch[/yellow]")
+        # FIXME
+        # if self.checkpoint_manager.latest_step() is not None:
+        #     state_dict = self.checkpoint_manager.restore(
+        #         self.checkpoint_manager.latest_step()
+        #     )
+        #     self.learning_rate = state_dict["lr"]
+        #     state_dict = jax.tree_map(np.asarray, state_dict)
+        #     state_dict["step"] = state_dict["step"].item()
+        #     self.state = TrainState(
+        #         tx=self.__get_optimizer(),
+        #         apply_fn=self.state.apply_fn,
+        #         **{
+        #             k: v if not isinstance(v, dict) else FrozenDict(v)
+        #             for k, v in state_dict.items()
+        #             if not k in ("last_loss", "lr")
+        #         },
+        #     )
+        #     print(
+        #         f"[yellow]Restored from epoch {self.checkpoint_manager.latest_step()}[/yellow]"
+        #     )
+        # else:
+        #     print("[yellow]No checkpoint found, starting from scratch[/yellow]")
+        pass
 
     def trivial_test(self):
         """
@@ -697,12 +718,14 @@ class Trainer:
 
         assert last_epoch is not None
         assert last_epoch <= self.num_epochs, "Already trained for this many epochs."
+        self.plot_preds(
+            plot_path=os.path.join(self.plot_path, "initial_preds_all_t"),
+            load_from_disk=False,
+        )
         self.sample_and_plot(
             restore_checkpoint=False,
             location=self.plot_path,
         )
-        current_patience = self.patience
-        stopping_criterion = -5
         rng, _ = jax.random.split(self.rngs["params"])
         rng, rng_this_epoch = jax.random.split(rng)  # TODO use that
         val_loss, val_time = self.__val_epoch(
@@ -711,7 +734,8 @@ class Trainer:
         min_val_loss = val_loss
         min_train_loss = np.inf
         print(val_loss.to_rich_table(f"Val Loss (prior training)", epoch=0))
-        eval_every = 4
+        eval_every = 1
+
         for epoch_idx in range(last_epoch, self.num_epochs + 1):
             val_rng_epoch = jax.random.fold_in(rng, enc(f"val_rng_{epoch_idx}"))
             train_rng_epoch = jax.random.fold_in(rng, enc(f"train_rng_{epoch_idx}"))
@@ -722,14 +746,6 @@ class Trainer:
             )
             if train_loss < min_train_loss:
                 min_train_loss = train_loss
-            # wandb.log( FIXME
-            print(
-                {f"main/{key}": val["nll"] for key, val in val_loss.items()}
-                | {f"main/total": val_loss.nll}
-                | val_loss.flatten()
-                | {"train_losses/train_loss": train_loss},
-                epoch_idx,
-            )
             print(
                 f"[red underline]Train[/red underline]\nloss={train_loss:.5f} best={min_train_loss:.5f} time={train_time:.4f}"
             )
@@ -752,7 +768,11 @@ class Trainer:
                     #     location="wandb",
                     #     title=f"val nll: {val_loss.nll:.4f}",
                     # )
-
+                    self.plot_preds(
+                        plot_path=os.path.join(
+                            self.plot_path, f"preds_all_t_{epoch_idx}"
+                        ),
+                    )
                     self.sample_and_plot(
                         restore_checkpoint=False,
                         location=self.plot_path,
@@ -805,9 +825,29 @@ class Trainer:
         # print(f"{title}: {metrics['relaxed_validity']:.3f} {metrics['uniqueness']:.3f}")
         assert self.sampling_metric is not None
         metrics = self.sampling_metric(sample)
-        print(metrics, f"step={self.state.step}")
+        # print(metrics, f"step={self.state.step}")
+        # print(
+        #     f"Validity: {metrics['validity']}\n Relaxed validity: {metrics['relaxed_validity']:.3f}\nUniqueness: {metrics['uniqueness']:.3f}"
+        # )
+        if ("validity" not in self.best_validity) or (
+            metrics["validity"] > self.best_validity["validity"]
+        ):
+            self.best_validity = metrics
+        print("[red]Current[/red] [green]Validity[/green]")
         print(
-            f"Relaxed validity: {metrics['relaxed_validity']:.3f}\nUniqueness: {metrics['uniqueness']:.3f}"
+            {
+                k: float(f"{v:.4f}")
+                for k, v in metrics.items()
+                if k in ("validity", "relaxed_validity", "uniqueness")
+            }
+        )
+        print("[red]Best[/red] [green]Validity[/green]")
+        print(
+            {
+                k: float(f"{v:.4f}")
+                for k, v in self.best_validity.items()
+                if k in ("validity", "relaxed_validity", "uniqueness")
+            }
         )
 
 

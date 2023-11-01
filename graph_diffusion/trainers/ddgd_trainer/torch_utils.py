@@ -2,11 +2,6 @@ import os
 from copy import deepcopy
 from typing import Optional, Union, Dict
 from ...shared.jax_geometric import utils
-
-# from omegaconf import OmegaConf, open_dict
-from overrides import overrides
-
-# from pytorch_lightning.utilities import rank_zero_only
 from ...shared.jax_geometric.utils import to_dense_adj, to_dense_batch
 
 

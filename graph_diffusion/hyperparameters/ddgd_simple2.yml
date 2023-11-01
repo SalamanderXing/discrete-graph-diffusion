@@ -1,0 +1,10 @@
+experiment: ddgd
+diffusion_type: simple
+force_cpu: false
+do_jit: true
+debug_compiles: false
+ssh_command: 'gcloud compute tpus tpu-vm ssh --zone=us-central1-a tpu-giulio-dev2'
+remote_dir: '/home/bluesk/discrete-graph-diffusion/'
+local_batch_size: 400
+remote_batch_size: 500
+diffusion_steps: 500

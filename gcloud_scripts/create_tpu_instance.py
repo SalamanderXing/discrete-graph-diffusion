@@ -6,8 +6,8 @@ import subprocess
 def main():
     # name = "tpu-giulio-dev3"
     name = "tpu-giulio-dev2"
-    zone = "europe-west4-a"
-    #zone = "us-central1-a"
+    #zone = "europe-west4-a"
+    zone = "us-central1-a"
     # zone = "us-central1-b"
     # zone = "us-central1-f"
     success = False

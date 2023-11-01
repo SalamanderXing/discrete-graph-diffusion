@@ -8,6 +8,7 @@ import ipdb
 from collections.abc import Iterable
 from dataclasses import dataclass
 from jaxtyping import Float, Array
+from rich import print
 
 from jax import numpy as np
 from mate.jax import SFloat
@@ -363,6 +364,8 @@ def load_data(save_dir: str, batch_size: int, onehot: bool = True):
     # gets the directory containing this file
     # save_dir = os.path.dirname(os.path.realpath(__file__))
     cache = os.path.join(save_dir, "qm9.pt")
+    print(os.listdir(save_dir))
+    print(f"Cache path: [red]{cache}[/red]")
     if not os.path.exists(cache):
         print("Creating cache")
         dense_data = get_dense_data(save_dir, batch_size, save_dir, onehot=False)

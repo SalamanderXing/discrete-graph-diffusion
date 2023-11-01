@@ -3,5 +3,6 @@ diffusion_type: simple
 force_cpu: false 
 do_jit: true
 debug_compiles: false
-local_batch_size: 400
+local_batch_size: 250
 remote_batch_size: 8000
+diffusion_steps: 500

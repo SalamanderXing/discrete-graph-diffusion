@@ -1449,15 +1449,6 @@
                         ]
                     ],
                     "tags": []
-                },
-                "qm9_digress": {
-                    "name": "qm9_digress",
-                    "exports": [
-                        "load_data"
-                    ],
-                    "errors": [],
-                    "dependencies": [],
-                    "tags": []
                 }
             },
             "trainers": {
@@ -1660,113 +1651,45 @@
                         ]
                     ],
                     "tags": []
+                },
+                "jax_geometric": {
+                    "name": "jax_geometric",
+                    "exports": [],
+                    "errors": [
+                        "No exports found in shared.jax_geometric. Consider exporting with 'mate export <module>'"
+                    ],
+                    "dependencies": [],
+                    "tags": []
+                }
+            },
+            "hyperparameters": {
+                "ddgd_simple2": {
+                    "errors": [],
+                    "tags": []
+                },
+                "ddgd_simple": {
+                    "errors": [],
+                    "tags": []
+                },
+                "ddgd_local": {
+                    "errors": [],
+                    "tags": []
+                },
+                "ddgd_expanded": {
+                    "errors": [],
+                    "tags": []
                 }
             },
             "experiments": {
-                "ddgd_tr_ZINC": {
-                    "name": "ddgd_tr_ZINC.py",
-                    "errors": [
-                        "The experiment should have at most one if statement (for the condition on train/test)",
-                        "The experiment should not contain math operations. You should encapsulate the logic into modules and call them  here."
-                    ],
+                "ddgd": {
+                    "name": "ddgd.py",
+                    "errors": [],
                     "imports": [
                         "data_loaders",
                         "models",
                         "trainers"
                     ],
-                    "tags": [
-                        "rocket"
-                    ]
-                },
-                "ddgd_so": {
-                    "name": "ddgd_so.py",
-                    "errors": [
-                        "The experiment should have at most one if statement (for the condition on train/test)",
-                        "The experiment should only contain assignments, function calls and imports",
-                        "The experiment should not contain math operations. You should encapsulate the logic into modules and call them  here."
-                    ],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": [
-                        "rocket"
-                    ]
-                },
-                "ddgd_tr_MUTAG": {
-                    "name": "ddgd_tr_MUTAG.py",
-                    "errors": [
-                        "The experiment should have at most one if statement (for the condition on train/test)",
-                        "The experiment should not contain math operations. You should encapsulate the logic into modules and call them  here."
-                    ],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": [
-                        "rocket"
-                    ]
-                },
-                "ddgd_tr_PTC": {
-                    "name": "ddgd_tr_PTC.py",
-                    "errors": [
-                        "The experiment should have at most one if statement (for the condition on train/test)"
-                    ],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": [
-                        "rocket"
-                    ]
-                },
-                "ddgd_tr_QM9": {
-                    "name": "ddgd_tr_QM9.py",
-                    "errors": [
-                        "The experiment should have at most one if statement (for the condition on train/test)",
-                        "The experiment should only contain assignments, function calls and imports"
-                    ],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": [
-                        "rocket"
-                    ]
-                },
-                "vdm_tr_QM9": {
-                    "name": "vdm_tr_QM9.py",
-                    "errors": [
-                        "ERROR in experiment \"vdm_tr_QM9.py\", line number:53.\n The experiment should not import from a subdirectory of models.\n You should import like so: \"from ..models.modelname import ModelClass\""
-                    ],
-                    "imports": [
-                        "data_loaders",
-                        "trainers",
-                        "models",
-                        "shared"
-                    ],
-                    "tags": [
-                        "book"
-                    ]
-                },
-                "ddgd_fo": {
-                    "name": "ddgd_fo.py",
-                    "errors": [
-                        "The experiment should have at most one if statement (for the condition on train/test)",
-                        "The experiment should only contain assignments, function calls and imports"
-                    ],
-                    "imports": [
-                        "data_loaders",
-                        "models",
-                        "trainers"
-                    ],
-                    "tags": [
-                        "rocket"
-                    ]
+                    "tags": []
                 }
             }
         },

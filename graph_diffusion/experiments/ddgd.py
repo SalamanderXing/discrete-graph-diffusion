@@ -58,7 +58,7 @@ dataset = load_data(
     batch_size=batch_size,
 )
 
-diffusion_steps = 1000
+diffusion_steps = mate.diffusion_steps
 
 rngs = {
     "params": random.PRNGKey(pyrandom.randint(0, 10000)),
