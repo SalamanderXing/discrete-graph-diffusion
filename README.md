@@ -7,7 +7,7 @@ primary focus is to get a good value for the Evidence Lower BOund (ELBO). A good
 (low) ELBO value value roughly indicatest that the model has modeled well the
 underlying graph distribution.
 
-$$-log(p(\mathbf{x})) \leq \text{ELBO}(\mathbf{x})$$
+$$-\text{log}(p(\mathbf{x})) \leq \text{ELBO}(\mathbf{x})$$
 
 This model was tested on the QM9 dataset.
 
