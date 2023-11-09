@@ -1,7 +1,11 @@
 # Discrete Graph Diffusion
 
-This project perf
-
+DDGD, discrete graph diffusion is a diffusion model that is able to generate
+graphs and uses a discrete categorical distribution instead of a gaussian to add
+noise to the graph. While this project was tested for graph generation, its
+primary focus is to get a good value for the Evidence Lower BOund (ELBO). A good
+(low) ELBO value value roughly indicatest that the model has modeled well the
+underlying graph distribution. This model was tested on the QM9 dataset.
 
 #### Install Mate
 
